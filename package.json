@@ -1,0 +1,69 @@
+{
+  "name": "class-cut",
+  "productName": "Class Cut",
+  "version": "0.1.0",
+  "description": "Corta las clases grabadas con Rodecaster Video y genera XML para Premiere Pro y DaVinci Resolve",
+  "main": "main.js",
+  "author": "Daniel Gutiérrez",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node tests/run.js",
+    "build": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.codigo.classcut",
+    "productName": "Class Cut",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "version.json",
+      "engine/**/*",
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "hardenedRuntime": true,
+      "target": [
+        {
+          "target": "pkg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "bin/mac",
+          "to": "bin",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "pkg": {
+      "artifactName": "ClassCut-${version}-arm64.${ext}",
+      "installLocation": "/Applications",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+    <title>Class Cut</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">✂</span>
+            <span class="brand-name">Class Cut</span>
+            <span class="brand-version" id="version"></span>
+        </div>
+
+        <ol class="steps" id="steps">
+            <li class="step is-current" data-step="1"><span class="step-num">1</span>Agregar carpeta</li>
+            <li class="step" data-step="2"><span class="step-num">2</span>Clases</li>
+            <li class="step" data-step="3"><span class="step-num">3</span>Procesar</li>
+            <li class="step" data-step="4"><span class="step-num">4</span>Revisar cortes</li>
+            <li class="step" data-step="5"><span class="step-num">5</span>Exportar XML</li>
+        </ol>
+
+        <button class="btn btn-ghost" id="btn-doctor">Diagnóstico</button>
+    </header>
+
+    <main class="content">
+
+        <!-- Paso 1 -->
+        <section class="view view-drop is-visible" id="view-drop">
+            <div class="dropzone" id="dropzone">
+                <div class="dropzone-icon">
+                    <svg viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
+                        <path d="M6 14a4 4 0 0 1 4-4h8l4 5h16a4 4 0 0 1 4 4v17a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V14z"
+                              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                        <path d="M17 26h14M24 26v9" fill="none" stroke="currentColor" stroke-width="2.5"
+                              stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <h1 class="dropzone-title">Arrastrá la carpeta acá</h1>
+                <p class="dropzone-sub">
+                    Puede ser el curso completo, un día o una sola clase:
+                    Class&nbsp;Cut se da cuenta de qué le diste.
+                </p>
+                <button class="btn btn-primary" id="btn-pick">Elegir carpeta…</button>
+                <p class="dropzone-hint">
+                    Las clases se reconocen por su contenido —un XML del Rodecaster con
+                    <code>Audio</code> y <code>Video</code> al lado—, no por el nombre de la carpeta.
+                </p>
+            </div>
+            <p class="drop-error" id="drop-error" hidden></p>
+        </section>
+
+        <!-- Paso 2 -->
+        <section class="view view-classes" id="view-classes">
+            <div class="subbar">
+                <div class="subbar-main">
+                    <h2 class="subbar-title" id="scan-title">—</h2>
+                    <button class="path-chip" id="scan-path" title="Ver en el Finder"></button>
+                </div>
+                <div class="subbar-actions">
+                    <button class="btn btn-ghost" id="btn-select-all">Marcar todas</button>
+                    <button class="btn btn-ghost" id="btn-select-none">Desmarcar</button>
+                    <button class="btn btn-ghost" id="btn-change">Cambiar carpeta</button>
+                </div>
+            </div>
+
+            <div class="alerts" id="scan-alerts"></div>
+
+            <div class="table-wrap">
+                <table class="grid" id="class-table">
+                    <thead>
+                    <tr>
+                        <th class="col-check"><input type="checkbox" id="check-all" aria-label="Marcar todas"></th>
+                        <th class="col-num">#</th>
+                        <th>Secuencia</th>
+                        <th>Día</th>
+                        <th class="num">Cám.</th>
+                        <th class="num">Audio</th>
+                        <th class="num">Duración</th>
+                        <th class="num">Bloques</th>
+                        <th>Vistas</th>
+                        <th>Estado</th>
+                    </tr>
+                    </thead>
+                    <tbody id="class-rows"></tbody>
+                </table>
+            </div>
+
+            <div class="footbar">
+                <div class="footbar-info" id="foot-info"></div>
+                <button class="btn btn-primary" id="btn-process" disabled>Procesar</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Panel de detalle de una clase -->
+    <aside class="drawer" id="drawer" hidden>
+        <div class="drawer-head">
+            <div>
+                <h3 class="drawer-title" id="drawer-title"></h3>
+                <p class="drawer-sub" id="drawer-sub"></p>
+            </div>
+            <button class="btn btn-icon" id="drawer-close" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+    </aside>
+
+    <!-- Diagnóstico -->
+    <div class="modal" id="modal" hidden>
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3 id="modal-title">Diagnóstico</h3>
+                <button class="btn btn-icon" id="modal-close" aria-label="Cerrar">✕</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+</div>
+
+<script src="js/renderer.js"></script>
+</body>
+</html>
