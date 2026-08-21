@@ -10,7 +10,12 @@
 const path = require('path');
 const fs = require('fs');
 
-const FILES = ['rodecaster-xml.test.js', 'course-scan.test.js'];
+const FILES = [
+    'rodecaster-xml.test.js',
+    'course-scan.test.js',
+    'transcribe.test.js',
+    'align.test.js'
+];
 
 const filter = process.argv[2] || '';
 const state = { pass: 0, fail: 0, skip: 0, failures: [] };

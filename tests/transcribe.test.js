@@ -1,0 +1,177 @@
+'use strict';
+/**
+ * Transcripción: lo que se puede probar sin gastar minutos de Whisper — el
+ * parseo de su salida, el colapso de bucles y la caché, que es lo que decide si
+ * una clase se vuelve a transcribir o no.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const transcribe = require('../engine/transcribe');
+const workspace = require('../engine/workspace');
+const fixture = require('./lib/fixture');
+
+function whisperJson(segments) {
+    return {
+        result: { language: 'es' },
+        transcription: segments.map(([text, from, to]) => ({
+            text,
+            offsets: { from: from * 1000, to: to * 1000 }
+        }))
+    };
+}
+
+module.exports = function (t) {
+    t.group('transcribe · salida de whisper');
+
+    t.test('cada segmento de una palabra se vuelve {start, end, text}', () => {
+        const words = transcribe.wordsFromWhisperJson(whisperJson([
+            [' Imagínate', 18.92, 19.88],
+            [' que', 19.88, 20.01]
+        ]));
+        t.deep(words, [
+            { start: 18.92, end: 19.88, text: 'Imagínate' },
+            { start: 19.88, end: 20.01, text: 'que' }
+        ]);
+    });
+
+    t.test('los segmentos vacíos que mete whisper se descartan', () => {
+        const words = transcribe.wordsFromWhisperJson(whisperJson([
+            ['', 0, 0], ['  ', 1, 1], [' hola', 2, 2.5]
+        ]));
+        t.eq(words.length, 1);
+        t.eq(words[0].text, 'hola');
+    });
+
+    t.group('transcribe · bucles de whisper');
+
+    t.test('una palabra repetida en bucle se colapsa', () => {
+        const words = [];
+        for (let i = 0; i < 20; i++) words.push({ start: i, end: i + 0.5, text: 'gracias' });
+        const result = transcribe.collapseLoops(words);
+        t.eq(result.words.length, transcribe.MAX_REPEATS);
+        t.eq(result.removed, 20 - transcribe.MAX_REPEATS);
+    });
+
+    t.test('el tiempo del bucle no desaparece de la línea de tiempo', () => {
+        const words = [];
+        for (let i = 0; i < 10; i++) words.push({ start: i, end: i + 0.5, text: 'sí' });
+        const result = transcribe.collapseLoops(words);
+        t.eq(result.words[result.words.length - 1].end, 9.5, 'el último tiene que absorber el final');
+    });
+
+    t.test('una repetición corta y legítima se respeta', () => {
+        const words = [
+            { start: 0, end: 0.4, text: 'sí' },
+            { start: 0.5, end: 0.9, text: 'sí' },
+            { start: 1.0, end: 1.6, text: 'claro' }
+        ];
+        t.eq(transcribe.collapseLoops(words).words.length, 3);
+    });
+
+    t.test('la puntuación no engaña al detector de bucles', () => {
+        const words = [];
+        for (let i = 0; i < 12; i++) words.push({ start: i, end: i + 0.4, text: i % 2 ? 'Gracias.' : 'gracias,' });
+        t.eq(transcribe.collapseLoops(words).words.length, transcribe.MAX_REPEATS);
+    });
+
+    t.group('transcribe · frases rearmadas');
+
+    t.test('las palabras se agrupan en frases por puntuación', () => {
+        const words = [
+            { start: 0, end: 0.5, text: 'Hola' },
+            { start: 0.5, end: 1.0, text: 'a' },
+            { start: 1.0, end: 1.6, text: 'todos.' },
+            { start: 1.7, end: 2.2, text: 'Empezamos' },
+            { start: 2.2, end: 2.9, text: 'ya.' }
+        ];
+        const segments = transcribe.segmentsFromWords(words);
+        t.eq(segments.length, 2);
+        t.eq(segments[0].text, 'Hola a todos.');
+        t.eq(segments[1].text, 'Empezamos ya.');
+    });
+
+    t.test('una pausa larga corta la frase aunque no haya puntuación', () => {
+        const words = [
+            { start: 0, end: 0.5, text: 'esto' },
+            { start: 0.5, end: 1.0, text: 'sigue' },
+            { start: 30, end: 30.5, text: 'otra' },
+            { start: 30.5, end: 31, text: 'toma' }
+        ];
+        const segments = transcribe.segmentsFromWords(words);
+        t.eq(segments.length, 2);
+        t.eq(segments[1].start, 30);
+    });
+
+    t.group('transcribe · caché');
+
+    function transcriptFor(source, overrides) {
+        return {
+            version: transcribe.TRANSCRIPT_VERSION,
+            source,
+            engine: { tool: 'whisper-cli', model: 'ggml-large-v3-turbo.bin', vad: true },
+            words: [{ start: 0, end: 1, text: 'hola' }],
+            ...(overrides || {})
+        };
+    }
+
+    t.test('sirve cuando el audio es el mismo', () => {
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        t.eq(transcribe.isUsable(transcriptFor(source), source), true);
+    });
+
+    t.test('no sirve si el audio cambió de tamaño o de fecha', () => {
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        t.eq(transcribe.isUsable(transcriptFor(source), { ...source, size: 101 }), false);
+        t.eq(transcribe.isUsable(transcriptFor(source), { ...source, mtimeMs: 6 }), false);
+    });
+
+    t.test('no sirve un transcript de una versión anterior', () => {
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        t.eq(transcribe.isUsable(transcriptFor(source, { version: 0 }), source), false);
+    });
+
+    t.test('no sirve uno hecho sin VAD', () => {
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        const sinVad = transcriptFor(source, { engine: { tool: 'whisper-cli', vad: false } });
+        t.eq(transcribe.isUsable(sinVad, source), false);
+    });
+
+    t.test('no sirve uno vacío (una corrida cancelada no puede pasar por buena)', () => {
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        t.eq(transcribe.isUsable(transcriptFor(source, { words: [] }), source), false);
+    });
+
+    t.group('workspace · dónde se escribe');
+
+    t.test('todo cuelga de una sola carpeta en la raíz', () => {
+        const root = '/curso';
+        t.eq(workspace.outputRoot(root), '/curso/The Cutter');
+        t.eq(workspace.finalXml(root, '04_clase'), '/curso/The Cutter/04_clase.xml');
+        t.eq(workspace.artifact(root, '04_clase', 'transcript'), '/curso/The Cutter/Backup/04_clase/transcript.json');
+        t.eq(workspace.artifact(root, '04_clase', 'alignedXml'), '/curso/The Cutter/Backup/04_clase/alineada.xml');
+    });
+
+    t.test('un nombre de secuencia con barras no se escapa de su carpeta', () => {
+        t.eq(workspace.safeName('a/b:c'), 'a-b-c');
+        const escapado = workspace.safeName('../../etc/passwd');
+        t.ok(!escapado.includes('/'), `quedó una barra: ${escapado}`);
+        t.ok(!escapado.startsWith('.'), `empieza con punto: ${escapado}`);
+        t.eq(workspace.safeName(''), 'sin-nombre');
+    });
+
+    t.test('la escritura atómica no deja archivos a medias', () => {
+        const root = fixture.tempRoot('atomic');
+        try {
+            const target = path.join(root, 'sub', 'archivo.json');
+            workspace.writeJson(target, { hola: 'mundo' });
+            t.deep(workspace.readJson(target), { hola: 'mundo' });
+            const sobras = fs.readdirSync(path.dirname(target)).filter(n => n.includes('.tmp-'));
+            t.eq(sobras.length, 0, `quedaron temporales: ${sobras.join(', ')}`);
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('leer un artefacto que no existe devuelve null en vez de explotar', () => {
+        t.eq(workspace.readJson('/no/existe.json'), null);
+    });
+};

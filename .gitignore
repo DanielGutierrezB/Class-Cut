@@ -4,3 +4,4 @@ bin/mac/python-env/
 *.log
 .DS_Store
 tests/tmp/
+bin/mac/models/
