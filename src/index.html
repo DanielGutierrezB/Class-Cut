@@ -96,6 +96,43 @@
                 <button class="btn btn-primary" id="btn-process" disabled>Procesar</button>
             </div>
         </section>
+        <!-- Paso 3 -->
+        <section class="view view-run" id="view-run">
+            <div class="subbar">
+                <div class="subbar-main">
+                    <h2 class="subbar-title" id="run-title">Procesando…</h2>
+                    <span class="run-sub" id="run-sub"></span>
+                </div>
+                <div class="subbar-actions">
+                    <button class="btn btn-ghost" id="btn-cancel">Cancelar</button>
+                    <button class="btn btn-ghost" id="btn-open-output" hidden>Abrir "The Cutter"</button>
+                    <button class="btn btn-ghost" id="btn-back" hidden>Volver a las clases</button>
+                </div>
+            </div>
+
+            <div class="alerts" id="run-alerts"></div>
+
+            <div class="table-wrap">
+                <table class="grid" id="run-table">
+                    <thead>
+                    <tr>
+                        <th class="col-num">#</th>
+                        <th>Clase</th>
+                        <th>Estado</th>
+                        <th class="num">Bloques</th>
+                        <th class="num">Queda</th>
+                        <th>Desfase</th>
+                        <th>Confianza</th>
+                    </tr>
+                    </thead>
+                    <tbody id="run-rows"></tbody>
+                </table>
+            </div>
+
+            <div class="footbar">
+                <div class="footbar-info" id="run-foot"></div>
+            </div>
+        </section>
     </main>
 
     <!-- Panel de detalle de una clase -->

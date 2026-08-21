@@ -292,13 +292,146 @@ function renderFoot() {
         : 'Ninguna clase marcada.';
 
     const btn = $('btn-process');
-    btn.textContent = selected.length ? `Procesar ${selected.length}` : 'Procesar';
-    btn.disabled = true;
-    btn.title = 'La transcripción y el alineado llegan en el paso siguiente del desarrollo.';
+    btn.textContent = selected.length === 1 ? 'Procesar 1 clase' : `Procesar ${selected.length} clases`;
+    btn.disabled = selected.length === 0;
+    btn.title = selected.length
+        ? 'Transcribe el Live-Mix, alinea los marcadores y escribe el XML cortado.'
+        : 'Marcá al menos una clase.';
 }
 
 function findClass(id) {
     return state.scan ? state.scan.classes.find(c => c.id === id) : null;
+}
+
+// ─── Paso 3: procesar ─────────────────────────────────────────────────
+
+const STAGE_LABEL = {
+    transcribir: 'Transcribiendo el Live-Mix',
+    alinear: 'Alineando los marcadores',
+    cortar: 'Calculando los cortes',
+    exportar: 'Escribiendo el XML'
+};
+
+const run = { rows: new Map(), started: 0, total: 0, done: 0, cancelling: false };
+
+async function startProcessing() {
+    const selected = state.scan.classes.filter(c => c.selected);
+    if (!selected.length) return;
+
+    closeDrawer();
+    run.rows = new Map(selected.map(c => [c.id, { cls: c, status: 'espera', stage: null, percent: null, result: null }]));
+    run.total = selected.length;
+    run.done = 0;
+    run.started = Date.now();
+    run.cancelling = false;
+
+    showView('run');
+    setStep(3);
+    $('run-title').textContent = selected.length === 1 ? 'Procesando 1 clase' : `Procesando ${selected.length} clases`;
+    $('run-sub').textContent = 'La transcripción es lo único que tarda; el resto es cálculo.';
+    $('btn-cancel').hidden = false;
+    $('btn-open-output').hidden = true;
+    $('btn-back').hidden = true;
+    $('run-alerts').innerHTML = '';
+    renderRunRows();
+    renderRunFoot();
+
+    const response = await window.cc.process({
+        root: state.scan.root,
+        ids: selected.map(c => c.id)
+    });
+
+    finishProcessing(response);
+}
+
+function finishProcessing(response) {
+    $('btn-cancel').hidden = true;
+    $('btn-back').hidden = false;
+
+    if (!response || !response.ok) {
+        $('run-title').textContent = 'No se pudo procesar';
+        $('run-alerts').innerHTML = `<div class="alert alert-err"><span>${esc((response && response.error) || 'Falló sin decir por qué.')}</span></div>`;
+        return;
+    }
+
+    state.outputDir = response.outputDir;
+    $('btn-open-output').hidden = false;
+
+    const okCount = response.results.filter(r => r.ok).length;
+    const seconds = Math.round((Date.now() - run.started) / 1000);
+    $('run-title').textContent = response.cancelled
+        ? `Cancelado · ${okCount} de ${run.total} listas`
+        : `Listo · ${okCount} de ${run.total} ${okCount === 1 ? 'clase exportada' : 'clases exportadas'}`;
+    $('run-sub').textContent = `En ${fmtDur(seconds)} · los XML están en "The Cutter"`;
+    setStep(5);
+
+    const alerts = [];
+    const failed = response.results.filter(r => !r.ok && !r.cancelled);
+    for (const fail of failed) {
+        alerts.push({ level: 'err', message: `${fail.id}: ${fail.error}` });
+    }
+    const review = response.results.reduce((sum, r) => sum + (r.ok ? r.totals.needsReview : 0), 0);
+    if (review) {
+        alerts.push({
+            level: 'warn',
+            message: `${plural(review, 'bloque quedó', 'bloques quedaron')} para revisar: casi siempre es la misma frase grabada varias veces. Importá "alineada.xml" del Backup para verlos en el editor.`
+        });
+    }
+    const seen = new Set();
+    for (const result of response.results) {
+        for (const w of (result.warnings || [])) {
+            const key = `${result.id}:${w.code}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            alerts.push({ level: 'warn', message: `${shortName(result.id)}: ${w.message}` });
+        }
+    }
+    $('run-alerts').innerHTML = alerts.slice(0, 12).map(a =>
+        `<div class="alert alert-${a.level}"><span>${esc(a.message)}</span></div>`).join('');
+}
+
+function shortName(id) {
+    const row = run.rows.get(id);
+    return row && row.cls.classNumber != null ? `Clase ${row.cls.classNumber}` : id;
+}
+
+function renderRunRows() {
+    const rows = [...run.rows.values()].map(entry => {
+        const cls = entry.cls;
+        const result = entry.result;
+        let status;
+        if (entry.status === 'espera') status = '<span class="cell-dim">en espera</span>';
+        else if (entry.status === 'trabajando') {
+            const label = STAGE_LABEL[entry.stage] || 'Trabajando';
+            const bar = entry.percent != null
+                ? `<span class="progress"><span style="width:${entry.percent}%"></span></span>`
+                : '';
+            status = `${esc(label)}${bar}`;
+        } else if (result && result.ok) status = '<span class="badge badge-ok">exportada</span>';
+        else if (result && result.cancelled) status = '<span class="badge badge-info">cancelada</span>';
+        else status = `<span class="badge badge-err">falló</span>`;
+
+        const conf = result && result.ok ? result.stats.confidence : null;
+        return `
+        <tr>
+            <td class="col-num"><span class="class-no">${cls.classNumber == null ? '—' : cls.classNumber}</span></td>
+            <td><span class="cell-seq">${esc(cls.sequenceName || cls.folderName)}</span></td>
+            <td>${status}</td>
+            <td class="num cell-num">${result && result.ok ? result.totals.kept : '—'}</td>
+            <td class="num cell-num">${result && result.ok ? fmtDur(result.totals.keepSec) : '—'}</td>
+            <td class="cell-dim">${result && result.ok ? `${result.offset.appliedSec.toFixed(2)}s <span class="cell-dim">(${esc(result.offset.source)})</span>` : '—'}</td>
+            <td>${conf
+                ? `<span class="badge badge-ok">${conf.alta}</span><span class="badge badge-warn">${conf.media}</span><span class="badge badge-err">${conf.baja}</span>`
+                : '<span class="cell-dim">—</span>'}</td>
+        </tr>`;
+    }).join('');
+    $('run-rows').innerHTML = rows;
+}
+
+function renderRunFoot() {
+    const done = [...run.rows.values()].filter(r => r.status === 'listo').length;
+    const kept = [...run.rows.values()].reduce((sum, r) => sum + (r.result && r.result.ok ? r.result.totals.keepSec : 0), 0);
+    $('run-foot').innerHTML = `${done} de ${run.total} · ${fmtDur(kept)} de material cortado`;
 }
 
 // ─── Detalle de una clase ─────────────────────────────────────────────
@@ -439,6 +572,22 @@ async function init() {
         renderRows();
         renderFoot();
     };
+    $('btn-process').onclick = startProcessing;
+    $('btn-cancel').onclick = async () => {
+        run.cancelling = true;
+        $('btn-cancel').disabled = true;
+        $('run-sub').textContent = 'Cancelando: se termina la clase que está en curso.';
+        await window.cc.cancelProcess();
+    };
+    $('btn-back').onclick = () => {
+        showView('classes');
+        setStep(2);
+        $('btn-cancel').disabled = false;
+    };
+    $('btn-open-output').onclick = () => {
+        if (state.outputDir) window.cc.openPath(state.outputDir);
+    };
+
     $('drawer-close').onclick = closeDrawer;
     $('btn-doctor').onclick = showDoctor;
     $('modal-close').onclick = () => { $('modal').hidden = true; };
@@ -469,6 +618,30 @@ async function init() {
             if (state.scan) { renderAlerts(); renderRows(); }
             renderFoot();
         }
+    });
+
+    window.cc.onProcessStage(payload => {
+        const entry = run.rows.get(payload.id);
+        if (!entry) return;
+        entry.status = 'trabajando';
+        entry.stage = payload.stage;
+        entry.percent = payload.percent != null ? payload.percent : null;
+        renderRunRows();
+    });
+
+    window.cc.onProcessClass(payload => {
+        const entry = run.rows.get(payload.id);
+        if (!entry) return;
+        if (payload.phase === 'empieza') {
+            entry.status = 'trabajando';
+        } else {
+            entry.status = 'listo';
+            entry.result = payload.result;
+            entry.stage = null;
+            entry.percent = null;
+        }
+        renderRunRows();
+        renderRunFoot();
     });
 }
 

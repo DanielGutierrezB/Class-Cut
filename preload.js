@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('cc', {
     doctor: () => ipcRenderer.invoke('doctor'),
     pickFolder: () => ipcRenderer.invoke('pick-folder'),
     scan: folder => ipcRenderer.invoke('scan', folder),
+    process: payload => ipcRenderer.invoke('process', payload),
+    cancelProcess: () => ipcRenderer.invoke('cancel-process'),
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
 
@@ -31,5 +33,11 @@ contextBridge.exposeInMainWorld('cc', {
     },
     onScanProgress: callback => {
         ipcRenderer.on('scan-progress', (_event, payload) => callback(payload));
+    },
+    onProcessStage: callback => {
+        ipcRenderer.on('process-stage', (_event, payload) => callback(payload));
+    },
+    onProcessClass: callback => {
+        ipcRenderer.on('process-class', (_event, payload) => callback(payload));
     }
 });

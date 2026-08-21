@@ -88,7 +88,8 @@ async function probeFile(filePath) {
         videoCodec: video ? video.codec_name : null,
         audioCodec: audio ? audio.codec_name : null,
         channels: audio ? audio.channels : null,
-        sampleRate: audio ? parseInt(audio.sample_rate, 10) || null : null
+        sampleRate: audio ? parseInt(audio.sample_rate, 10) || null : null,
+        bits: audio ? (parseInt(audio.bits_per_raw_sample, 10) || parseInt(audio.bits_per_sample, 10) || null) : null
     };
 }
 
@@ -133,6 +134,9 @@ async function probeClass(cls) {
             item.fps = p.fps;
             item.channels = p.channels;
             item.sampleRate = p.sampleRate;
+            item.bits = p.bits;
+            item.width = p.width;
+            item.height = p.height;
         }
     }
 

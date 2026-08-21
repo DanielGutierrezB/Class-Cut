@@ -15,8 +15,11 @@ const fs = require('fs');
 const scanner = require('./engine/course-scan');
 const probe = require('./engine/media-probe');
 const paths = require('./engine/paths');
+const pipeline = require('./engine/pipeline');
+const workspace = require('./engine/workspace');
 
 let mainWindow = null;
+let currentRun = null;
 
 function appVersion() {
     try {
@@ -71,7 +74,7 @@ async function devShot() {
     }
     if (extraJs) {
         await mainWindow.webContents.executeJavaScript(extraJs);
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, Number(argValue('wait')) || 400));
     }
     if (!shot) return;
 
@@ -161,6 +164,69 @@ ipcMain.handle('scan', async (event, folder) => {
     }
     result.totalDurationSec = result.classes.reduce((sum, c) => sum + (c.durationSec || 0), 0);
     return result;
+});
+
+/**
+ * Procesa las clases marcadas. Se vuelve a escanear y a medir antes de empezar:
+ * lo que llega de la ventana son ids, no el material — el disco pudo cambiar
+ * mientras el editor miraba la tabla.
+ */
+ipcMain.handle('process', async (event, payload) => {
+    const { root, ids = [], viewMap, force } = payload || {};
+    if (currentRun) return { ok: false, error: 'Ya hay un procesamiento en curso.' };
+
+    const scan = scanner.scan(root);
+    if (!scan.ok) return scan;
+
+    const wanted = new Set(ids);
+    const classes = scan.classes.filter(c => wanted.has(c.id));
+    if (!classes.length) return { ok: false, error: 'No quedó ninguna clase marcada.' };
+
+    await probe.probeClasses(classes);
+    const usable = classes.filter(c => c.processable);
+    if (!usable.length) {
+        return { ok: false, error: 'Ninguna de las clases marcadas se puede procesar. Mirá el detalle de cada fila.' };
+    }
+
+    const send = (channel, data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, data);
+    };
+
+    const controller = new AbortController();
+    currentRun = controller;
+    try {
+        const results = await pipeline.processClasses({
+            root: scan.root,
+            classes: usable,
+            viewMap,
+            force,
+            signal: controller.signal,
+            onStage: (stage, info) => send('process-stage', { stage, ...info }),
+            onClass: (phase, info) => send('process-class', {
+                phase,
+                id: info.cls.id,
+                index: info.index,
+                total: info.total,
+                result: info.result || null
+            })
+        });
+        return {
+            ok: true,
+            cancelled: controller.signal.aborted,
+            outputDir: workspace.outputRoot(scan.root),
+            results
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    } finally {
+        currentRun = null;
+    }
+});
+
+ipcMain.handle('cancel-process', () => {
+    if (!currentRun) return false;
+    currentRun.abort();
+    return true;
 });
 
 ipcMain.handle('reveal', (event, target) => {

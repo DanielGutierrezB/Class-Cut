@@ -463,3 +463,7 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     text-align: center;
     color: var(--text-mute);
 }
+
+.run-sub { font-size: 11.5px; color: var(--text-mute); }
+.view-run .grid tbody tr { cursor: default; }
+.view-run .grid tbody tr:hover { background: var(--surface); }
