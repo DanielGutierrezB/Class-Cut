@@ -1,6 +1,8 @@
 node_modules/
 dist/
-bin/mac/python-env/
+# Los binarios y modelos se arman con tools/bundle-binaries.sh: son 1,7 GB y no
+# son código.
+bin/
 *.log
 .DS_Store
 tests/tmp/

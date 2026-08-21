@@ -24,8 +24,12 @@ dijo, calcula los cortes y escribe el XML. Nada del material original se toca.
 
 ## Estado
 
-En desarrollo. Fase 1 lista: escáner, parser de marcadores, medición del material
-y la tabla de clases (verificado contra un curso real de 3 días y 13 clases).
+Funciona de punta a punta contra el curso real (3 días, 13 clases): se agrega la
+carpeta, se procesan las clases y salen los XML cortados, revisables antes de
+exportar. Lo que falta es el instalador (ver **Distribución**).
+
+Medido sobre ese curso: 8h18m de material crudo → 1h37m de tomas buenas en 174
+bloques, con el 95% de los marcadores anclados al audio.
 
 ## Desarrollo
 
@@ -57,10 +61,36 @@ tests/                   corredor propio: node tests/run.js
 
 ### Herramientas externas
 
-En desarrollo se usan las del sistema (`/opt/homebrew/bin`). La app distribuida
-las trae adentro: el instalador `.pkg` incluye ffmpeg, ffprobe, whisper-cli y su
-modelo, así que no hay nada que instalar aparte. **Diagnóstico** (arriba a la
-derecha) dice qué encontró y dónde.
+La app busca ffmpeg, ffprobe, whisper-cli y los modelos primero dentro de sí
+misma (`bin/mac/`) y después en el sistema. **Diagnóstico** (arriba a la derecha)
+dice qué encontró y dónde.
+
+Para desarrollo alcanza con Homebrew:
+
+```bash
+brew install ffmpeg whisper-cpp
+mkdir -p bin/mac/models   # y dejar ahí ggml-large-v3-turbo.bin y el modelo de VAD
+```
+
+Los modelos: `ggml-large-v3-turbo.bin` (1,5 GB) y `ggml-silero-v5.1.2.bin`
+(885 KB), de los repos `ggerganov/whisper.cpp` y `ggml-org/whisper-vad` en
+Hugging Face. Se pueden apuntar con `CLASSCUT_WHISPER_MODEL` y `CLASSCUT_VAD_MODEL`.
+
+## Distribución
+
+Pendiente. `tools/bundle-binaries.sh` ya deja ffmpeg y ffprobe autocontenidos
+—copia sus librerías, reescribe de dónde las cargan y los vuelve a firmar—, y se
+comprobó que arrancan sin Homebrew en el PATH.
+
+Falta whisper-cli, y por un motivo concreto: el paquete de Homebrew trae la
+carpeta de sus backends (Metal, BLAS, CPU) compilada adentro, así que aunque se
+copie sigue cargando los de `/opt/homebrew`. Con dos copias de ggml en el mismo
+proceso, los dispositivos se registran en una y se buscan en la otra, y aborta.
+La salida es compilar whisper.cpp acá con los backends enlazados adentro
+(`cmake -DGGML_BACKEND_DL=OFF`) en vez de copiar el de Homebrew.
+
+Hasta entonces el `.pkg` no puede prometer "cero instalación", que es justamente
+lo que tiene que prometer.
 
 ## Lo que se aprendió del material real
 

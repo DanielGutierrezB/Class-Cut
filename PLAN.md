@@ -267,12 +267,39 @@ Notas de corrección (fáciles de romper si no se fijan):
 - **Interfaz intuitiva** como principio: flujo lineal, una acción principal por pantalla, estado por clase, UI en español.
 - Repo: `~/Movies/Class-Cut`.
 
-## 11. Pendientes / a validar durante el desarrollo
+## 11. Estado de la implementación
 
-- Precisión de los word timestamps de `whisper-cli` para el anclaje (si queda corta, `audio-onset` corrige el frame; alternativa: motor mlx-whisper opcional en el python-env).
-- Validar import en **DaVinci Resolve**: clips `enabled=FALSE` respetados y mapeo de colores de marcadores (checklist de Fase 6).
-- Confirmar con el primer transcript real la frase exacta de la claqueta por clase (calibración fina de `clap-detect`).
-- fps real de las cámaras vía ffprobe en Fase 1 (el XML declara media 29.97 con timebase de secuencia 30).
+| Fase | Estado |
+|---|---|
+| 1. Esqueleto + escáner + parser | **Listo** · 13/13 clases del curso real detectadas, con tests |
+| 2. Transcripción | **Listo** · whisper.cpp con VAD, ~40× tiempo real; 8h18m de audio en 12m27s |
+| 3. Alineación | **Listo** · claqueta + anclaje + invariantes; 95% de los bloques anclan |
+| 4. Cutplan + vistas | **Listo** · PV/R → cámara, claqueta fuera, bloques desmarcables |
+| 5. Visor de revisión | **Listo** · silueta, zoom con detalle propio, transcript y audición de bordes |
+| 6. Export XML | **Listo** · `The Cutter/` con el XML final y `Backup/` con poblada y alineada |
+| 7. Instalador .pkg | **Pendiente** · ffmpeg y ffprobe ya quedan autocontenidos; falta whisper (ver abajo) |
+
+Hallazgos del material real que cambiaron el diseño sobre la marcha:
+
+- **VAD obligatorio en la transcripción.** Sin él los tiempos de palabra erran
+  hasta 17 s en material crudo, porque whisper reparte las palabras sobre el
+  silencio que sigue a cada toma. Con VAD caen donde está el sonido — y aparece
+  la claqueta hablada, que sin él se perdía entera.
+- **La referencia de la claqueta es el aplauso, no la frase.** Y el desfase no se
+  aplica por fe: se comparan candidatos (claqueta, deriva de los propios
+  anclajes, no mover nada) midiendo cuánto le falta a cada marcador para llegar a
+  sus palabras. En la clase 03 eso descartó un "golpe" que estaba 13 s fuera.
+- **El material es 30 fps exactos**, aunque el XML del Rodecaster declare 29.97:
+  el frame rate sale de ffprobe.
+- **El XML se genera en JavaScript**, no portando el generador Python de Sync: la
+  salida plana que necesitamos es más simple y la app se queda sin intérprete de
+  Python adentro.
+
+## 12. Pendientes / a validar durante el desarrollo
+
+- **Terminar el instalador**: compilar whisper.cpp con los backends enlazados adentro (`cmake -DGGML_BACKEND_DL=OFF`). El de Homebrew trae su carpeta de backends compilada y, reubicado, mezcla dos copias de ggml en el mismo proceso y aborta.
+- **Importar en Premiere y en Resolve** los XML ya generados y confirmar la lista: clips en posición, vista deshabilitada correcta, audio con solo Live-Mix, marcadores en posición y color, cero media offline.
+- Revisar los bloques que quedaron en confianza media (39%): son casi siempre la misma frase grabada varias veces, y el visor está para eso.
 - **Firma y notarización del PKG con Developer ID** (si hay cuenta Apple Developer): elimina el aviso de Gatekeeper; sin firma funciona, pero macOS muestra "desarrollador no verificado" (como Sync hoy).
 - Nombre visible de la app y bundle id (propuesta: "Class Cut", `com.codigo.classcut`).
 - Confirmar nombre de archivo del XML final (propuesta: igual al nombre de secuencia, p.ej. `04_2608_…_105913.xml`).
