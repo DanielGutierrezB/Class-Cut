@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('cc', {
     scan: folder => ipcRenderer.invoke('scan', folder),
     process: payload => ipcRenderer.invoke('process', payload),
     cancelProcess: () => ipcRenderer.invoke('cancel-process'),
+    loadReview: payload => ipcRenderer.invoke('load-review', payload),
+    saveReview: payload => ipcRenderer.invoke('save-review', payload),
+    waveformWindow: payload => ipcRenderer.invoke('waveform-window', payload),
+    audition: payload => ipcRenderer.invoke('audition', payload),
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
 

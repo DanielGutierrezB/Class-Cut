@@ -357,6 +357,17 @@ function finishProcessing(response) {
     state.outputDir = response.outputDir;
     $('btn-open-output').hidden = false;
 
+    const exported = response.results.filter(r => r.ok);
+    if (exported.length) {
+        // Se entra a revisar por la clase que más lo necesita, no por la primera.
+        const worst = exported.slice().sort((a, b) => b.totals.needsReview - a.totals.needsReview)[0];
+        state.reviewFirst = worst.id;
+        $('btn-review').hidden = false;
+        $('btn-review').textContent = worst.totals.needsReview
+            ? `Revisar cortes (${exported.reduce((sum, r) => sum + r.totals.needsReview, 0)} pendientes)`
+            : 'Revisar cortes';
+    }
+
     const okCount = response.results.filter(r => r.ok).length;
     const seconds = Math.round((Date.now() - run.started) / 1000);
     $('run-title').textContent = response.cancelled
@@ -432,6 +443,386 @@ function renderRunFoot() {
     const done = [...run.rows.values()].filter(r => r.status === 'listo').length;
     const kept = [...run.rows.values()].reduce((sum, r) => sum + (r.result && r.result.ok ? r.result.totals.keepSec : 0), 0);
     $('run-foot').innerHTML = `${done} de ${run.total} · ${fmtDur(kept)} de material cortado`;
+}
+
+// ─── Paso 4: revisar cortes ───────────────────────────────────────────
+
+const rev = {
+    data: null,
+    id: null,
+    segments: [],
+    selected: 0,
+    dirty: false,
+    audio: null
+};
+
+const ZOOM_MARGIN_SEC = 4;
+
+async function openReview(id) {
+    const target = id || (state.scan.classes.find(c => c.selected && c.alreadyProcessed) || {}).id;
+    if (!target) return;
+
+    showView('review');
+    setStep(4);
+    $('rev-title').textContent = 'Cargando…';
+
+    const data = await window.cc.loadReview({ id: target, buckets: 2400 });
+    if (!data.ok) {
+        $('rev-title').textContent = 'No se pudo abrir';
+        $('rev-sub').textContent = data.error;
+        return;
+    }
+
+    rev.data = data;
+    rev.id = target;
+    rev.dirty = false;
+    // Se trabaja sobre una copia: hasta que no se guarda, el plan del disco es el
+    // que vale y "Volver a lo calculado" tiene de dónde volver.
+    rev.segments = data.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
+    rev.selected = Math.max(0, rev.segments.findIndex(s => s.confidence !== 'alta'));
+
+    fillClassPicker();
+    renderReview();
+}
+
+function fillClassPicker() {
+    const options = state.scan.classes
+        .filter(c => c.processable)
+        .map(c => `<option value="${esc(c.id)}" ${c.id === rev.id ? 'selected' : ''}>Clase ${c.classNumber} · ${esc(c.sequenceName)}</option>`)
+        .join('');
+    $('rev-class').innerHTML = options;
+}
+
+function renderReview() {
+    const data = rev.data;
+    const pending = rev.segments.filter(s => s.keep && s.confidence !== 'alta').length;
+
+    $('rev-title').textContent = `Clase ${data.classNumber} · ${plural(rev.segments.filter(s => s.keep).length, 'bloque', 'bloques')}`;
+    $('rev-sub').textContent = pending
+        ? `${plural(pending, 'bloque para revisar', 'bloques para revisar')}${rev.dirty ? ' · hay cambios sin guardar' : ''}`
+        : (rev.dirty ? 'Hay cambios sin guardar' : 'Todo revisado');
+
+    renderReviewList();
+    renderOverview();
+    renderZoom();
+    renderEdges();
+    renderTranscript();
+}
+
+function renderReviewList() {
+    $('rev-list').innerHTML = rev.segments.map((segment, index) => `
+        <button class="rev-item conf-${esc(segment.confidence)} ${index === rev.selected ? 'is-active' : ''} ${segment.keep ? '' : 'is-out'}"
+                data-idx="${index}">
+            <span class="rev-item-head">
+                <span>${index + 1}.</span>
+                <span class="rev-item-time">${fmtClock(segment.sourceStartSec)}</span>
+                <span class="cell-dim">${(segment.sourceEndSec - segment.sourceStartSec).toFixed(1)}s</span>
+                <span class="badge ${segment.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(segment.view)}</span>
+                ${segment.keep ? '' : '<span class="badge badge-err">fuera</span>'}
+            </span>
+            <span class="rev-item-note">${esc(segment.note || segment.cueIn || '')}</span>
+        </button>
+    `).join('');
+
+    for (const item of document.querySelectorAll('.rev-item')) {
+        item.addEventListener('click', () => {
+            rev.selected = Number(item.dataset.idx);
+            renderReview();
+        });
+    }
+}
+
+function canvasSize(canvas) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 800;
+    const height = Number(canvas.getAttribute('height')) || 100;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return { ctx, width, height };
+}
+
+function drawPeaks(ctx, peaks, from, to, width, height, color) {
+    const total = peaks.length;
+    const fromIdx = Math.max(0, Math.floor(from * total));
+    const toIdx = Math.min(total, Math.ceil(to * total));
+    const span = Math.max(1, toIdx - fromIdx);
+    const mid = height / 2;
+
+    ctx.fillStyle = color;
+    for (let x = 0; x < width; x++) {
+        const start = fromIdx + Math.floor((x / width) * span);
+        const end = fromIdx + Math.floor(((x + 1) / width) * span);
+        let peak = 0;
+        for (let i = start; i < Math.max(end, start + 1) && i < total; i++) {
+            if (peaks[i] > peak) peak = peaks[i];
+        }
+        const h = Math.max(1, peak * (height - 6));
+        ctx.fillRect(x, mid - h / 2, 1, h);
+    }
+}
+
+function renderOverview() {
+    const canvas = $('rev-overview');
+    const wave = rev.data.waveform;
+    const { ctx, width, height } = canvasSize(canvas);
+    const duration = rev.data.durationSec || 1;
+
+    ctx.clearRect(0, 0, width, height);
+
+    // Primero las zonas que se quedan, para que la silueta se dibuje encima.
+    for (const segment of rev.segments) {
+        if (!segment.keep) continue;
+        const x = (segment.sourceStartSec / duration) * width;
+        const w = Math.max(1, ((segment.sourceEndSec - segment.sourceStartSec) / duration) * width);
+        ctx.fillStyle = segment.confidence === 'alta' ? 'rgba(62,207,142,.20)' : 'rgba(245,181,68,.20)';
+        ctx.fillRect(x, 0, w, height);
+    }
+    if (wave) drawPeaks(ctx, wave.peaks, 0, 1, width, height, 'rgba(162,169,184,.75)');
+
+    const current = rev.segments[rev.selected];
+    if (current) {
+        const x = (current.sourceStartSec / duration) * width;
+        const w = Math.max(2, ((current.sourceEndSec - current.sourceStartSec) / duration) * width);
+        ctx.strokeStyle = '#4f9cf9';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, 1, w, height - 2);
+    }
+
+    canvas.onclick = event => {
+        const rect = canvas.getBoundingClientRect();
+        const seconds = ((event.clientX - rect.left) / rect.width) * duration;
+        let best = 0;
+        let bestDistance = Infinity;
+        rev.segments.forEach((segment, index) => {
+            const distance = Math.abs((segment.sourceStartSec + segment.sourceEndSec) / 2 - seconds);
+            if (distance < bestDistance) { bestDistance = distance; best = index; }
+        });
+        rev.selected = best;
+        renderReview();
+    };
+}
+
+function zoomWindow() {
+    const segment = rev.segments[rev.selected];
+    if (!segment) return null;
+    const from = Math.max(0, segment.sourceStartSec - ZOOM_MARGIN_SEC);
+    const to = Math.min(rev.data.durationSec || segment.sourceEndSec + ZOOM_MARGIN_SEC,
+        segment.sourceEndSec + ZOOM_MARGIN_SEC);
+    return { from, to, span: Math.max(0.5, to - from) };
+}
+
+function renderZoom() {
+    const canvas = $('rev-zoom');
+    const segment = rev.segments[rev.selected];
+    const window_ = zoomWindow();
+    const { ctx, width, height } = canvasSize(canvas);
+    ctx.clearRect(0, 0, width, height);
+    if (!segment || !window_) return;
+
+    const xOf = seconds => ((seconds - window_.from) / window_.span) * width;
+
+    ctx.fillStyle = 'rgba(79,156,249,.13)';
+    ctx.fillRect(xOf(segment.sourceStartSec), 0, xOf(segment.sourceEndSec) - xOf(segment.sourceStartSec), height);
+
+    // El detalle del tramo se pide aparte: con los cubos del resumen, veinte
+    // segundos son doce puntos y el borde del sonido no se ve.
+    const detail = rev.zoomWave;
+    if (detail && Math.abs(detail.fromSec - window_.from) < 0.01 && Math.abs(detail.toSec - window_.to) < 0.01) {
+        drawPeaks(ctx, detail.peaks, 0, 1, width, height, 'rgba(200,207,222,.85)');
+    } else {
+        loadZoomWave(window_);
+    }
+
+    for (const [seconds, color] of [[segment.sourceStartSec, '#3ecf8e'], [segment.sourceEndSec, '#f2646b']]) {
+        const x = xOf(seconds);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+
+    $('rev-zoom-label').textContent =
+        `${fmtClock(window_.from)} – ${fmtClock(window_.to)} · clic para mover la entrada, con Alt la salida`;
+
+    canvas.onclick = event => {
+        const rect = canvas.getBoundingClientRect();
+        const seconds = window_.from + ((event.clientX - rect.left) / rect.width) * window_.span;
+        setEdge(event.altKey ? 'out' : 'in', seconds);
+    };
+}
+
+let zoomWaveToken = 0;
+async function loadZoomWave(window_) {
+    if (!rev.data.liveMixPath) return;
+    const token = ++zoomWaveToken;
+    const detail = await window.cc.waveformWindow({
+        path: rev.data.liveMixPath,
+        fromSec: window_.from,
+        toSec: window_.to,
+        buckets: 1400
+    });
+    // Mientras se leía el disco el editor pudo saltar a otro bloque.
+    if (!detail || token !== zoomWaveToken) return;
+    rev.zoomWave = detail;
+    renderZoom();
+}
+
+function setEdge(edge, seconds) {
+    const segment = rev.segments[rev.selected];
+    if (!segment) return;
+    const frame = 1 / (rev.data.fps || 30);
+    const value = Math.max(0, Math.min(rev.data.durationSec || seconds, seconds));
+
+    if (edge === 'in') {
+        segment.sourceStartSec = Math.min(value, segment.sourceEndSec - frame);
+    } else {
+        segment.sourceEndSec = Math.max(value, segment.sourceStartSec + frame);
+    }
+    segment.sourceStartSec = Math.round(segment.sourceStartSec * 1000) / 1000;
+    segment.sourceEndSec = Math.round(segment.sourceEndSec * 1000) / 1000;
+    rev.dirty = true;
+    renderReview();
+}
+
+function renderEdges() {
+    const segment = rev.segments[rev.selected];
+    if (!segment) return;
+    $('in-time').textContent = fmtClock(segment.sourceStartSec);
+    $('out-time').textContent = fmtClock(segment.sourceEndSec);
+    $('rev-keep').checked = segment.keep !== false;
+
+    const cameras = rev.data.cameras || [];
+    const views = Object.keys(rev.data.cutplan.viewMap || { PV: 0, R: 1 });
+    $('rev-views').innerHTML = views.map(view => {
+        const camera = cameras[rev.data.cutplan.viewMap[view]];
+        return `<button class="view-btn ${segment.view === view ? 'is-on' : ''}" data-view="${esc(view)}">
+            ${esc(view)}${camera ? ` · ${esc(camera.name.replace(/\.[^.]+$/, ''))}` : ''}
+        </button>`;
+    }).join('');
+
+    for (const button of document.querySelectorAll('.view-btn')) {
+        button.onclick = () => {
+            segment.view = button.dataset.view;
+            rev.dirty = true;
+            renderReview();
+        };
+    }
+}
+
+function renderTranscript() {
+    const segment = rev.segments[rev.selected];
+    if (!segment) return;
+    const margin = 10;
+    const segments = (rev.data.segments || []).filter(s =>
+        s.end >= segment.sourceStartSec - margin && s.start <= segment.sourceEndSec + margin);
+
+    $('rev-transcript').innerHTML = segments.length
+        ? segments.map(s => {
+            const inside = s.start >= segment.sourceStartSec - 0.2 && s.end <= segment.sourceEndSec + 0.2;
+            return `<div class="seg ${inside ? 'inside' : ''}">
+                <span class="seg-time">${fmtClock(s.start)}</span>${esc(s.text)}
+            </div>`;
+        }).join('')
+        : '<div class="cell-dim">No hay transcript para este tramo.</div>';
+}
+
+async function playEdge(edge) {
+    const segment = rev.segments[rev.selected];
+    if (!segment || !rev.data.liveMixPath) return;
+
+    const at = edge === 'in' ? segment.sourceStartSec : segment.sourceEndSec;
+    const startSec = Math.max(0, at - 1.5);
+    const result = await window.cc.audition({
+        path: rev.data.liveMixPath,
+        startSec,
+        durationSec: 3.5
+    });
+    if (!result.ok) { toast(result.error); return; }
+
+    if (rev.audio) rev.audio.pause();
+    rev.audio = new Audio(result.dataUrl);
+    rev.audio.play().catch(err => toast(`No se pudo reproducir: ${err.message}`));
+}
+
+async function saveReviewChanges() {
+    const button = $('rev-save');
+    button.disabled = true;
+    button.textContent = 'Guardando…';
+
+    const result = await window.cc.saveReview({
+        id: rev.id,
+        segments: rev.segments.map(s => ({
+            blockIndex: s.blockIndex,
+            sourceStartSec: s.sourceStartSec,
+            sourceEndSec: s.sourceEndSec,
+            view: s.view,
+            keep: s.keep,
+            reviewed: s.reviewed
+        })),
+        viewMap: rev.data.cutplan.viewMap
+    });
+
+    button.disabled = false;
+    button.textContent = 'Guardar y regenerar';
+
+    if (!result.ok) { toast(result.error); return; }
+    rev.dirty = false;
+    rev.data.cutplan = result.cutplan;
+    rev.segments = result.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
+    toast(`XML regenerado · ${result.exported.segments} bloques · ${fmtDur(result.exported.keepSec)}`);
+    renderReview();
+}
+
+function wireReview() {
+    $('rev-back').onclick = () => {
+        showView('run');
+        setStep(5);
+    };
+    $('rev-save').onclick = saveReviewChanges;
+    $('rev-class').onchange = event => openReview(event.target.value);
+    $('rev-keep').onchange = event => {
+        rev.segments[rev.selected].keep = event.target.checked;
+        rev.dirty = true;
+        renderReview();
+    };
+    $('rev-ok').onclick = () => {
+        rev.segments[rev.selected].confidence = 'alta';
+        rev.segments[rev.selected].reviewed = true;
+        rev.dirty = true;
+        if (rev.selected < rev.segments.length - 1) rev.selected++;
+        renderReview();
+    };
+    $('rev-reset').onclick = () => {
+        const segment = rev.segments[rev.selected];
+        rev.segments[rev.selected] = { ...segment.original, original: segment.original };
+        rev.dirty = true;
+        renderReview();
+    };
+
+    for (const group of document.querySelectorAll('.nudges')) {
+        for (const button of group.querySelectorAll('button')) {
+            button.onclick = () => {
+                const segment = rev.segments[rev.selected];
+                const delta = Number(button.dataset.delta);
+                const edge = group.dataset.edge;
+                setEdge(edge, (edge === 'in' ? segment.sourceStartSec : segment.sourceEndSec) + delta);
+            };
+        }
+    }
+    for (const button of document.querySelectorAll('.btn-play')) {
+        button.onclick = () => playEdge(button.dataset.play);
+    }
+
+    window.addEventListener('resize', () => {
+        if (document.getElementById('view-review').classList.contains('is-visible')) {
+            renderOverview();
+            renderZoom();
+        }
+    });
 }
 
 // ─── Detalle de una clase ─────────────────────────────────────────────
@@ -587,6 +978,8 @@ async function init() {
     $('btn-open-output').onclick = () => {
         if (state.outputDir) window.cc.openPath(state.outputDir);
     };
+    $('btn-review').onclick = () => openReview(state.reviewFirst);
+    wireReview();
 
     $('drawer-close').onclick = closeDrawer;
     $('btn-doctor').onclick = showDoctor;

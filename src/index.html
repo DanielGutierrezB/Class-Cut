@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src data:;">
     <title>Class Cut</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -131,6 +131,82 @@
 
             <div class="footbar">
                 <div class="footbar-info" id="run-foot"></div>
+                <button class="btn btn-primary" id="btn-review" hidden>Revisar cortes</button>
+            </div>
+        </section>
+
+        <!-- Paso 4 -->
+        <section class="view view-review" id="view-review">
+            <div class="subbar">
+                <div class="subbar-main">
+                    <h2 class="subbar-title" id="rev-title">—</h2>
+                    <span class="run-sub" id="rev-sub"></span>
+                </div>
+                <div class="subbar-actions">
+                    <select class="picker" id="rev-class"></select>
+                    <button class="btn btn-ghost" id="rev-back">Volver</button>
+                    <button class="btn btn-primary" id="rev-save">Guardar y regenerar</button>
+                </div>
+            </div>
+
+            <div class="review">
+                <aside class="review-list" id="rev-list"></aside>
+
+                <div class="review-main" id="rev-main">
+                    <div class="wave-box">
+                        <canvas class="wave wave-overview" id="rev-overview" height="72"></canvas>
+                        <div class="wave-label">Clase completa · clic para ir a un bloque</div>
+                    </div>
+
+                    <div class="wave-box">
+                        <canvas class="wave wave-zoom" id="rev-zoom" height="132"></canvas>
+                        <div class="wave-label" id="rev-zoom-label">—</div>
+                    </div>
+
+                    <div class="edges">
+                        <div class="edge" id="edge-in">
+                            <div class="edge-head">
+                                <span class="edge-name">Entrada</span>
+                                <span class="edge-time" id="in-time">—</span>
+                                <button class="btn btn-ghost btn-play" data-play="in">▶ Escuchar</button>
+                            </div>
+                            <div class="nudges" data-edge="in">
+                                <button class="btn btn-ghost" data-delta="-1">−1 s</button>
+                                <button class="btn btn-ghost" data-delta="-0.25">−¼</button>
+                                <button class="btn btn-ghost" data-delta="-0.033">−1f</button>
+                                <button class="btn btn-ghost" data-delta="0.033">+1f</button>
+                                <button class="btn btn-ghost" data-delta="0.25">+¼</button>
+                                <button class="btn btn-ghost" data-delta="1">+1 s</button>
+                            </div>
+                        </div>
+
+                        <div class="edge" id="edge-out">
+                            <div class="edge-head">
+                                <span class="edge-name">Salida</span>
+                                <span class="edge-time" id="out-time">—</span>
+                                <button class="btn btn-ghost btn-play" data-play="out">▶ Escuchar</button>
+                            </div>
+                            <div class="nudges" data-edge="out">
+                                <button class="btn btn-ghost" data-delta="-1">−1 s</button>
+                                <button class="btn btn-ghost" data-delta="-0.25">−¼</button>
+                                <button class="btn btn-ghost" data-delta="-0.033">−1f</button>
+                                <button class="btn btn-ghost" data-delta="0.033">+1f</button>
+                                <button class="btn btn-ghost" data-delta="0.25">+¼</button>
+                                <button class="btn btn-ghost" data-delta="1">+1 s</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="block-actions">
+                        <label class="toggle"><input type="checkbox" id="rev-keep"> Se queda en el corte</label>
+                        <span class="views" id="rev-views"></span>
+                        <button class="btn btn-ghost" id="rev-reset">Volver a lo calculado</button>
+                        <button class="btn btn-ghost" id="rev-ok">Marcar revisado</button>
+                    </div>
+
+                    <div class="section-title">Qué se dice acá</div>
+                    <div class="transcript" id="rev-transcript"></div>
+                </div>
             </div>
         </section>
     </main>
