@@ -237,9 +237,24 @@ function markerXml(marker, fps) {
     const outFrame = marker.endSec != null && marker.endSec > marker.startSec
         ? toFrames(marker.endSec, fps)
         : -1;
+
+    // El color va DOS veces, y no es redundancia:
+    //
+    // `pproColor` es el entero nativo de Premiere y es el mismo que trae el XML
+    // del Rodecaster, así que el marcador vuelve con exactamente el color que le
+    // puso el director de contenido. Sin él, Premiere lee los componentes RGB y
+    // los ajusta al más parecido de su paleta indexada: el color cambia sin que
+    // nadie lo haya pedido.
+    //
+    // `color` es el que entiende todo lo demás, Resolve incluido, que de
+    // `pproColor` no sabe nada.
+    const ppro = typeof marker.color === 'number' && isFinite(marker.color)
+        ? `<pproColor>${marker.color}</pproColor>`
+        : '';
+
     return `    <marker><comment>${xmlSafe(marker.comment || '')}</comment>` +
         `<name>${xmlSafe(marker.name || '')}</name>` +
-        `<in>${inFrame}</in><out>${outFrame}</out>` +
+        `<in>${inFrame}</in><out>${outFrame}</out>${ppro}` +
         `<color><alpha>${color.alpha}</alpha><red>${color.red}</red>` +
         `<green>${color.green}</green><blue>${color.blue}</blue></color></marker>\n`;
 }
@@ -350,6 +365,7 @@ ${markersXml}      </sequence>
 
 module.exports = {
     sequenceXml,
+    markerXml,
     toFrames,
     framesToSeconds,
     rateFor,

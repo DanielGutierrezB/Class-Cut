@@ -255,6 +255,21 @@ module.exports = function (t) {
         t.deep(fcp.colorComponents(null), fcp.MARKER_COLORS.white);
     });
 
+    t.test('el marcador devuelve a Premiere su entero original', () => {
+        // Sin pproColor, Premiere ajusta el RGB al color más parecido de su
+        // paleta y el marcador cambia de color al reimportarlo.
+        const xml = fcp.markerXml(
+            { name: 'PV', comment: 'x', startSec: 0, color: 4281740498 }, 30
+        );
+        t.ok(xml.includes('<pproColor>4281740498</pproColor>'), 'falta el entero de Premiere');
+        t.ok(xml.includes('<red>13878</red>'), 'falta el RGB para Resolve');
+    });
+
+    t.test('sin color original no se inventa un pproColor', () => {
+        const xml = fcp.markerXml({ name: 'K', startSec: 0, color: null }, 30);
+        t.ok(!xml.includes('pproColor'), 'no debería inventar un entero');
+    });
+
     t.test('cada fuente lleva su etiqueta y la primera es Cerulean', () => {
         t.eq(fcp.CLIP_LABELS[0], 'Cerulean');
         t.eq(fcp.CLIP_LABELS[1], 'Rose');

@@ -52,6 +52,23 @@ El corte se decide en tres capas, de la más barata a la más cara:
 Todo es local (Ollama). Si no está corriendo, la app corta igual con las reglas y
 lo dice en **Diagnóstico**; la casilla "Afinar con IA local" lo apaga a mano.
 
+## Colores
+
+Los **marcadores** salen con el color que les puso el director de contenido, sin
+excepción. Para que Premiere los devuelva idénticos hay que escribirle su entero
+nativo (`pproColor`, el mismo que trae el XML del Rodecaster): si solo se le dan
+componentes RGB, los ajusta al color más parecido de su paleta y el marcador
+cambia de color solo. El XML lleva las dos formas —el entero para Premiere, el
+RGB para Resolve y el resto—, así que ninguno de los dos tiene que adivinar.
+
+Los **clips** se colorean por fuente y siempre igual entre clases: la cámara en
+Cerulean, el screen recorder en Rose, y de ahí en adelante una etiqueta distinta
+por fuente ([engine/fcp-xml.js](engine/fcp-xml.js), `CLIP_LABELS`). El audio
+queda con su color por defecto. Esto Premiere lo lee del XML; Resolve no importa
+colores de clip desde FCP7, así que para eso va aparte
+[resolve/colorear-clips.py](resolve/colorear-clips.py), que se corre dentro de
+Resolve una vez importado.
+
 ## Estado
 
 Funciona de punta a punta contra el curso real (3 días, 13 clases): se agrega la
