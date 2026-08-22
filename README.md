@@ -73,10 +73,12 @@ Resolve una vez importado.
 
 Funciona de punta a punta contra el curso real (3 días, 13 clases): se agrega la
 carpeta, se procesan las clases y salen los XML cortados, revisables antes de
-exportar. Lo que falta es el instalador (ver **Distribución**).
+exportar. Las herramientas y el modelo ya viajan dentro de la app; lo que queda
+es empaquetar el `.pkg` (ver **Distribución**).
 
-Medido sobre ese curso: 8h18m de material crudo → 1h37m de tomas buenas en 174
-bloques, con el 95% de los marcadores anclados al audio.
+Medido sobre ese curso: 8h18m de material crudo → 1h28m de tomas buenas en 174
+bloques, en 19 minutos de proceso, con el 95% de los marcadores anclados al
+audio.
 
 ## Desarrollo
 
@@ -97,17 +99,23 @@ npx electron . --folder=/ruta/al/curso --js="openDrawer('04_…')" --shot=/tmp/c
 
 ```
 main.js · preload.js     Electron (el motor corre en el proceso principal)
-src/                     ventana: HTML/CSS/JS sin frameworks
+src/js/                  ventana: un módulo por paso, sin frameworks
+  app.js                 solo el cableado: qué botón llama a qué
+  vista-carpeta · vista-clases · vista-corrida    pasos 1 a 3
+  visor/                 paso 4: onda, bordes y guion, con su estado aparte
 engine/
   course-scan.js         descubre clases por firma de estructura
   rodecaster-xml.js      parser de marcadores (pares IN/OUT, claqueta, cues)
   media-probe.js         duración y frame rate reales con ffprobe
   transcribe.js          Whisper local con VAD
+  decidir.js             de las palabras a los bloques decididos
   align.js               claqueta, anclaje de cada marcador e invariantes
   speech-edges.js        habla del director, límites de palabra, cierre de frase
   cut-refine.js          candidatos de corte y elección (regla o IA)
   coherence.js           guion final y revisión de sentido
   ai-local.js            cliente de Ollama, con todo lo que dice validado
+  ollama-server.js       levanta el modelo propio y elige cuál usar
+  ollama-store.js        dónde están Ollama y sus modelos en esta máquina
   cutplan.js · export.js · fcp-xml.js    plan de cortes y XML de salida
   paths.js               dónde están ffmpeg/ffprobe/whisper en esta máquina
 resolve/                 script de color de clips para DaVinci (ver su README)
@@ -127,11 +135,11 @@ brew install ffmpeg whisper-cpp
 mkdir -p bin/mac/models   # y dejar ahí ggml-large-v3-turbo.bin y el modelo de VAD
 ```
 
-La IA es opcional y también local:
+La IA es opcional y también local. Para desarrollo, cualquier Ollama con un
+modelo de la lista de `ollama-server.js` sirve; la app lo detecta solo:
 
 ```bash
-brew install ollama && ollama serve
-ollama pull qwen3.8:27b     # o el que prefieras: se configura en ai-local.js
+brew install ollama && ollama pull qwen3:4b
 ```
 
 Los modelos: `ggml-large-v3-turbo.bin` (1,5 GB) y `ggml-silero-v5.1.2.bin`
@@ -140,19 +148,34 @@ Hugging Face. Se pueden apuntar con `CLASSCUT_WHISPER_MODEL` y `CLASSCUT_VAD_MOD
 
 ## Distribución
 
-Pendiente. `tools/bundle-binaries.sh` ya deja ffmpeg y ffprobe autocontenidos
-—copia sus librerías, reescribe de dónde las cargan y los vuelve a firmar—, y se
-comprobó que arrancan sin Homebrew en el PATH.
+La app no le pide nada al editor: trae ffmpeg, ffprobe, whisper-cli, los modelos
+de Whisper y VAD, y su propio Ollama con un modelo. Dos scripts la arman:
 
-Falta whisper-cli, y por un motivo concreto: el paquete de Homebrew trae la
-carpeta de sus backends (Metal, BLAS, CPU) compilada adentro, así que aunque se
-copie sigue cargando los de `/opt/homebrew`. Con dos copias de ggml en el mismo
-proceso, los dispositivos se registran en una y se buscan en la otra, y aborta.
-La salida es compilar whisper.cpp acá con los backends enlazados adentro
-(`cmake -DGGML_BACKEND_DL=OFF`) en vez de copiar el de Homebrew.
+```bash
+brew install cmake              # solo para compilar whisper.cpp
+bash tools/bundle-binaries.sh   # ffmpeg, ffprobe y whisper-cli
+bash tools/bundle-ollama.sh     # Ollama + qwen3:4b
+```
 
-Hasta entonces el `.pkg` no puede prometer "cero instalación", que es justamente
-lo que tiene que prometer.
+**whisper-cli se compila, no se copia.** El paquete de Homebrew trae la carpeta
+de sus backends (Metal, BLAS, CPU) compilada adentro del binario, así que
+reubicado seguía cargando los de `/opt/homebrew` junto con la librería del
+bundle; con dos copias de ggml en el mismo proceso los dispositivos se registran
+en una y se buscan en la otra, y aborta con `GGML_ASSERT(device) failed`. No hay
+variable de entorno que apague esa ruta. Compilado con los backends enlazados
+adentro y el shader de Metal embebido, el problema no existe: no hay ninguna
+carpeta que encontrar. Quedan 3 MB que solo dependen de frameworks del sistema.
+
+Se apunta a la línea base de Apple Silicon (`armv8.2-a+dotprod+fp16`) y no a la
+máquina que empaqueta: un binario hecho en un M3 usa instrucciones (`i8mm`) que
+en un M1 son ilegales, y eso no se descubre hasta que le revienta al editor.
+
+**Ollama entra en 44 MB** adelgazando `ollama` y `llama-server` a arm64; el resto
+de Ollama.app son backends de MLX y variantes de CPU de Intel que acá no se usan.
+Van los dos binarios porque el servidor busca a `llama-server` como hermano suyo:
+separarlos lo deja corriendo en CPU sin avisar. Corre en un puerto propio, nunca
+el 11434, para no pelearle nada a la instalación que el editor ya tenga —y si esa
+instalación tiene un modelo más grande, se usa ése.
 
 ## Lo que se aprendió del material real
 
