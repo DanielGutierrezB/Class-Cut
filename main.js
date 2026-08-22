@@ -65,7 +65,7 @@ function argValue(flag) {
 
 /**
  * Para iterar la interfaz sin abrir la app a mano:
- *   electron . --folder=/ruta/al/curso --shot=/tmp/class-cut.png --js='openDrawer(id)'
+ *   electron . --folder=/ruta/al/curso --shot=/tmp/class-cut.png --js='dev.abrirClase(id)'
  * Carga la carpeta, espera a que la tabla termine de medir, corre el JS que se le
  * pase, guarda el PNG y sale.
  */
@@ -76,7 +76,7 @@ async function devShot() {
     if (!shot && !folder) return;
 
     if (folder) {
-        await mainWindow.webContents.executeJavaScript(`addFolder(${JSON.stringify(folder)})`);
+        await mainWindow.webContents.executeJavaScript(`dev.addFolder(${JSON.stringify(folder)})`);
         await new Promise(r => setTimeout(r, 4000));
     }
     if (extraJs) {
