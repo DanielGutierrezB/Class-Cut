@@ -20,19 +20,18 @@
 # 2. Se reescribe a @executable_path/lib y @loader_path, no a @rpath: esas dos no
 #    buscan en varios sitios, dicen exactamente dónde está el archivo.
 #
-# ESTADO: ffmpeg y ffprobe quedan autocontenidos y arrancan sin Homebrew en el
-# PATH (comprobado abajo). whisper-cli TODAVÍA NO: el paquete de Homebrew trae la
-# carpeta de sus backends (Metal, BLAS, CPU) compilada adentro
-# —/opt/homebrew/Cellar/ggml/*/libexec—, así que reubicado sigue cargando los de
-# ahí junto con la librería del bundle. Con dos copias de ggml-base en el mismo
+# whisper-cli no se copia: se compila. El paquete de Homebrew trae la carpeta de
+# sus backends (Metal, BLAS, CPU) compilada adentro del binario
+# —/opt/homebrew/Cellar/ggml/*/libexec—, así que reubicado seguía cargando los de
+# ahí JUNTO con la librería del bundle. Con dos copias de ggml-base en el mismo
 # proceso, los dispositivos quedan registrados en una y buscados en la otra, y
 # aborta con `GGML_ASSERT(device) failed`. No hay variable de entorno que apague
 # esa ruta: GGML_BACKEND_PATH apunta a UN archivo, no reemplaza el directorio.
 #
-# La salida es compilar whisper.cpp acá con los backends enlazados adentro
-# (`cmake -DGGML_BACKEND_DL=OFF`) en vez de copiar el de Homebrew. Mientras
-# tanto la app usa el whisper-cli del sistema, que es lo que ya hace en
-# desarrollo.
+# Compilado desde fuente con los backends enlazados adentro y el shader de Metal
+# embebido en el ejecutable, el problema desaparece de raíz: no hay ninguna
+# carpeta que encontrar. El binario queda en 3 MB y no depende de nada fuera de
+# los frameworks del sistema.
 #
 #   bash tools/bundle-binaries.sh
 #
@@ -147,38 +146,64 @@ bundle_tool() {
     resign "$DEST/$name"
 }
 
+# Se apunta a la línea base de Apple Silicon y no a ESTA máquina: `GGML_NATIVE`
+# compila para el procesador que tenga el que empaqueta, y un binario hecho en un
+# M3 usa instrucciones (i8mm) que en un M1 son ilegales. El editor no se entera
+# de eso hasta que la app le revienta al transcribir.
+WHISPER_ARCH="armv8.2-a+dotprod+fp16"
+WHISPER_SRC="${WHISPER_SRC:-$PWD/build/whisper.cpp}"
+
+build_whisper() {
+    if ! command -v cmake > /dev/null; then
+        echo "✗ falta cmake para compilar whisper.cpp. Instalalo con: brew install cmake" >&2
+        return 1
+    fi
+    if [ ! -d "$WHISPER_SRC/.git" ]; then
+        log "whisper.cpp ← github"
+        mkdir -p "$(dirname "$WHISPER_SRC")"
+        git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git "$WHISPER_SRC" 2>&1 |
+            sed 's/^/    /'
+    fi
+
+    log "compilando whisper-cli para $WHISPER_ARCH"
+    cmake -S "$WHISPER_SRC" -B "$WHISPER_SRC/build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DGGML_BACKEND_DL=OFF \
+        -DGGML_METAL=ON \
+        -DGGML_METAL_EMBED_LIBRARY=ON \
+        -DGGML_NATIVE=OFF \
+        -DGGML_CPU_ARM_ARCH="$WHISPER_ARCH" \
+        -DWHISPER_BUILD_TESTS=OFF \
+        -DWHISPER_BUILD_SERVER=OFF \
+        > /dev/null || { echo "✗ falló el cmake de whisper.cpp" >&2; return 1; }
+
+    cmake --build "$WHISPER_SRC/build" --config Release -j "$(sysctl -n hw.ncpu)" \
+        > /dev/null || { echo "✗ falló la compilación de whisper.cpp" >&2; return 1; }
+
+    cp "$WHISPER_SRC/build/bin/whisper-cli" "$DEST/whisper-cli"
+    resign "$DEST/whisper-cli"
+}
+
 echo "Empaquetando binarios en $DEST"
 bundle_tool ffmpeg
 bundle_tool ffprobe
-bundle_tool whisper-cli
-
-GGML_LIBEXEC=$(ls -d /opt/homebrew/Cellar/ggml/*/libexec 2>/dev/null | tail -1 || true)
-if [ -n "$GGML_LIBEXEC" ]; then
-    log "backends de ggml ← $GGML_LIBEXEC"
-    for backend in "$GGML_LIBEXEC"/*.so "$GGML_LIBEXEC"/*.dylib; do
-        [ -e "$backend" ] || continue
-        base=$(basename "$backend")
-        cp "$backend" "$LIBDIR/$base"
-        chmod u+w "$LIBDIR/$base"
-        install_name_tool -id "@loader_path/$base" "$LIBDIR/$base" 2>/dev/null || true
-        fix_deps "$LIBDIR/$base" "$backend" "@loader_path/"
-        resign "$LIBDIR/$base"
-    done
-    for extra in "$GGML_LIBEXEC"/*.metal "$GGML_LIBEXEC"/*.metallib; do
-        [ -e "$extra" ] && cp "$extra" "$LIBDIR/" || true
-    done
-    # Los backends van SOLO en lib/, junto a la librería de ggml que los usa.
-    # Copiarlos también al lado del ejecutable parecía más seguro y es peor: se
-    # registran dos veces y whisper aborta con GGML_ASSERT(device) failed.
-else
-    log "no encontré los backends de ggml: whisper va a andar solo por CPU"
-fi
+build_whisper
 
 echo
 echo "Listo:"
 du -sh "$DEST" | sed 's/^/  /'
 echo
+# La única comprobación que vale es sin Homebrew a la vista: con él en el PATH un
+# binario mal enlazado funciona igual y el problema aparece en la máquina del
+# editor, que es donde no se puede arreglar.
 echo "Comprobación (sin Homebrew en el PATH):"
-env PATH=/usr/bin:/bin "$DEST/ffprobe" -version 2>&1 | head -1 | sed 's/^/  /'
-env PATH=/usr/bin:/bin GGML_BACKEND_PATH="$PWD/$LIBDIR" "$DEST/whisper-cli" --help 2>&1 |
-    grep -E "^usage|load_backend" | head -4 | sed 's/^/  /'
+env -i PATH=/usr/bin:/bin "$DEST/ffprobe" -version 2>&1 | head -1 | sed 's/^/  /'
+env -i PATH=/usr/bin:/bin "$DEST/ffmpeg" -version 2>&1 | head -1 | sed 's/^/  /'
+
+if otool -L "$DEST/whisper-cli" | tail -n +2 | grep -qv -e '/usr/lib/' -e '/System/'; then
+    echo "  ✗ whisper-cli depende de algo que no es del sistema:" >&2
+    otool -L "$DEST/whisper-cli" | tail -n +2 | grep -v -e '/usr/lib/' -e '/System/' >&2
+    exit 1
+fi
+echo "  whisper-cli: solo frameworks del sistema · $(du -h "$DEST/whisper-cli" | cut -f1)"

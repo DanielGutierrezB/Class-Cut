@@ -19,6 +19,7 @@ const cutplan = require('./cutplan');
 const exporter = require('./export');
 const workspace = require('./workspace');
 const onset = require('./vendor/audio-onset');
+const ollamaServer = require('./ollama-server');
 
 const STAGES = ['transcribir', 'alinear', 'afinar', 'cortar', 'exportar', 'revisar'];
 
@@ -91,6 +92,23 @@ async function processClass(params) {
     // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
     // los que tienen más de una opción razonable, que es donde el criterio cambia
     // el resultado.
+    //
+    // El modelo se levanta acá y no al abrir la app: tenerlo cargado ocupa
+    // memoria, y mirar una clase ya procesada no tiene por qué costar eso.
+    // `ensure` recuerda el arranque, así que de la segunda clase en adelante no
+    // cuesta nada.
+    let useAi = params.useAi !== false;
+    if (useAi && words.length) {
+        const model = await ollamaServer.ensure({ signal });
+        useAi = model.ok;
+        if (!model.ok) {
+            warnings.push({
+                code: 'sin_modelo',
+                message: `${model.reason} Los cortes salen con las reglas, sin criterio en los casos dudosos.`
+            });
+        }
+    }
+
     if (words.length) {
         notify('afinar', {});
         try {
@@ -99,7 +117,7 @@ async function processClass(params) {
                 words,
                 wav,
                 options: { fps: cls.fps || 30 },
-                useAi: params.useAi !== false,
+                useAi,
                 signal,
                 onProgress: info => notify('afinar', {
                     percent: Math.round((info.index / Math.max(1, info.total)) * 100)
@@ -142,7 +160,7 @@ async function processClass(params) {
             review = await coherence.reviewClass({
                 alignResult,
                 words,
-                useAi: params.useAi !== false,
+                useAi,
                 signal,
                 onProgress: info => notify('revisar', {
                     percent: Math.round((info.chunk / Math.max(1, info.total)) * 100)

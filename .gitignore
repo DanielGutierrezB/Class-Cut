@@ -1,9 +1,10 @@
 node_modules/
 dist/
-# Los binarios y modelos se arman con tools/bundle-binaries.sh: son 1,7 GB y no
-# son código.
+# Los binarios y modelos se arman con tools/bundle-binaries.sh y
+# tools/bundle-ollama.sh: son varios GB y no son código.
 bin/
+# El árbol de whisper.cpp que se clona y compila para armar el bundle.
+build/
 *.log
 .DS_Store
 tests/tmp/
-bin/mac/models/

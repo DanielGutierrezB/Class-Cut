@@ -16,7 +16,8 @@ const FILES = [
     'transcribe.test.js',
     'align.test.js',
     'export.test.js',
-    'criterio.test.js'
+    'criterio.test.js',
+    'modelo-local.test.js'
 ];
 
 const filter = process.argv[2] || '';

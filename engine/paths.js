@@ -90,6 +90,67 @@ const ffprobe = () => resolveTool('ffprobe');
 const ffmpeg = () => resolveTool('ffmpeg');
 const whisper = () => resolveTool('whisper-cli');
 
+// Ollama viene en su propia carpeta y no en `bin/`, porque el servidor busca a
+// `llama-server` como hermano suyo y no en el PATH: separarlos lo deja corriendo
+// en CPU sin avisar.
+function ollamaDirs() {
+    const dirs = [];
+    if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'bin', 'ollama'));
+    dirs.push(path.join(appRoot(), 'bin', 'mac', 'ollama'));
+    return dirs;
+}
+
+function ollama() {
+    const searched = [];
+    for (const dir of ollamaDirs()) {
+        const candidate = path.join(dir, 'ollama');
+        searched.push(candidate);
+        if (isExecutable(candidate) && isExecutable(path.join(dir, 'llama-server'))) {
+            return { path: candidate, dir, source: 'incluido en la app', searched };
+        }
+    }
+    const system = resolveTool('ollama');
+    searched.push(...system.searched);
+    if (system.path) {
+        return { path: system.path, dir: path.dirname(system.path), source: system.source, searched };
+    }
+    return { path: null, dir: null, source: 'no encontrado', searched };
+}
+
+/** El almacén de modelos que viene con la app, si se empaquetó. */
+function ollamaModels() {
+    const dirs = [];
+    if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'bin', 'ollama-models'));
+    dirs.push(path.join(appRoot(), 'bin', 'mac', 'ollama-models'));
+    for (const dir of dirs) {
+        if (fs.existsSync(path.join(dir, 'manifests'))) {
+            return { path: dir, source: 'incluido en la app', searched: dirs };
+        }
+    }
+    return { path: null, source: 'no encontrado', searched: dirs };
+}
+
+/** El almacén del editor, que puede tener modelos mejores que el que traemos. */
+function userOllamaModels() {
+    const dir = process.env.OLLAMA_MODELS
+        || path.join(process.env.HOME || '', '.ollama', 'models');
+    return fs.existsSync(path.join(dir, 'manifests')) ? dir : null;
+}
+
+/** Qué modelos hay en un almacén, leyendo los manifiestos. */
+function modelsIn(store) {
+    const base = path.join(store || '', 'manifests', 'registry.ollama.ai', 'library');
+    const names = [];
+    let libs = [];
+    try { libs = fs.readdirSync(base); } catch (e) { return names; }
+    for (const name of libs) {
+        let tags = [];
+        try { tags = fs.readdirSync(path.join(base, name)); } catch (e) { continue; }
+        for (const tag of tags) names.push(`${name}:${tag}`);
+    }
+    return names;
+}
+
 // ─── Modelos ──────────────────────────────────────────────────────────
 
 // De mejor a peor para esta tarea. `large-v3-turbo` da prácticamente la misma
@@ -196,5 +257,6 @@ function clearCache() { cache.clear(); }
 module.exports = {
     resolveTool, ffprobe, ffmpeg, whisper,
     whisperModel, vadModel, modelDirs, MODEL_PREFERENCE,
+    ollama, ollamaModels, userOllamaModels, modelsIn,
     doctor, clearCache, appRoot
 };

@@ -21,6 +21,7 @@ const workspace = require('./engine/workspace');
 const review = require('./engine/review');
 const waveform = require('./engine/waveform');
 const aiLocal = require('./engine/ai-local');
+const ollamaServer = require('./engine/ollama-server');
 
 let mainWindow = null;
 let currentRun = null;
@@ -111,6 +112,10 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
+// El modelo es un proceso aparte y no se entera de que la app cerró: sin esto
+// queda cargado ocupando memoria hasta que alguien lo mate a mano.
+app.on('before-quit', () => { ollamaServer.stop(); });
+
 // ─── Puente con la ventana ────────────────────────────────────────────
 
 ipcMain.handle('app-info', () => ({
@@ -124,7 +129,19 @@ ipcMain.handle('doctor', async () => {
     const report = paths.doctor();
     // La IA es opcional: sin ella la app corta igual, solo pierde el criterio en
     // los bordes dudosos y la lectura del guion. Por eso se informa aparte.
-    report.ai = await aiLocal.probe();
+    //
+    // Se informa sin levantar el servidor: abrir Diagnóstico no debería cargar un
+    // modelo en memoria. Si ya está corriendo, se le pregunta de verdad.
+    const local = ollamaServer.status();
+    report.ai = local.running
+        ? { ...(await aiLocal.probe()), ...local }
+        : {
+            ...local,
+            ok: local.ok,
+            reason: local.ok
+                ? `Listo: ${local.model} (${local.modelSource}). Arranca al procesar.`
+                : 'Falta el modelo local: los cortes salen con las reglas solas.'
+        };
     return report;
 });
 
