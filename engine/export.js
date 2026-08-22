@@ -20,19 +20,28 @@ const rodecaster = require('./rodecaster-xml');
 const fcp = require('./fcp-xml');
 const workspace = require('./workspace');
 
-// Colores de marcador en la salida. El comentario del CD viaja intacto; el color
-// es lo único que agregamos, y dice de un vistazo qué hay que mirar.
-const VIEW_COLOR = { PV: 'blue', R: 'green', K: 'white' };
-const CONFIDENCE_COLOR = { alta: 'green', media: 'yellow', baja: 'red' };
+/**
+ * El color del marcador es el que eligió el director de contenido y viaja tal
+ * cual: `pproColor` es el entero ARGB del XML original y `fcp-xml` lo convierte
+ * sin interpretarlo. Recolorear por vista o por confianza convertía el XML en un
+ * informe de la herramienta; lo que hay que revisar se dice en la interfaz, que
+ * es donde se mira.
+ */
+function markerColor(source) {
+    return source && source.color != null ? source.color : 'white';
+}
 
-function videoSource(file) {
+function videoSource(file, index) {
     return {
         path: file.path,
         name: file.name,
         durationSec: file.durationSec || 0,
         width: file.width,
         height: file.height,
-        audioOnly: false
+        audioOnly: false,
+        // Cada cámara con su color, y el mismo en todas las clases: el orden del
+        // archivo es estable porque el Rodecaster numera igual siempre.
+        label: fcp.CLIP_LABELS[(index || 0) % fcp.CLIP_LABELS.length]
     };
 }
 
@@ -51,8 +60,8 @@ function audioSource(file) {
 /** Pistas con el material entero desde 00:00, que es como se grabó. */
 function fullTracks(cls) {
     const durationSec = cls.durationSec || 0;
-    const videoTracks = (cls.videos || []).map(video => ([{
-        source: videoSource(video),
+    const videoTracks = (cls.videos || []).map((video, index) => ([{
+        source: videoSource(video, index),
         startSec: 0,
         endSec: video.durationSec || durationSec,
         sourceInSec: 0,
@@ -80,7 +89,7 @@ function markersFromParsed(parsed) {
             name: parsed.clap.name || 'K',
             comment: parsed.clap.comment || '',
             startSec: parsed.clap.seconds,
-            color: 'white'
+            color: markerColor(parsed.clap)
         });
     }
     for (const block of parsed.blocks) {
@@ -89,14 +98,14 @@ function markersFromParsed(parsed) {
             comment: block.inComment,
             startSec: block.startFrame / timebase,
             endSec: (block.startFrame / timebase) + 10,
-            color: VIEW_COLOR[block.view] || 'blue'
+            color: markerColor(block)
         });
         if (block.complete) {
             markers.push({
                 name: block.view,
                 comment: block.outComment,
                 startSec: block.endFrame / timebase,
-                color: VIEW_COLOR[block.view] || 'blue'
+                color: markerColor(block)
             });
         }
     }
@@ -113,34 +122,26 @@ function markersFromAlign(alignResult, parsed) {
             name: parsed.clap.name || 'K',
             comment: parsed.clap.comment || '',
             startSec: Math.max(0, parsed.clap.seconds + offset),
-            color: 'white'
+            color: markerColor(parsed.clap)
         });
     }
     for (const block of alignResult.blocks) {
-        const color = block.confidence === 'alta'
-            ? (VIEW_COLOR[block.view] || 'blue')
-            : CONFIDENCE_COLOR[block.confidence];
+        const original = parsed.blocks.find(b => b.index === block.index);
         markers.push({
             name: block.view,
-            comment: block.in.originalComment || blockComment(parsed, block, 'in'),
+            comment: original ? original.inComment : '',
             startSec: block.startSec,
             endSec: block.startSec + 10,
-            color
+            color: markerColor(original)
         });
         markers.push({
             name: block.view,
-            comment: blockComment(parsed, block, 'out'),
+            comment: original ? original.outComment || '' : '',
             startSec: block.endSec,
-            color
+            color: markerColor(original)
         });
     }
     return markers;
-}
-
-function blockComment(parsed, block, kind) {
-    const original = parsed.blocks.find(b => b.index === block.index);
-    if (!original) return '';
-    return (kind === 'in' ? original.inComment : original.outComment) || '';
 }
 
 /** La clase ya cortada: cada bloque uno detrás de otro, con su vista. */
@@ -150,7 +151,7 @@ function cutTracks(cls, plan) {
     const audios = cls.audios || [];
 
     const videoTracks = videos.map((video, trackIndex) => kept.map(segment => ({
-        source: videoSource(video),
+        source: videoSource(video, trackIndex),
         startSec: segment.timelineStartSec,
         endSec: segment.timelineEndSec,
         sourceInSec: segment.sourceStartSec,
@@ -172,9 +173,7 @@ function cutTracks(cls, plan) {
         name: segment.view,
         comment: segment.note || segment.cueIn || '',
         startSec: segment.timelineStartSec,
-        color: segment.confidence === 'alta'
-            ? (VIEW_COLOR[segment.view] || 'blue')
-            : CONFIDENCE_COLOR[segment.confidence]
+        color: markerColor(segment)
     }));
 
     return { videoTracks, audioTracks, markers, durationSec: plan.totals.keepSec };
@@ -261,4 +260,7 @@ function fmt(seconds) {
     return `${m}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
-module.exports = { exportClass, fullTracks, cutTracks, markersFromParsed, markersFromAlign, VIEW_COLOR, CONFIDENCE_COLOR };
+module.exports = {
+    exportClass, fullTracks, cutTracks,
+    markersFromParsed, markersFromAlign, markerColor, videoSource
+};

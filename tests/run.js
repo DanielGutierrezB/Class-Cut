@@ -15,7 +15,8 @@ const FILES = [
     'course-scan.test.js',
     'transcribe.test.js',
     'align.test.js',
-    'export.test.js'
+    'export.test.js',
+    'criterio.test.js'
 ];
 
 const filter = process.argv[2] || '';

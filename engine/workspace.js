@@ -18,12 +18,13 @@ const path = require('path');
 const OUTPUT_DIR = 'The Cutter';
 const BACKUP_DIR = 'Backup';
 
-// Nombres de los artefactos. Los dos XML numerados son los que el editor puede
+// El sufijo que lleva cada artefacto. Los dos XML son los que el editor puede
 // importar para ver en qué paso se rompió algo.
 const FILES = {
     transcript: 'transcript.json',
     align: 'align.json',
     cutplan: 'cutplan.json',
+    coherence: 'coherence.json',
     log: 'run.log',
     populatedXml: 'poblada.xml',
     alignedXml: 'alineada.xml'
@@ -37,15 +38,54 @@ function backupRoot(root) {
     return path.join(outputRoot(root), BACKUP_DIR);
 }
 
-/** Carpeta de trabajo de una clase. El nombre de secuencia es único por diseño. */
-function classDir(root, sequenceName) {
-    return path.join(backupRoot(root), safeName(sequenceName));
-}
-
+/**
+ * Los artefactos van sueltos dentro de `Backup/`, con el nombre de la secuencia
+ * y qué son al final: `04_…_105913_alineada.xml`. Una carpeta por clase obligaba
+ * a entrar y salir de trece carpetas para comparar dos alineados.
+ */
 function artifact(root, sequenceName, key) {
     const file = FILES[key];
     if (!file) throw new Error(`Artefacto desconocido: ${key}`);
-    return path.join(classDir(root, sequenceName), file);
+    return path.join(backupRoot(root), `${safeName(sequenceName)}_${file}`);
+}
+
+/**
+ * Pasa los Backup viejos (una carpeta por clase) al formato plano. Es de un solo
+ * uso y no borra nada que no haya movido: sin esto, los transcripts guardados
+ * quedarían invisibles y habría que volver a pasar Whisper por horas de audio.
+ * @returns {{moved: number, folders: number}}
+ */
+function migrateBackup(root) {
+    const base = backupRoot(root);
+    let moved = 0;
+    let folders = 0;
+
+    let entries;
+    try {
+        entries = fs.readdirSync(base, { withFileTypes: true });
+    } catch (e) {
+        return { moved, folders };
+    }
+
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const dir = path.join(base, entry.name);
+        let inside;
+        try { inside = fs.readdirSync(dir); } catch (e) { continue; }
+
+        for (const name of inside) {
+            const target = path.join(base, `${entry.name}_${name}`);
+            if (fs.existsSync(target)) continue;
+            try {
+                fs.renameSync(path.join(dir, name), target);
+                moved++;
+            } catch (e) { /* lo que no se pueda mover se queda donde está */ }
+        }
+        try {
+            if (!fs.readdirSync(dir).length) { fs.rmdirSync(dir); folders++; }
+        } catch (e) { /* la carpeta se queda si algo quedó adentro */ }
+    }
+    return { moved, folders };
 }
 
 function finalXml(root, sequenceName) {
@@ -133,8 +173,8 @@ module.exports = {
     FILES,
     outputRoot,
     backupRoot,
-    classDir,
     artifact,
+    migrateBackup,
     finalXml,
     masterXml,
     safeName,

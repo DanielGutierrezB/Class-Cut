@@ -148,8 +148,47 @@ module.exports = function (t) {
         const root = '/curso';
         t.eq(workspace.outputRoot(root), '/curso/The Cutter');
         t.eq(workspace.finalXml(root, '04_clase'), '/curso/The Cutter/04_clase.xml');
-        t.eq(workspace.artifact(root, '04_clase', 'transcript'), '/curso/The Cutter/Backup/04_clase/transcript.json');
-        t.eq(workspace.artifact(root, '04_clase', 'alignedXml'), '/curso/The Cutter/Backup/04_clase/alineada.xml');
+    });
+
+    t.test('los artefactos van sueltos, diciendo qué son al final del nombre', () => {
+        const root = '/curso';
+        t.eq(workspace.artifact(root, '04_clase', 'transcript'), '/curso/The Cutter/Backup/04_clase_transcript.json');
+        t.eq(workspace.artifact(root, '04_clase', 'alignedXml'), '/curso/The Cutter/Backup/04_clase_alineada.xml');
+        t.eq(workspace.artifact(root, '04_clase', 'coherence'), '/curso/The Cutter/Backup/04_clase_coherence.json');
+    });
+
+    t.test('un artefacto que no existe se rechaza en vez de escribir en cualquier lado', () => {
+        let falló = false;
+        try { workspace.artifact('/curso', '04_clase', 'inventado'); } catch (e) { falló = true; }
+        t.eq(falló, true);
+    });
+
+    t.test('la migración pasa los Backup viejos al formato plano sin perder nada', () => {
+        const root = fixture.tempRoot('migrar');
+        try {
+            const vieja = path.join(root, 'The Cutter', 'Backup', '04_clase');
+            fs.mkdirSync(vieja, { recursive: true });
+            fs.writeFileSync(path.join(vieja, 'transcript.json'), '{"version":2}');
+            fs.writeFileSync(path.join(vieja, 'alineada.xml'), '<xmeml/>');
+
+            const result = workspace.migrateBackup(root);
+            t.eq(result.moved, 2);
+            t.eq(result.folders, 1);
+            t.deep(workspace.readJson(workspace.artifact(root, '04_clase', 'transcript')), { version: 2 });
+            t.eq(fs.existsSync(vieja), false, 'la carpeta vacía se saca del medio');
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('migrar dos veces no rompe nada', () => {
+        const root = fixture.tempRoot('migrar-dos');
+        try {
+            const vieja = path.join(root, 'The Cutter', 'Backup', '04_clase');
+            fs.mkdirSync(vieja, { recursive: true });
+            fs.writeFileSync(path.join(vieja, 'align.json'), '{}');
+            workspace.migrateBackup(root);
+            const segunda = workspace.migrateBackup(root);
+            t.eq(segunda.moved, 0);
+        } finally { fixture.rimraf(root); }
     });
 
     t.test('un nombre de secuencia con barras no se escapa de su carpeta', () => {

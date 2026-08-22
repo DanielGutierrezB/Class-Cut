@@ -24,8 +24,11 @@
 const anchor = require('./vendor/marker-anchor');
 const onset = require('./vendor/audio-onset');
 const clapDetect = require('./clap-detect');
+const speech = require('./speech-edges');
 
-const ALIGN_VERSION = 1;
+// 2: los bordes pasan por el ajuste a frase y el recorte del habla del director,
+// y el audio mide el frame con los límites de la palabra vecina.
+const ALIGN_VERSION = 2;
 
 const DEFAULTS = {
     fps: 30,
@@ -173,30 +176,28 @@ function limitsFor(blocks, index, kind, offsetSec) {
 }
 
 /**
- * Un borde: la frase elige la palabra, el audio elige el frame.
- * Devuelve siempre algo aplicable — si nada convence, el tiempo original.
+ * Fase 1 — Qué palabras abren o cierran el bloque, según la nota del CD.
+ * No mira el audio todavía: solo decide de qué frase estamos hablando.
  */
-function alignEdge(params) {
-    const { words, wav, cue, kind, currentSec, limits, options } = params;
-    const fps = opt(options, 'fps');
+function anchorEdge(params) {
+    const { words, cue, kind, currentSec, limits, options } = params;
 
-    const out = {
+    const edge = {
         kind,
         originalSec: round(currentSec),
-        alignedSec: round(currentSec),
-        shiftSec: 0,
+        timeSec: currentSec,
         score: null,
         confidence: CONFIDENCE.baja,
-        moved: false,
         ambiguous: false,
         snippet: null,
-        audio: null,
+        anchored: false,
+        decidedBy: 'nota',
         reason: ''
     };
 
     if (!cue) {
-        out.reason = 'El marcador no trae texto para buscar.';
-        return out;
+        edge.reason = 'El marcador no trae texto para buscar.';
+        return edge;
     }
 
     const match = anchor.anchorFor(words, cue, kind, currentSec, {
@@ -204,56 +205,97 @@ function alignEdge(params) {
         minScore: opt(options, 'minScore'),
         autoScore: opt(options, 'autoScore'),
         maxShiftSec: opt(options, 'maxShiftSec'),
-        fps,
+        fps: opt(options, 'fps'),
         minTime: limits.minTime,
         maxTime: limits.maxTime
     });
 
     if (!match.ok) {
-        out.reason = match.reason;
-        return out;
+        edge.reason = match.reason;
+        return edge;
     }
 
-    out.score = match.score;
-    out.ambiguous = Boolean(match.ambiguous);
-    out.snippet = match.snippet;
-    out.reason = match.reason;
+    edge.score = match.score;
+    edge.ambiguous = Boolean(match.ambiguous);
+    edge.snippet = match.snippet;
+    edge.reason = match.reason;
 
     if (match.score < opt(options, 'minScore')) {
-        out.reason = `${match.reason}: se queda donde estaba.`;
-        return out;
+        edge.reason = `${match.reason}: se queda donde estaba.`;
+        return edge;
     }
 
-    let time = match.time;
-
-    // El transcript dice qué palabra abre el bloque; el audio, en qué frame
-    // empieza a sonar. Sin esto el corte queda con aire muerto o mordiendo el
-    // ataque de la palabra.
-    if (wav) {
-        const measured = onset.measure(wav, time, kind, {
-            fps,
-            padFrames: opt(options, 'padFrames'),
-            minTime: limits.minTime,
-            maxTime: limits.maxTime
-        });
-        if (measured && measured.applyTime != null) {
-            out.audio = {
-                appliedSec: round(measured.applyTime),
-                airFrames: measured.airFrames == null ? null : measured.airFrames,
-                code: measured.code || null,
-                message: measured.message || null
-            };
-            time = measured.applyTime;
-        }
-    }
-
-    out.alignedSec = round(time);
-    out.shiftSec = round(time - currentSec);
-    out.moved = Math.abs(out.shiftSec) > 1 / fps;
-    out.confidence = match.score >= opt(options, 'autoScore') && !match.ambiguous
+    edge.timeSec = match.time;
+    edge.anchored = true;
+    edge.decidedBy = 'nota';
+    edge.confidence = match.score >= opt(options, 'autoScore') && !match.ambiguous
         ? CONFIDENCE.alta
         : CONFIDENCE.media;
-    return out;
+    return edge;
+}
+
+/**
+ * Fase 2 — Que el borde caiga donde una frase abre o cierra.
+ *
+ * La nota del CD viene recortada a ~50 caracteres, así que el ancla cae en la
+ * última palabra que se pudo emparejar, no necesariamente donde termina la idea.
+ * De ahí salían los 103 bloques que cerraban con un fragmento colgando.
+ */
+function applySnap(edge, words, options) {
+    const snap = speech.snapToSentence(words, edge.timeSec, edge.kind, options);
+    edge.snap = { how: snap.how, moved: snap.moved, candidates: snap.candidates };
+    if (!snap.moved) return edge;
+
+    edge.timeSec = snap.timeSec;
+    edge.decidedBy = 'regla';
+    edge.reason = `${edge.reason} ${snap.how}.`.trim();
+    return edge;
+}
+
+/**
+ * Fase 3 — El frame exacto, medido en el audio.
+ *
+ * Los límites de palabra son lo que impide que el colchón de aire se lleve
+ * puesta la palabra vecina: sin ellos, un OUT colocado justo después de la
+ * última frase se comía el "Pausa" que el profesor le dice al editor, y en el
+ * corte se oía "Pau—".
+ */
+function refineWithAudio(edge, params) {
+    const { words, wav, blockLimits, options } = params;
+    const fps = opt(options, 'fps');
+    if (!wav) return edge;
+
+    const limits = speech.tightest(
+        speech.wordLimits(words, edge.timeSec, edge.kind),
+        blockLimits
+    );
+
+    const measured = onset.measure(wav, edge.timeSec, edge.kind, {
+        fps,
+        padFrames: opt(options, 'padFrames'),
+        minTime: limits.minTime,
+        maxTime: limits.maxTime
+    });
+
+    if (measured && measured.applyTime != null) {
+        edge.audio = {
+            appliedSec: round(measured.applyTime),
+            airFrames: measured.airFrames == null ? null : measured.airFrames,
+            code: measured.code || null,
+            message: measured.message || null
+        };
+        edge.timeSec = measured.applyTime;
+    }
+    return edge;
+}
+
+/** Cierra un borde: los campos con los que viaja al artefacto y a la interfaz. */
+function sealEdge(edge, options) {
+    const fps = opt(options, 'fps');
+    edge.alignedSec = round(edge.timeSec);
+    edge.shiftSec = round(edge.alignedSec - edge.originalSec);
+    edge.moved = Math.abs(edge.shiftSec) > 1 / fps;
+    return edge;
 }
 
 /**
@@ -309,22 +351,61 @@ function alignClass(params) {
     const aligned = [];
     for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        const inEdge = alignEdge({
-            words, wav, cue: block.cueIn, kind: 'IN',
-            currentSec: block.startSec + offsetSec,
-            limits: limitsFor(blocks, i, 'IN', offsetSec),
-            options
+        const inLimits = limitsFor(blocks, i, 'IN', offsetSec);
+        const outLimits = limitsFor(blocks, i, 'OUT', offsetSec);
+
+        // 1. La nota del CD dice de qué frase estamos hablando.
+        const inEdge = anchorEdge({
+            words, cue: block.cueIn, kind: 'IN',
+            currentSec: block.startSec + offsetSec, limits: inLimits, options
         });
-        const outEdge = alignEdge({
-            words, wav, cue: block.cueOut, kind: 'OUT',
-            currentSec: block.endSec + offsetSec,
-            limits: limitsFor(blocks, i, 'OUT', offsetSec),
-            options
+        const outEdge = anchorEdge({
+            words, cue: block.cueOut, kind: 'OUT',
+            currentSec: block.endSec + offsetSec, limits: outLimits, options
         });
+
+        // 2. Fuera las órdenes al editor, que es lo que el ancla arrastra cuando
+        //    el CD las escribió dentro de la frase ("…nuestro producto. Pausa.").
+        const removed = [];
+        const trimChatter = () => {
+            const cut = speech.trimChatter(words, inEdge.timeSec, outEdge.timeSec, options);
+            if (!cut.removed.length) return;
+            if (Math.abs(cut.startSec - inEdge.timeSec) > 0.001) {
+                inEdge.timeSec = cut.startSec;
+                inEdge.decidedBy = 'regla';
+            }
+            if (Math.abs(cut.endSec - outEdge.timeSec) > 0.001) {
+                outEdge.timeSec = cut.endSec;
+                outEdge.decidedBy = 'regla';
+            }
+            removed.push(...cut.removed);
+        };
+        trimChatter();
+
+        // 3. Que el bloque abra y cierre una idea, no la mitad de una.
+        applySnap(inEdge, words, options);
+        applySnap(outEdge, words, options);
+        // Cerrar la frase puede haber vuelto a meter un "Pausa." que también
+        // termina en punto, así que se limpia otra vez.
+        trimChatter();
+
+        // 4. El frame exacto, ya con la palabra vecina como límite.
+        refineWithAudio(inEdge, { words, wav, blockLimits: inLimits, options });
+        refineWithAudio(outEdge, { words, wav, blockLimits: outLimits, options });
+        sealEdge(inEdge, options);
+        sealEdge(outEdge, options);
+
+        if (removed.length) {
+            inEdge.chatterRemoved = removed;
+            outEdge.chatterRemoved = removed;
+        }
 
         aligned.push({
             index: block.index,
             view: block.view,
+            // El color que el CD le puso al marcador viaja con el bloque hasta el
+            // XML de salida sin que nadie lo reinterprete.
+            color: block.color,
             note: block.note,
             complete: block.complete,
             cueIn: block.cueIn,
@@ -442,6 +523,7 @@ function enforce(blocks, context) {
 }
 
 module.exports = {
-    alignClass, alignEdge, offsetProbe, chooseOffset, limitsFor,
+    alignClass, anchorEdge, applySnap, refineWithAudio, sealEdge,
+    offsetProbe, chooseOffset, limitsFor,
     ALIGN_VERSION, DEFAULTS, CONFIDENCE
 };

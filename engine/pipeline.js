@@ -13,12 +13,14 @@
 
 const transcribe = require('./transcribe');
 const align = require('./align');
+const cutRefine = require('./cut-refine');
+const coherence = require('./coherence');
 const cutplan = require('./cutplan');
 const exporter = require('./export');
 const workspace = require('./workspace');
 const onset = require('./vendor/audio-onset');
 
-const STAGES = ['transcribir', 'alinear', 'cortar', 'exportar'];
+const STAGES = ['transcribir', 'alinear', 'afinar', 'cortar', 'exportar', 'revisar'];
 
 /**
  * @param {object} params
@@ -37,6 +39,10 @@ async function processClass(params) {
     if (!cls.sequenceName) {
         return { ok: false, error: 'La clase no tiene XML: no hay secuencia que generar.' };
     }
+
+    // Los Backup viejos tenían una carpeta por clase. Se pasan al formato plano
+    // antes de buscar nada, para no dar por perdido un transcript que está.
+    workspace.migrateBackup(root);
 
     // ── 1. Transcribir ──
     let transcript = null;
@@ -69,17 +75,41 @@ async function processClass(params) {
     const info = cls.liveMixPath ? onset.wavInfo(cls.liveMixPath) : null;
     const wav = info ? { file: cls.liveMixPath, info } : null;
 
+    const words = transcript ? transcript.words : [];
     const alignResult = align.alignClass({
         blocks: cls.blocks || [],
-        words: transcript ? transcript.words : [],
+        words,
         wav,
         classNumber: cls.classNumber,
         clapMarkerSec: cls.clapSec,
         durationSec: cls.durationSec,
         options: { fps: cls.fps || 30 }
     });
-    workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'align'), alignResult);
     warnings.push(...alignResult.warnings);
+
+    // ── 2b. Afinar los bordes dudosos ──
+    // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
+    // los que tienen más de una opción razonable, que es donde el criterio cambia
+    // el resultado.
+    if (words.length) {
+        notify('afinar', {});
+        try {
+            await cutRefine.refineClass({
+                alignResult,
+                words,
+                wav,
+                options: { fps: cls.fps || 30 },
+                useAi: params.useAi !== false,
+                signal,
+                onProgress: info => notify('afinar', {
+                    percent: Math.round((info.index / Math.max(1, info.total)) * 100)
+                })
+            });
+        } catch (err) {
+            warnings.push({ code: 'afinado_fallo', message: `No se pudieron afinar los bordes: ${err.message}` });
+        }
+    }
+    workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'align'), alignResult);
 
     // ── 3. Plan de cortes ──
     notify('cortar', {});
@@ -102,6 +132,34 @@ async function processClass(params) {
         return { ok: false, error: `No se pudo escribir el XML: ${err.message}` };
     }
 
+    // ── 5. ¿La clase cortada se entiende? ──
+    // Se hace al final y sobre el resultado: un bloque puede estar perfecto y la
+    // clase entera no cerrar.
+    let review = null;
+    if (words.length) {
+        notify('revisar', {});
+        try {
+            review = await coherence.reviewClass({
+                alignResult,
+                words,
+                useAi: params.useAi !== false,
+                signal,
+                onProgress: info => notify('revisar', {
+                    percent: Math.round((info.chunk / Math.max(1, info.total)) * 100)
+                })
+            });
+            workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'coherence'), review);
+            for (const finding of review.findings.filter(f => f.gravedad === 'alta')) {
+                warnings.push({
+                    code: 'coherencia',
+                    message: `Bloque ${finding.bloque}: ${finding.detalle}`
+                });
+            }
+        } catch (err) {
+            warnings.push({ code: 'revision_fallo', message: `No se pudo revisar el guion: ${err.message}` });
+        }
+    }
+
     return {
         ok: true,
         sequenceName: cls.sequenceName,
@@ -110,6 +168,10 @@ async function processClass(params) {
             : null,
         offset: alignResult.offset,
         stats: alignResult.stats,
+        refine: alignResult.refine || null,
+        coherence: review
+            ? { findings: review.findings.length, stats: review.stats, wordCount: review.wordCount }
+            : null,
         totals: plan.totals,
         exported,
         warnings

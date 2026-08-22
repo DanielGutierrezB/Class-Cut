@@ -20,6 +20,7 @@ const pipeline = require('./engine/pipeline');
 const workspace = require('./engine/workspace');
 const review = require('./engine/review');
 const waveform = require('./engine/waveform');
+const aiLocal = require('./engine/ai-local');
 
 let mainWindow = null;
 let currentRun = null;
@@ -119,7 +120,13 @@ ipcMain.handle('app-info', () => ({
     platform: process.platform
 }));
 
-ipcMain.handle('doctor', () => paths.doctor());
+ipcMain.handle('doctor', async () => {
+    const report = paths.doctor();
+    // La IA es opcional: sin ella la app corta igual, solo pierde el criterio en
+    // los bordes dudosos y la lectura del guion. Por eso se informa aparte.
+    report.ai = await aiLocal.probe();
+    return report;
+});
 
 ipcMain.handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -234,7 +241,7 @@ ipcMain.handle('audition', async (event, { path: wavPath, startSec, durationSec 
  * mientras el editor miraba la tabla.
  */
 ipcMain.handle('process', async (event, payload) => {
-    const { root, ids = [], viewMap, force } = payload || {};
+    const { root, ids = [], viewMap, force, useAi } = payload || {};
     if (currentRun) return { ok: false, error: 'Ya hay un procesamiento en curso.' };
 
     const scan = scanner.scan(root);
@@ -262,6 +269,7 @@ ipcMain.handle('process', async (event, payload) => {
             classes: usable,
             viewMap,
             force,
+            useAi: useAi !== false,
             signal: controller.signal,
             onStage: (stage, info) => send('process-stage', { stage, ...info }),
             onClass: (phase, info) => send('process-class', {

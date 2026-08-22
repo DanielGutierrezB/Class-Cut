@@ -31,6 +31,7 @@ function loadReview(params) {
     }
     const align = workspace.readJson(workspace.artifact(root, sequenceName, 'align'));
     const transcript = workspace.readJson(workspace.artifact(root, sequenceName, 'transcript'));
+    const coherence = workspace.readJson(workspace.artifact(root, sequenceName, 'coherence'));
 
     const wave = cls.liveMixPath ? waveform.peaks(cls.liveMixPath, params.buckets || 3000) : null;
 
@@ -44,11 +45,34 @@ function loadReview(params) {
         cameras: (cls.videos || []).map((v, i) => ({ index: i, name: v.name })),
         cutplan,
         offset: align ? align.offset : null,
+        refine: align ? align.refine : null,
+        // Los bordes traen quién los decidió (la nota, una regla o el modelo) y
+        // por qué; el visor lo muestra al lado de cada bloque.
+        edges: align ? align.blocks.map(b => ({
+            index: b.index,
+            in: edgeSummary(b.in),
+            out: edgeSummary(b.out)
+        })) : [],
+        coherence: coherence
+            ? { blocks: coherence.blocks, findings: coherence.findings, wordCount: coherence.wordCount, stats: coherence.stats }
+            : null,
         // Las palabras enteras de una clase de una hora son varios MB y el visor
         // solo muestra el texto alrededor del bloque que se está mirando: van las
         // frases, que son cien veces menos.
         segments: transcript ? transcript.segments : [],
         waveform: wave
+    };
+}
+
+function edgeSummary(edge) {
+    if (!edge) return null;
+    return {
+        decidedBy: edge.decidedBy || 'nota',
+        reason: edge.reason || '',
+        snap: edge.snap ? edge.snap.how : null,
+        chatterRemoved: edge.chatterRemoved || null,
+        refine: edge.refine || null,
+        score: edge.score
     };
 }
 

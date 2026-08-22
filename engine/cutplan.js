@@ -75,6 +75,7 @@ function buildCutplan(params) {
             timelineStartSec: keep ? round(timelineSec) : null,
             timelineEndSec: keep ? round(timelineSec + durationSecBlock) : null,
             view,
+            color: block.color,
             cameraIndex,
             note: block.note || '',
             cueIn: block.cueIn || '',

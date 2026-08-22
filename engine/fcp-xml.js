@@ -17,6 +17,14 @@
  * los dos editores.
  */
 
+// Etiquetas de color de clip. Son los nombres nativos de Premiere; el orden es
+// el que se le asigna a la 1ª, 2ª, 3ª… fuente de video, y como el Rodecaster
+// numera igual en todas las clases, cada cámara conserva su color en el curso
+// entero. Resolve ignora esta etiqueta al importar (ver resolve/README.md).
+const CLIP_LABELS = [
+    'Cerulean', 'Rose', 'Mango', 'Forest', 'Purple', 'Iris', 'Caribbean', 'Lavender'
+];
+
 // Premiere guarda los colores de marcador como enteros; el XML de intercambio los
 // quiere como componentes de 16 bits. Este es el mapa que entienden los dos NLE.
 const MARKER_COLORS = {
@@ -161,6 +169,9 @@ class FileRegistry {
         const name = xmlSafe(source.name || source.path.split('/').pop());
         const duration = toFrames(source.durationSec, this.fps);
         const fileXml = this.fileXml(source);
+        const label = source.label
+            ? `<labels><label2>${xmlSafe(source.label)}</label2></labels>`
+            : '';
         const videoTrack = source.audioOnly ? '' :
             `<video><track><clipitem id="bin-v-${entry.id}"><name>${name}</name>` +
             `<file id="${entry.id}"/></clipitem></track></video>`;
@@ -173,7 +184,7 @@ class FileRegistry {
         return `        <clip id="masterclip-bin-${entry.id}">` +
             `<masterclipid>${entry.masterclip}</masterclipid>` +
             `<name>${name}</name><duration>${duration}</duration>${rateXml(this.fps)}` +
-            `${fileXml}<media>${videoTrack}${audioTrack}</media></clip>\n`;
+            `${label}${fileXml}<media>${videoTrack}${audioTrack}</media></clip>\n`;
     }
 }
 
@@ -185,6 +196,11 @@ function clipItemXml(params) {
     const sourceTrack = kind === 'audio'
         ? '<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>'
         : '';
+    // La etiqueta de color, para distinguir de un vistazo qué fuente es cada clip
+    // en una secuencia con los dieciséis trozos de la clase.
+    const label = source.label
+        ? `<labels><label2>${xmlSafe(source.label)}</label2></labels>`
+        : '';
 
     return `        <clipitem id="${id}" frameBlend="FALSE">` +
         `<masterclipid>${entry.masterclip}</masterclipid>` +
@@ -193,11 +209,28 @@ function clipItemXml(params) {
         `<duration>${sourceDuration}</duration>${rateXml(fps)}` +
         `<start>${startFrame}</start><end>${endFrame}</end>` +
         `<in>${inFrame}</in><out>${outFrame}</out>` +
-        `${fileXml}${sourceTrack}</clipitem>\n`;
+        `${label}${fileXml}${sourceTrack}</clipitem>\n`;
+}
+
+/**
+ * El color de un marcador, venga como nombre o como el entero de Premiere.
+ *
+ * `pproColor` es ARGB empaquetado: el `4281740498` que el Rodecaster le pone a
+ * los marcadores PV es RGB(54, 44, 210). Se pasa a componentes de 16 bits (x257)
+ * y el color llega idéntico al que eligió el director de contenido.
+ */
+function colorComponents(color) {
+    if (typeof color === 'number' && isFinite(color)) {
+        const red = (color >>> 16) & 255;
+        const green = (color >>> 8) & 255;
+        const blue = color & 255;
+        return { alpha: 0, red: red * 257, green: green * 257, blue: blue * 257 };
+    }
+    return MARKER_COLORS[String(color || 'white').toLowerCase()] || MARKER_COLORS.white;
 }
 
 function markerXml(marker, fps) {
-    const color = MARKER_COLORS[String(marker.color || 'white').toLowerCase()] || MARKER_COLORS.white;
+    const color = colorComponents(marker.color);
     const inFrame = toFrames(marker.startSec, fps);
     // Un marcador con duración lleva su `out`; los de punto usan -1, que es como
     // el formato dice "sin duración".
@@ -322,6 +355,8 @@ module.exports = {
     rateFor,
     pathUrl,
     xmlSafe,
+    colorComponents,
     MARKER_COLORS,
+    CLIP_LABELS,
     FileRegistry
 };

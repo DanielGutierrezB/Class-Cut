@@ -328,7 +328,9 @@ async function startProcessing() {
     showView('run');
     setStep(3);
     $('run-title').textContent = selected.length === 1 ? 'Procesando 1 clase' : `Procesando ${selected.length} clases`;
-    $('run-sub').textContent = 'La transcripción es lo único que tarda; el resto es cálculo.';
+    $('run-sub').textContent = $('use-ai').checked
+        ? 'Transcribe, alinea, afina los cortes dudosos y lee la clase entera.'
+        : 'Solo reglas: la IA local está apagada.';
     $('btn-cancel').hidden = false;
     $('btn-open-output').hidden = true;
     $('btn-back').hidden = true;
@@ -338,7 +340,8 @@ async function startProcessing() {
 
     const response = await window.cc.process({
         root: state.scan.root,
-        ids: selected.map(c => c.id)
+        ids: selected.map(c => c.id),
+        useAi: $('use-ai').checked
     });
 
     finishProcessing(response);
@@ -482,6 +485,7 @@ async function openReview(id) {
     rev.selected = Math.max(0, rev.segments.findIndex(s => s.confidence !== 'alta'));
 
     fillClassPicker();
+    setReviewTab(rev.tab || 'cortes');
     renderReview();
 }
 
@@ -506,7 +510,9 @@ function renderReview() {
     renderOverview();
     renderZoom();
     renderEdges();
+    renderDecided();
     renderTranscript();
+    if (rev.tab === 'guion') renderScript();
 }
 
 function renderReviewList() {
@@ -713,6 +719,129 @@ function renderEdges() {
     }
 }
 
+const DECIDED_LABEL = {
+    nota: 'la nota del CD',
+    regla: 'una regla',
+    ia: 'la IA local'
+};
+
+function renderDecided() {
+    const segment = rev.segments[rev.selected];
+    const edges = (rev.data.edges || []).find(e => e.index === segment.blockIndex);
+    if (!edges) {
+        $('rev-decided').innerHTML = '<span class="cell-dim">Sin detalle del alineado.</span>';
+        return;
+    }
+
+    const row = (label, edge) => {
+        if (!edge) return '';
+        const parts = [];
+        if (edge.reason) parts.push(esc(edge.reason));
+        if (edge.chatterRemoved && edge.chatterRemoved.length) {
+            parts.push(`Se sacó del bloque: ${esc(edge.chatterRemoved.join(', '))}`);
+        }
+        if (edge.refine && edge.refine.reason) parts.push(esc(edge.refine.reason));
+        return `
+        <div class="decided-row">
+            <span class="decided-kind">${label}</span>
+            <span class="badge badge-by-${esc(edge.decidedBy)}">${esc(DECIDED_LABEL[edge.decidedBy] || edge.decidedBy)}</span>
+            <span class="decided-text">${parts.join(' · ') || '—'}</span>
+        </div>`;
+    };
+
+    $('rev-decided').innerHTML = row('Entrada', edges.in) + row('Salida', edges.out);
+}
+
+function renderScript() {
+    const data = rev.data;
+    const coherence = data.coherence;
+    const host = $('rev-script');
+
+    if (!coherence || !coherence.blocks || !coherence.blocks.length) {
+        host.innerHTML = `<div class="script-head">
+            <div class="script-title">Guion final</div>
+            <p class="script-sub">Esta clase se procesó sin revisión del guion. Volvé a procesarla con la IA encendida para leerla de corrido.</p>
+        </div>`;
+        return;
+    }
+
+    const byBlock = new Map();
+    for (const finding of coherence.findings || []) {
+        if (!byBlock.has(finding.bloque)) byBlock.set(finding.bloque, []);
+        byBlock.get(finding.bloque).push(finding);
+    }
+
+    const total = (coherence.findings || []).length;
+    const minutes = Math.round(coherence.blocks.reduce((sum, b) => sum + b.durationSec, 0) / 60);
+
+    const body = coherence.blocks.map(block => {
+        const findings = byBlock.get(block.n) || [];
+        const worstLevel = findings.some(f => f.gravedad === 'alta') ? 'alta'
+            : findings.some(f => f.gravedad === 'media') ? 'media'
+                : (findings.length ? 'baja' : '');
+
+        const notes = findings.map(f => `
+            <div class="finding ${esc(f.gravedad)}">
+                <div class="finding-head">
+                    <span class="finding-tipo">${esc(TIPO_LABEL[f.tipo] || f.tipo)}</span>
+                    <span class="badge ${f.fuente === 'ia' ? 'badge-by-ia' : 'badge-by-regla'}">${f.fuente === 'ia' ? 'IA' : 'regla'}</span>
+                </div>
+                <div>${esc(f.detalle)}</div>
+                ${f.sugerencia ? `<div class="finding-fix">${esc(f.sugerencia)}</div>` : ''}
+            </div>`).join('');
+
+        return `
+        <div class="script-block ${worstLevel ? `has-${worstLevel}` : ''}" data-block="${block.index}">
+            <div class="script-n">${block.n}</div>
+            <div>
+                ${block.note ? `<div class="script-note">${esc(block.note)}</div>` : ''}
+                <div class="script-text">${esc(block.text) || '<span class="cell-dim">(sin habla)</span>'}</div>
+                ${notes}
+            </div>
+        </div>`;
+    }).join('');
+
+    host.innerHTML = `
+        <div class="script-head">
+            <div class="script-title">La clase cortada, leída de corrido</div>
+            <p class="script-sub">
+                ${plural(coherence.blocks.length, 'bloque', 'bloques')} · ${minutes} min · ${coherence.wordCount} palabras ·
+                ${total ? `${plural(total, 'cosa para mirar', 'cosas para mirar')}` : 'sin hallazgos'}
+            </p>
+        </div>
+        <div class="script-body">${body}</div>`;
+
+    for (const el of host.querySelectorAll('.script-block')) {
+        el.addEventListener('click', () => {
+            const index = Number(el.dataset.block);
+            const position = rev.segments.findIndex(s => s.blockIndex === index);
+            if (position === -1) return;
+            rev.selected = position;
+            setReviewTab('cortes');
+            renderReview();
+        });
+    }
+}
+
+const TIPO_LABEL = {
+    idea_colgando: 'Idea colgando',
+    repetido: 'Se dice dos veces',
+    empalme: 'Empalme raro',
+    conector: 'Conector sin antecedente',
+    orden: 'Orden que no fluye',
+    otro: 'Para mirar'
+};
+
+function setReviewTab(tab) {
+    rev.tab = tab;
+    for (const button of document.querySelectorAll('#rev-tabs .tab')) {
+        button.classList.toggle('is-on', button.dataset.tab === tab);
+    }
+    $('rev-cuts').style.display = tab === 'cortes' ? '' : 'none';
+    $('rev-script').hidden = tab !== 'guion';
+    if (tab === 'guion') renderScript();
+}
+
 function renderTranscript() {
     const segment = rev.segments[rev.selected];
     if (!segment) return;
@@ -778,6 +907,9 @@ async function saveReviewChanges() {
 }
 
 function wireReview() {
+    for (const button of document.querySelectorAll('#rev-tabs .tab')) {
+        button.onclick = () => setReviewTab(button.dataset.tab);
+    }
     $('rev-back').onclick = () => {
         showView('run');
         setStep(5);
@@ -924,6 +1056,15 @@ async function showDoctor() {
                 : `<span class="badge ${tool.required ? 'badge-err' : 'badge-warn'}">${tool.required ? 'falta' : 'todavía no hace falta'}</span> <span class="cell-dim">buscado en: ${esc(tool.searched.join(', '))}</span>`
         ]);
     }
+    if (doc.ai) {
+        rows.push([
+            'IA local (Ollama)',
+            doc.ai.ok && doc.ai.hasModel
+                ? `<span class="badge badge-ok">lista</span> <span class="mono">${esc(doc.ai.model)}</span>`
+                : `<span class="badge badge-warn">no disponible</span> <span class="cell-dim">${esc(doc.ai.reason)}</span>`
+        ]);
+    }
+
     openModal('Diagnóstico', `<div class="kv">${rows.map(([k, v]) =>
         `<div class="kv-row"><div class="kv-key">${esc(k)}</div><div class="kv-val">${v}</div></div>`).join('')}</div>`);
 }

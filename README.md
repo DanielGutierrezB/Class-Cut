@@ -15,12 +15,42 @@ dijo, calcula los cortes y escribe el XML. Nada del material original se toca.
    `Video/` al lado), no por el nombre de la carpeta.
 2. **Clases** — tabla con lo que encontró: número de clase (sale del nombre de
    secuencia del XML), duración real medida con ffprobe, bloques del CD y avisos.
-3. **Procesar** — transcribe `Live-Mix.wav` con Whisper local, ubica la claqueta
-   y alinea cada marcador con el audio.
+3. **Procesar** — transcribe `Live-Mix.wav` con Whisper local, ubica la claqueta,
+   alinea cada marcador con el audio y decide dónde el corte tiene sentido (ver
+   **Cortes con criterio**).
 4. **Revisar cortes** — waveform, bloques y transcript para ajustar antes de
-   exportar.
+   exportar, y el **guion final**: la clase cortada leída de corrido, con lo que
+   no cierra marcado en su bloque.
 5. **Exportar XML** — una sola carpeta `The Cutter/` en la raíz agregada, con el
    XML final de cada clase y un `Backup/` con lo que se usó para generarlo.
+
+## Cortes con criterio
+
+Cortar donde el director de contenido puso la marca no alcanza: sus marcas están
+cerca, pero el bloque termina diciendo "Pausa" o se corta a mitad de frase.
+Medido sobre las 174 tomas del curso antes de arreglarlo: **66 terminaban con una
+orden al editor** y **103 quedaban colgando** a mitad de idea.
+
+El corte se decide en tres capas, de la más barata a la más cara:
+
+1. **Reglas** ([engine/speech-edges.js](engine/speech-edges.js)) — los límites de
+   palabra impiden que el colchón de aire se lleve la palabra vecina, se saca lo
+   que el profesor le dice al editor ("pausa", "corte", el conteo) y el borde se
+   lleva a donde una frase abre o cierra. Esto solo arregla el 93%.
+2. **Criterio** ([engine/cut-refine.js](engine/cut-refine.js)) — cuando quedan
+   dos cortes defendibles, decide el modelo local. No se le pide un tiempo: se le
+   dan los cortes posibles **numerados** dentro de la transcripción y contesta un
+   número, así no puede inventar un timecode ni cortar a mitad de palabra. Si
+   contesta cualquier otra cosa, manda la regla.
+3. **Sentido** ([engine/coherence.js](engine/coherence.js)) — con la clase ya
+   cortada se arma el guion final —solo lo que sobrevive, en orden— y se lee
+   buscando lo que ninguna regla ve: una idea que quedó colgando, algo dicho dos
+   veces porque sobrevivieron dos tomas, un bloque que abre con un "Y entonces"
+   cuyo antecedente se eliminó. Los hallazgos apuntan a **números de bloque** y se
+   validan contra los que existen.
+
+Todo es local (Ollama). Si no está corriendo, la app corta igual con las reglas y
+lo dice en **Diagnóstico**; la casilla "Afinar con IA local" lo apaga a mano.
 
 ## Estado
 
@@ -55,7 +85,15 @@ engine/
   course-scan.js         descubre clases por firma de estructura
   rodecaster-xml.js      parser de marcadores (pares IN/OUT, claqueta, cues)
   media-probe.js         duración y frame rate reales con ffprobe
+  transcribe.js          Whisper local con VAD
+  align.js               claqueta, anclaje de cada marcador e invariantes
+  speech-edges.js        habla del director, límites de palabra, cierre de frase
+  cut-refine.js          candidatos de corte y elección (regla o IA)
+  coherence.js           guion final y revisión de sentido
+  ai-local.js            cliente de Ollama, con todo lo que dice validado
+  cutplan.js · export.js · fcp-xml.js    plan de cortes y XML de salida
   paths.js               dónde están ffmpeg/ffprobe/whisper en esta máquina
+resolve/                 script de color de clips para DaVinci (ver su README)
 tests/                   corredor propio: node tests/run.js
 ```
 
@@ -70,6 +108,13 @@ Para desarrollo alcanza con Homebrew:
 ```bash
 brew install ffmpeg whisper-cpp
 mkdir -p bin/mac/models   # y dejar ahí ggml-large-v3-turbo.bin y el modelo de VAD
+```
+
+La IA es opcional y también local:
+
+```bash
+brew install ollama && ollama serve
+ollama pull qwen3.8:27b     # o el que prefieras: se configura en ai-local.js
 ```
 
 Los modelos: `ggml-large-v3-turbo.bin` (1,5 GB) y `ggml-silero-v5.1.2.bin`
@@ -104,3 +149,9 @@ lo que tiene que prometer.
   OUT, que a veces cae antes.
 - El número de clase vive en el nombre de secuencia del XML: la carpeta
   "FIRS CLASS" es internamente la clase 13.
+- El colchón de aire necesita saber dónde está la palabra vecina. Sin ese límite
+  se comía lo que venía después: 66 de 174 tomas terminaban con el "Pausa" que el
+  profesor le dice al editor, y en el corte se oía "Pau—".
+- Los cortes posibles no pueden salir solo de las pausas del audio: en un tramo
+  hablado de corrido no hay ninguna, y el cierre bueno —el punto final de la
+  frase— se queda fuera de la lista. Hay que ofrecerlo aparte.

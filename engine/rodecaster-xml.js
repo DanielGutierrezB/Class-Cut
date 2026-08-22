@@ -197,7 +197,8 @@ function parseXml(text, options) {
             seconds: clapMarkers[0].inFrame / timebase,
             markerCount: clapMarkers.length,
             name: clapMarkers[0].name,
-            comment: clapMarkers[0].comment
+            comment: clapMarkers[0].comment,
+            color: clapMarkers[0].color
         };
     } else {
         warnings.push({
