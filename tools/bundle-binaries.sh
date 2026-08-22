@@ -151,7 +151,7 @@ bundle_tool() {
 # M3 usa instrucciones (i8mm) que en un M1 son ilegales. El editor no se entera
 # de eso hasta que la app le revienta al transcribir.
 WHISPER_ARCH="armv8.2-a+dotprod+fp16"
-WHISPER_SRC="${WHISPER_SRC:-$PWD/build/whisper.cpp}"
+WHISPER_SRC="${WHISPER_SRC:-$PWD/vendor/whisper.cpp}"
 
 build_whisper() {
     if ! command -v cmake > /dev/null; then

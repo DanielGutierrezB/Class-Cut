@@ -4,7 +4,8 @@ dist/
 # tools/bundle-ollama.sh: son varios GB y no son código.
 bin/
 # El árbol de whisper.cpp que se clona y compila para armar el bundle.
-build/
+# (no en build/, que es donde electron-builder espera icon.icns y entitlements)
+vendor/whisper.cpp/
 *.log
 .DS_Store
 tests/tmp/

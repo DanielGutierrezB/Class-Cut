@@ -19,9 +19,8 @@ const scanner = require('../engine/course-scan');
 const probe = require('../engine/media-probe');
 const transcribe = require('../engine/transcribe');
 const onset = require('../engine/vendor/audio-onset');
-const align = require('../engine/align');
-const cutRefine = require('../engine/cut-refine');
-const coherence = require('../engine/coherence');
+const decidir = require('../engine/decidir');
+const ollamaServer = require('../engine/ollama-server');
 const ai = require('../engine/ai-local');
 
 const root = process.argv[2];
@@ -37,7 +36,9 @@ if (!root) {
 
 const wanted = (arg('clases') || '1,5,12').split(',').map(Number);
 const models = (arg('modelos') || 'qwen3:4b').split(',').filter(Boolean);
-const baseline = arg('base') || ai.DEFAULTS.model;
+// El de referencia es el mejor de la lista de preferencia: es contra el que hay
+// que justificar empaquetar uno más chico.
+const baseline = arg('base') || ollamaServer.PREFERENCE[0];
 
 /** Los bordes de una clase, en frames, que es la unidad en la que importa. */
 function edgesOf(alignResult, fps) {
@@ -121,18 +122,17 @@ function compare(base, other) {
     }
     console.log(`\r${prepared.length} clases listas · ${prepared.reduce((n, p) => n + p.words.length, 0)} palabras\n`);
 
-    const freshAlign = p => align.alignClass({
-        blocks: p.cls.blocks || [],
-        words: p.words,
-        wav: p.wav,
-        classNumber: p.cls.classNumber,
-        clapMarkerSec: p.cls.clapSec,
-        durationSec: p.cls.durationSec,
-        options: { fps: p.fps }
-    });
+    // El servidor se levanta una vez y de ahí sale un cliente por modelo: son
+    // todos el mismo Ollama, y es el que trae la app —no el del editor—, que es
+    // la única forma de que lo medido sea lo que se distribuye.
+    const arranque = await ollamaServer.ensure({});
+    if (!arranque.cliente) {
+        console.error(`No hay modelo local: ${arranque.reason}`);
+        process.exit(1);
+    }
+    const url = arranque.cliente.url;
 
     async function runWith(model) {
-        ai.configure({ model });
         const started = Date.now();
         const stats = { consultas: 0, fallosDelModelo: 0, cambiados: 0 };
         const edges = new Map();
@@ -140,14 +140,17 @@ function compare(base, other) {
         let findings = 0;
 
         for (const p of prepared) {
-            const alignResult = freshAlign(p);
-            const s = await cutRefine.refineClass({
-                alignResult, words: p.words, wav: p.wav,
-                options: { fps: p.fps }, useAi: true
+            // Exactamente lo que corre la app, no una copia: si esto se separa
+            // del pipeline, el banco mide un producto que no existe.
+            const { alignResult, review } = await decidir.decidirCortes({
+                cls: p.cls, words: p.words, wav: p.wav,
+                ai: ai.cliente({ url, model })
             });
-            stats.consultas += s.consultas;
-            stats.fallosDelModelo += s.fallosDelModelo;
-            stats.cambiados += s.cambiados;
+
+            const s = alignResult.refine || {};
+            stats.consultas += s.consultas || 0;
+            stats.fallosDelModelo += s.fallosDelModelo || 0;
+            stats.cambiados += s.cambiados || 0;
             for (const [k, v] of edgesOf(alignResult, p.fps)) {
                 edges.set(`${p.cls.classNumber}/${k}`, v);
             }
@@ -155,9 +158,8 @@ function compare(base, other) {
                 for (const kind of ['IN', 'OUT']) {
                     const edge = kind === 'IN' ? block.in : block.out;
                     if (!edge) continue;
-                    const at = kind === 'IN' ? block.startSec : block.endSec;
                     detail.set(`${p.cls.classNumber}/${block.index}:${kind}`, {
-                        at,
+                        at: kind === 'IN' ? block.startSec : block.endSec,
                         words: p.words,
                         kind,
                         reason: edge.refine ? edge.refine.reason : '',
@@ -165,10 +167,7 @@ function compare(base, other) {
                     });
                 }
             }
-            const review = await coherence.reviewClass({
-                alignResult, words: p.words, useAi: true
-            });
-            findings += (review.findings || []).length;
+            findings += review ? (review.findings || []).length : 0;
         }
         return { model, edges, detail, stats, findings, secs: (Date.now() - started) / 1000 };
     }

@@ -12,16 +12,14 @@
  */
 
 const transcribe = require('./transcribe');
-const align = require('./align');
-const cutRefine = require('./cut-refine');
-const coherence = require('./coherence');
+const decidir = require('./decidir');
 const cutplan = require('./cutplan');
 const exporter = require('./export');
 const workspace = require('./workspace');
 const onset = require('./vendor/audio-onset');
 const ollamaServer = require('./ollama-server');
 
-const STAGES = ['transcribir', 'alinear', 'afinar', 'cortar', 'exportar', 'revisar'];
+const STAGES = ['transcribir', 'alinear', 'afinar', 'revisar', 'cortar', 'exportar'];
 
 /**
  * @param {object} params
@@ -71,63 +69,23 @@ async function processClass(params) {
         });
     }
 
-    // ── 2. Alinear ──
-    notify('alinear', {});
+    // ── 2. Decidir los cortes ──
     const info = cls.liveMixPath ? onset.wavInfo(cls.liveMixPath) : null;
     const wav = info ? { file: cls.liveMixPath, info } : null;
-
     const words = transcript ? transcript.words : [];
-    const alignResult = align.alignClass({
-        blocks: cls.blocks || [],
-        words,
-        wav,
-        classNumber: cls.classNumber,
-        clapMarkerSec: cls.clapSec,
-        durationSec: cls.durationSec,
-        options: { fps: cls.fps || 30 }
+
+    const decided = await decidir.decidirCortes({
+        cls, words, wav, signal,
+        ai: params.ai || null,
+        onStage: notify
     });
-    warnings.push(...alignResult.warnings);
+    const alignResult = decided.alignResult;
+    warnings.push(...decided.warnings);
 
-    // ── 2b. Afinar los bordes dudosos ──
-    // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
-    // los que tienen más de una opción razonable, que es donde el criterio cambia
-    // el resultado.
-    //
-    // El modelo se levanta acá y no al abrir la app: tenerlo cargado ocupa
-    // memoria, y mirar una clase ya procesada no tiene por qué costar eso.
-    // `ensure` recuerda el arranque, así que de la segunda clase en adelante no
-    // cuesta nada.
-    let useAi = params.useAi !== false;
-    if (useAi && words.length) {
-        const model = await ollamaServer.ensure({ signal });
-        useAi = model.ok;
-        if (!model.ok) {
-            warnings.push({
-                code: 'sin_modelo',
-                message: `${model.reason} Los cortes salen con las reglas, sin criterio en los casos dudosos.`
-            });
-        }
-    }
-
-    if (words.length) {
-        notify('afinar', {});
-        try {
-            await cutRefine.refineClass({
-                alignResult,
-                words,
-                wav,
-                options: { fps: cls.fps || 30 },
-                useAi,
-                signal,
-                onProgress: info => notify('afinar', {
-                    percent: Math.round((info.index / Math.max(1, info.total)) * 100)
-                })
-            });
-        } catch (err) {
-            warnings.push({ code: 'afinado_fallo', message: `No se pudieron afinar los bordes: ${err.message}` });
-        }
-    }
     workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'align'), alignResult);
+    if (decided.review) {
+        workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'coherence'), decided.review);
+    }
 
     // ── 3. Plan de cortes ──
     notify('cortar', {});
@@ -150,34 +108,7 @@ async function processClass(params) {
         return { ok: false, error: `No se pudo escribir el XML: ${err.message}` };
     }
 
-    // ── 5. ¿La clase cortada se entiende? ──
-    // Se hace al final y sobre el resultado: un bloque puede estar perfecto y la
-    // clase entera no cerrar.
-    let review = null;
-    if (words.length) {
-        notify('revisar', {});
-        try {
-            review = await coherence.reviewClass({
-                alignResult,
-                words,
-                useAi,
-                signal,
-                onProgress: info => notify('revisar', {
-                    percent: Math.round((info.chunk / Math.max(1, info.total)) * 100)
-                })
-            });
-            workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'coherence'), review);
-            for (const finding of review.findings.filter(f => f.gravedad === 'alta')) {
-                warnings.push({
-                    code: 'coherencia',
-                    message: `Bloque ${finding.bloque}: ${finding.detalle}`
-                });
-            }
-        } catch (err) {
-            warnings.push({ code: 'revision_fallo', message: `No se pudo revisar el guion: ${err.message}` });
-        }
-    }
-
+    const review = decided.review;
     return {
         ok: true,
         sequenceName: cls.sequenceName,
@@ -200,24 +131,51 @@ async function processClass(params) {
 async function processClasses(params) {
     const { classes = [], onClass, onStage, signal } = params;
     const results = [];
-    for (let i = 0; i < classes.length; i++) {
-        if (signal && signal.aborted) break;
-        const cls = classes[i];
-        if (onClass) onClass('empieza', { index: i, total: classes.length, cls });
 
-        const result = await processClass({
-            ...params,
-            cls,
-            // Quien escucha necesita saber de qué clase es cada etapa: procesar
-            // trece seguidas con un progreso anónimo no dice nada.
-            onStage: (stage, info) => {
-                if (onStage) onStage(stage, { ...info, id: cls.id, index: i, total: classes.length });
-            }
-        });
+    // Si el modelo está disponible es una propiedad de la corrida, no de cada
+    // clase: se levanta una vez para las trece. Preguntarlo por clase daba trece
+    // avisos idénticos que tapaban los que sí eran distintos.
+    const modelo = params.useAi === false
+        ? { cliente: null, reason: 'Criterio apagado a pedido.' }
+        : await ollamaServer.ensure({ signal });
+    const avisoDelModelo = modelo.cliente ? null : {
+        code: 'sin_modelo',
+        message: `${modelo.reason} Los cortes salen con las reglas, sin criterio en los casos dudosos.`
+    };
+    if (onClass) onClass('modelo', { modelo, aviso: avisoDelModelo });
 
-        results.push({ id: cls.id, ...result });
-        if (onClass) onClass('termina', { index: i, total: classes.length, cls, result });
+    try {
+        for (let i = 0; i < classes.length; i++) {
+            if (signal && signal.aborted) break;
+            const cls = classes[i];
+            if (onClass) onClass('empieza', { index: i, total: classes.length, cls });
+
+            const result = await processClass({
+                ...params,
+                cls,
+                ai: modelo.cliente,
+                // Quien escucha necesita saber de qué clase es cada etapa:
+                // procesar trece seguidas con un progreso anónimo no dice nada.
+                onStage: (stage, info) => {
+                    if (onStage) onStage(stage, { ...info, id: cls.id, index: i, total: classes.length });
+                }
+            });
+
+            results.push({ id: cls.id, ...result });
+            if (onClass) onClass('termina', { index: i, total: classes.length, cls, result });
+        }
+    } finally {
+        // Lo que se levanta acá se baja acá. Dejarlo vivo entre corridas ahorra
+        // diez segundos de arranque y a cambio deja varios GB de modelo en
+        // memoria y un proceso hijo que no deja salir a quien nos llame desde la
+        // terminal. La app tiene además su propio apagado por si se la cierra en
+        // medio de una corrida.
+        ollamaServer.stop();
     }
+
+    // El aviso del modelo va una sola vez, en la primera clase, para que quien
+    // mire la lista lo vea sin que se repita trece veces.
+    if (avisoDelModelo && results.length) results[0].warnings.unshift(avisoDelModelo);
     return results;
 }
 

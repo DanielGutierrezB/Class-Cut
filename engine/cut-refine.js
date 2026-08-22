@@ -22,7 +22,6 @@ const precision = require('./vendor/marker-precision');
 const anchor = require('./vendor/marker-anchor');
 const onset = require('./vendor/audio-onset');
 const speech = require('./speech-edges');
-const ai = require('./ai-local');
 
 const DEFAULTS = {
     fps: 30,
@@ -181,7 +180,7 @@ function neighbourText(blocks, index, kind, words, options) {
  * Afina un borde. Devuelve siempre algo aplicable: si el modelo no está, no
  * contesta o contesta cualquier cosa, manda lo que ya había.
  *
- * @param {object} params { words, edge, block, blocks, index, kind, options, useAi }
+ * @param {object} params { words, edge, block, blocks, index, kind, options, ai }
  */
 async function refineEdge(params) {
     const { words, edge, block, blocks, index, kind, options } = params;
@@ -226,8 +225,8 @@ async function refineEdge(params) {
         return result;
     }
 
-    if (!params.useAi) {
-        result.reason = `hay ${usable.length} cortes parecidos y la IA está apagada: se deja donde está`;
+    if (!params.ai) {
+        result.reason = `hay ${usable.length} cortes parecidos y no hay modelo: se deja donde está`;
         return result;
     }
 
@@ -255,7 +254,7 @@ async function refineEdge(params) {
     });
 
     result.askedModel = true;
-    const response = await ai.ask({
+    const response = await params.ai.ask({
         system: prompt.systemMsg,
         prompt: prompt.prompt,
         signal: params.signal
@@ -280,7 +279,7 @@ async function refineEdge(params) {
  * Afina los bordes dudosos de una clase. Muta los bloques del alineado (que es el
  * objeto que después se guarda y se dibuja) y devuelve el resumen.
  *
- * @param {object} params { alignResult, words, options, useAi, onProgress, signal }
+ * @param {object} params { alignResult, words, options, ai, onProgress, signal }
  */
 /**
  * Vuelve a medir el frame contra el audio después de mover un borde.
@@ -320,7 +319,7 @@ async function refineClass(params) {
 
             const refined = await refineEdge({
                 words, edge, block, blocks, index: i, kind, options,
-                useAi: params.useAi,
+                ai: params.ai,
                 signal: params.signal
             });
 

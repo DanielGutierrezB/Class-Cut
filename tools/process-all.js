@@ -40,30 +40,43 @@ function fmt(seconds) {
 
     const started = Date.now();
     let ok = 0;
-    for (const cls of classes) {
-        process.stdout.write(`${cls.classNumber}. ${cls.sequenceName} `);
-        const result = await pipeline.processClass({
-            root: scan.root,
-            cls,
-            force,
-            onStage: (stage, info) => {
-                const detail = info.percent != null ? ` ${info.percent}%` : '';
-                process.stdout.write(`\r${cls.classNumber}. ${cls.sequenceName} · ${stage}${detail}          `);
-            }
-        });
+    let label = '';
 
-        if (!result.ok) {
-            console.log(`\r${cls.classNumber}. ${cls.sequenceName} · FALLÓ: ${result.error}          `);
-            continue;
+    // `processClasses` y no `processClass` en un bucle: el modelo local se
+    // levanta una vez para todo el lote, y es el mismo camino que corre la app.
+    await pipeline.processClasses({
+        root: scan.root,
+        classes,
+        force,
+        onStage: (stage, info) => {
+            const detail = info.percent != null ? ` ${info.percent}%` : '';
+            process.stdout.write(`\r${label} · ${stage}${detail}          `);
+        },
+        onClass: (phase, info) => {
+            if (phase === 'modelo') {
+                console.log(`modelo: ${info.modelo.reason}\n`);
+                return;
+            }
+            if (phase === 'empieza') {
+                label = `${info.cls.classNumber}. ${info.cls.sequenceName}`;
+                process.stdout.write(`${label} `);
+                return;
+            }
+
+            const { result, cls } = info;
+            if (!result.ok) {
+                console.log(`\r${label} · FALLÓ: ${result.error}          `);
+                return;
+            }
+            ok++;
+            const conf = result.stats.confidence;
+            console.log(`\r${label} · ` +
+                `${result.totals.kept} bloques · ${fmt(result.totals.keepSec)} de ${fmt(cls.durationSec)} · ` +
+                `desfase ${result.offset.appliedSec.toFixed(2)}s (${result.offset.source}) · ` +
+                `alta ${conf.alta} media ${conf.media} baja ${conf.baja}          `);
+            for (const w of result.warnings) console.log(`     ⚠ ${w.message}`);
         }
-        ok++;
-        const conf = result.stats.confidence;
-        console.log(`\r${cls.classNumber}. ${cls.sequenceName} · ` +
-            `${result.totals.kept} bloques · ${fmt(result.totals.keepSec)} de ${fmt(cls.durationSec)} · ` +
-            `desfase ${result.offset.appliedSec.toFixed(2)}s (${result.offset.source}) · ` +
-            `alta ${conf.alta} media ${conf.media} baja ${conf.baja}          `);
-        for (const w of result.warnings) console.log(`     ⚠ ${w.message}`);
-    }
+    });
 
     console.log(`\n${ok}/${classes.length} clases exportadas en ${fmt((Date.now() - started) / 1000)}`);
     console.log(`XML en ${scan.outputDir}`);

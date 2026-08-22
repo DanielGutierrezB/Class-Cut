@@ -219,8 +219,20 @@ function clipItemXml(params) {
  * los marcadores PV es RGB(54, 44, 210). Se pasa a componentes de 16 bits (x257)
  * y el color llega idéntico al que eligió el director de contenido.
  */
+/**
+ * El color vino como el entero nativo de Premiere y no como nombre.
+ *
+ * Lo deciden dos sitios —los componentes RGB y el `pproColor`— y tienen que
+ * decidir lo mismo: si discrepan se escribe un entero que no coincide con el RGB
+ * de al lado, y Premiere y Resolve muestran colores distintos para el mismo
+ * marcador. Que es exactamente lo que esto vino a evitar.
+ */
+function esEnteroDePremiere(color) {
+    return typeof color === 'number' && isFinite(color);
+}
+
 function colorComponents(color) {
-    if (typeof color === 'number' && isFinite(color)) {
+    if (esEnteroDePremiere(color)) {
         const red = (color >>> 16) & 255;
         const green = (color >>> 8) & 255;
         const blue = color & 255;
@@ -248,7 +260,7 @@ function markerXml(marker, fps) {
     //
     // `color` es el que entiende todo lo demás, Resolve incluido, que de
     // `pproColor` no sabe nada.
-    const ppro = typeof marker.color === 'number' && isFinite(marker.color)
+    const ppro = esEnteroDePremiere(marker.color)
         ? `<pproColor>${marker.color}</pproColor>`
         : '';
 

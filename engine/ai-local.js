@@ -13,8 +13,6 @@
  */
 
 const DEFAULTS = {
-    url: 'http://localhost:11434',
-    model: 'qwen3.8:27b',
     temperature: 0.2,
     numPredict: 400,
     timeoutMs: 120000,
@@ -23,20 +21,29 @@ const DEFAULTS = {
     keepAlive: '10m'
 };
 
-let settings = { ...DEFAULTS };
-
-function configure(options) {
-    settings = { ...settings, ...(options || {}) };
-    return settings;
-}
-
-function current() {
-    return { ...settings };
+/**
+ * Un cliente atado a UN servidor y UN modelo.
+ *
+ * No hay configuración global a propósito. Con un singleton, `refineClass` decía
+ * "usá la IA" y a qué servidor le hablaba dependía de quién lo hubiera
+ * configurado antes: el banco de pruebas terminaba midiendo contra el Ollama del
+ * editor en vez del que trae la app, que es justo lo que este código promete no
+ * tocar. Si el cliente se pasa como parámetro, eso no se puede escribir.
+ *
+ * @param {{url:string, model:string}} config
+ */
+function cliente(config) {
+    const settings = { ...DEFAULTS, ...config };
+    return {
+        url: settings.url,
+        model: settings.model,
+        ask: params => ask({ ...settings, ...params }),
+        probe: () => probe(settings)
+    };
 }
 
 /** ¿Hay un Ollama escuchando y tiene el modelo que vamos a pedir? */
-async function probe(options) {
-    const config = { ...settings, ...(options || {}) };
+async function probe(config) {
     try {
         const response = await fetch(`${config.url}/api/tags`, {
             signal: AbortSignal.timeout(4000)
@@ -68,11 +75,11 @@ async function probe(options) {
 
 /**
  * Una pregunta, una respuesta en JSON.
- * @param {object} params { system, prompt, numPredict, signal, model }
+ * @param {object} config { url, model, system, prompt, numPredict, signal }
  * @returns {Promise<object>} el JSON del modelo, o `{error}` — nunca lanza.
  */
-async function ask(params) {
-    const config = { ...settings, ...(params || {}) };
+async function ask(config) {
+    const params = config;
     const body = {
         model: config.model,
         messages: [
@@ -148,4 +155,4 @@ function parseJson(text) {
     return null;
 }
 
-module.exports = { ask, probe, configure, current, parseJson, DEFAULTS };
+module.exports = { cliente, ask, probe, parseJson, DEFAULTS };

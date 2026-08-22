@@ -20,7 +20,6 @@ const pipeline = require('./engine/pipeline');
 const workspace = require('./engine/workspace');
 const review = require('./engine/review');
 const waveform = require('./engine/waveform');
-const aiLocal = require('./engine/ai-local');
 const ollamaServer = require('./engine/ollama-server');
 
 let mainWindow = null;
@@ -128,20 +127,10 @@ ipcMain.handle('app-info', () => ({
 ipcMain.handle('doctor', async () => {
     const report = paths.doctor();
     // La IA es opcional: sin ella la app corta igual, solo pierde el criterio en
-    // los bordes dudosos y la lectura del guion. Por eso se informa aparte.
-    //
-    // Se informa sin levantar el servidor: abrir Diagnóstico no debería cargar un
-    // modelo en memoria. Si ya está corriendo, se le pregunta de verdad.
-    const local = ollamaServer.status();
-    report.ai = local.running
-        ? { ...(await aiLocal.probe()), ...local }
-        : {
-            ...local,
-            ok: local.ok,
-            reason: local.ok
-                ? `Listo: ${local.model} (${local.modelSource}). Arranca al procesar.`
-                : 'Falta el modelo local: los cortes salen con las reglas solas.'
-        };
+    // los bordes dudosos y la lectura del guion. Por eso se informa aparte, y sin
+    // levantar el servidor: abrir Diagnóstico no debería cargar un modelo en
+    // memoria.
+    report.ai = ollamaServer.estado();
     return report;
 });
 
@@ -289,13 +278,17 @@ ipcMain.handle('process', async (event, payload) => {
             useAi: useAi !== false,
             signal: controller.signal,
             onStage: (stage, info) => send('process-stage', { stage, ...info }),
-            onClass: (phase, info) => send('process-class', {
-                phase,
-                id: info.cls.id,
-                index: info.index,
-                total: info.total,
-                result: info.result || null
-            })
+            // La fase 'modelo' llega una vez y sin clase: es de la corrida
+            // entera, no de ninguna en particular.
+            onClass: (phase, info) => send('process-class', phase === 'modelo'
+                ? { phase, modelo: { reason: info.modelo.reason, model: info.modelo.model || null } }
+                : {
+                    phase,
+                    id: info.cls.id,
+                    index: info.index,
+                    total: info.total,
+                    result: info.result || null
+                })
         });
         return {
             ok: true,

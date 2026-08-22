@@ -18,7 +18,6 @@
  */
 
 const speech = require('./speech-edges');
-const ai = require('./ai-local');
 
 const COHERENCE_VERSION = 1;
 
@@ -212,7 +211,7 @@ function validateFindings(raw, script) {
 
 /**
  * Revisa una clase entera.
- * @param {object} params { alignResult, words, useAi, options, onProgress, signal }
+ * @param {object} params { alignResult, words, ai, options, onProgress, signal }
  */
 async function reviewClass(params) {
     const { alignResult, words, options } = params;
@@ -220,12 +219,12 @@ async function reviewClass(params) {
     const findings = localFindings(script);
     const stats = { llamadas: 0, fallos: 0, hallazgosIa: 0, hallazgosRegla: findings.length };
 
-    if (params.useAi && script.blocks.length) {
+    if (params.ai && script.blocks.length) {
         const chunks = chunk(script, options);
         for (let i = 0; i < chunks.length; i++) {
             if (params.onProgress) params.onProgress({ chunk: i + 1, total: chunks.length });
             stats.llamadas++;
-            const response = await ai.ask({
+            const response = await params.ai.ask({
                 system: SYSTEM,
                 prompt: buildPrompt(chunks[i], script),
                 numPredict: opt(options, 'numPredict'),

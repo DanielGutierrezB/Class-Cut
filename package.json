@@ -22,17 +22,7 @@
       "package.json",
       "version.json",
       "engine/**/*",
-      "src/**/*",
-      "assets/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "scripts",
-        "to": "scripts",
-        "filter": [
-          "**/*"
-        ]
-      }
+      "src/**/*"
     ],
     "mac": {
       "category": "public.app-category.video",
