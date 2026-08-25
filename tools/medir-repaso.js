@@ -136,9 +136,14 @@ const limpiando = process.argv.includes('--limpiar');
         const rp = salida.alignResult.repaso || {};
         antes += rp.quedaban || 0;
         const arreglados = ((review && review.findings) || []).filter(f => f.corregido).length;
+        // Los fallos del modelo se dicen SIEMPRE que los haya: una clase con la
+        // lectura caída muestra "0 encontradas" y se lee como una clase limpia,
+        // que es exactamente lo contrario de lo que pasó.
+        const fallos = (review && review.stats && review.stats.fallos) || 0;
         console.log(`clase ${String(cls.classNumber).padStart(2)} · ${String(vivos.length).padStart(2)} bloques · ` +
             `${String(rp.quedaban || 0).padStart(2)} encontradas → ${String(quedan).padStart(2)} pendientes · ` +
-            `${arreglados} arregladas${rp.relectura ? ' · releída' : ''}`);
+            `${arreglados} arregladas${rp.relectura ? ' · releída' : ''}` +
+            (fallos ? ` · ¡${fallos} llamadas fallaron!` : ''));
     }
 
     const totalPend = TIPOS.reduce((n, t) => n + pendientes[t], 0);

@@ -162,15 +162,24 @@ function cliente(config) {
         model,
         proveedor: 'cursor',
         contextoGrande: true,
-        ask: params => {
-            if (!bin) return Promise.resolve({ error: 'No está el Cursor CLI en esta Mac.' });
-            return preguntar({
+        ask: async params => {
+            if (!bin) return { error: 'No está el Cursor CLI en esta Mac.' };
+            const pedido = {
                 bin, model,
                 system: params.system,
                 prompt: params.prompt,
                 signal: params.signal,
                 timeoutMs: (config && config.timeoutMs) || DEFAULTS.timeoutMs
-            });
+            };
+            const primera = await preguntar(pedido);
+            // Un reintento, y solo uno. Midiendo el curso entero, tras cuarenta
+            // minutos de consultas el CLI empezó a fallar suelto y una clase
+            // salió "limpia" porque su lectura entera se cayó. Una falla suelta
+            // se reintenta; dos seguidas son un problema de verdad y se informa.
+            // Lo cancelado no: cancelar es una orden, no una falla.
+            if (!primera.error || primera.error === 'cancelado') return primera;
+            if (params.signal && params.signal.aborted) return primera;
+            return preguntar(pedido);
         }
     };
 }

@@ -364,6 +364,24 @@ no idéntico (por la API se pide `temperature: 0`, que es lo más cerca). Las
 herramientas de medición usan la MISMA puerta que la app (`engine/ia.js`), con
 `--ia` y `--modelo` para los A/B.
 
+Medido sobre las trece clases del curso, mismo código, qwen3.8:27b local contra
+Sonnet 5 por el CLI (ventana de 1M, clase entera de fondo):
+
+|                                  | qwen local | Sonnet 5 |
+| -------------------------------- | ---------: | -------: |
+| cosas que la lectura encontró    |         24 |       63 |
+| defectos de borde (colgando)     |         27 |       25 |
+| defectos de borde (conector)     |         14 |       12 |
+| tiempo total                     |     52 min |   45 min |
+
+La diferencia grande no está en los bordes —eso lo deciden mayormente las
+reglas y la lista de candidatos— sino en la LECTURA: Sonnet encuentra el triple
+y lo describe como un editor ("la frase se corta antes de decir cuál es la
+respuesta, probablemente 'no'"; "'puede ser efímero' no concuerda en género con
+'la deuda'"). Más hallazgos no es un corte peor: es un lector más exigente
+diciendo qué le falta al primer corte, que es exactamente lo que el visor le
+muestra al editor.
+
 ### Cuánto tiene que ver el modelo
 
 Al afinar un borde, el modelo LOCAL ve unas 60 palabras alrededor del corte. La
