@@ -19,8 +19,55 @@ const workspace = require('./workspace');
 const estadoClase = require('./estado-clase');
 const onset = require('./vendor/audio-onset');
 const ia = require('./ia');
+const tokens = require('./tokens');
 
 const STAGES = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
+
+/**
+ * Cuánto tardó cada etapa, medido acá y no adivinado en la ventana.
+ *
+ * La ventana ya sabía qué etapa corre, pero no cuánto duró ninguna: como el
+ * progreso llega por avisos sueltos, lo único que podía cronometrar era "desde
+ * que me avisaron". Eso alcanza para una barra y no para decir cuánto falta,
+ * que es lo que se pidió. Acá se mide donde está el trabajo.
+ *
+ * Suma por nombre en vez de apilar tramos: una etapa que avisa cien veces
+ * (transcribir, con su porcentaje) tiene que ser UNA línea en el resumen, y si
+ * alguna vez el orden dejara de ser estricto, el total seguiría siendo el real.
+ */
+function cronometro() {
+    const inicio = Date.now();
+    const acumulado = new Map();
+    let actual = null;
+
+    const cerrar = () => {
+        if (!actual) return;
+        acumulado.set(actual.etapa, (acumulado.get(actual.etapa) || 0) + (Date.now() - actual.desde));
+        actual = null;
+    };
+
+    return {
+        inicio,
+        entrar(etapa) {
+            if (actual && actual.etapa === etapa) return;
+            cerrar();
+            actual = { etapa, desde: Date.now() };
+        },
+        cerrar,
+        /** Las etapas cerradas, en el orden canónico del pipeline. */
+        etapas() {
+            return STAGES.filter(e => acumulado.has(e)).map(e => ({ etapa: e, ms: acumulado.get(e) }));
+        },
+        /** Lo medido hasta ahora, para que viaje con cada aviso de progreso. */
+        parcial() {
+            return {
+                msClase: Date.now() - inicio,
+                msEtapa: actual ? Date.now() - actual.desde : 0,
+                hechas: this.etapas()
+            };
+        }
+    };
+}
 
 /**
  * @param {object} params
@@ -33,7 +80,15 @@ const STAGES = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revis
  */
 async function processClass(params) {
     const { root, cls, onStage, signal } = params;
-    const notify = (stage, info) => { if (onStage) onStage(stage, info || {}); };
+    const crono = cronometro();
+    // Cuánto había gastado el modelo ANTES de esta clase. El cliente es uno
+    // solo para toda la corrida —se arma en `processClasses`—, así que lo que
+    // gastó esta clase es la resta y no el total, que crece con las trece.
+    const usoAntes = tokens.instantanea(params.ai && params.ai.uso);
+    const notify = (stage, info) => {
+        crono.entrar(stage);
+        if (onStage) onStage(stage, { ...(info || {}), ...crono.parcial() });
+    };
     const warnings = [];
 
     if (!cls.sequenceName) {
@@ -126,6 +181,15 @@ async function processClass(params) {
     // Al final y no antes: lo que se guarda es lo que quedó en disco, ya
     // exportado. Si falla, la corrida sigue siendo buena —el XML está— y lo
     // único que se pierde es poder saltarse esto la próxima vez.
+    // El cronómetro se para ANTES de guardar: lo que se persiste es lo que
+    // tardó en cortar la clase, no lo que además tardó el disco en escribir el
+    // recibo. Si se contara, el número dependería de si el curso está en un SSD
+    // o en el disco de red del cliente, y dejaría de servir para estimar.
+    crono.cerrar();
+    const msProceso = Date.now() - crono.inicio;
+    const gasto = tokens.totales(
+        tokens.diferencia(usoAntes, tokens.instantanea(params.ai && params.ai.uso)));
+
     const guardado = estadoClase.guardar({
         root,
         cls,
@@ -134,7 +198,17 @@ async function processClass(params) {
             modelo: params.modelName || null,
             datos: {
                 bloques: plan.totals ? plan.totals.kept : null,
-                offsetSec: alignResult.offset ? alignResult.offset.appliedSec : null
+                offsetSec: alignResult.offset ? alignResult.offset.appliedSec : null,
+                // Cuánto tardó y qué costó. Va acá y no en el cutplan porque no
+                // describe el corte: describe la corrida que lo produjo, y una
+                // clase que se vuelve a exportar desde el visor mantiene su
+                // corte pero no su tiempo de proceso. La duración final NO se
+                // guarda: ya está en `trabajo.cutplan.totals.keepSec`, y
+                // duplicarla es garantizar que algún día digan cosas distintas.
+                msProceso,
+                etapas: crono.etapas(),
+                tokens: gasto.informa ? gasto : null,
+                materialSec: cls.durationSec || null
             }
         }
     });
@@ -153,6 +227,15 @@ async function processClass(params) {
         // Qué se saltó por estar ya hecho, para poder decirlo en la corrida.
         reusado: reusado.restaurados.length ? reusado : null,
         estadoGuardado: guardado.ok,
+        msProceso,
+        etapas: crono.etapas(),
+        tokens: gasto,
+        materialSec: cls.durationSec || null,
+        // Si esta clase pasó por Whisper o se saltó la transcripción. Separa las
+        // dos poblaciones al estimar: una clase reusada tarda segundos y una
+        // desde cero, una hora. Promediarlas juntas da un estimado que no vale
+        // para ninguna de las dos.
+        transcribio: Boolean(transcript && !transcript.fromCache),
         transcript: transcript
             ? { words: transcript.wordCount, language: transcript.language, fromCache: transcript.fromCache }
             : null,

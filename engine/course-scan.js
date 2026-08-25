@@ -374,7 +374,13 @@ function scan(rootPath) {
             procesadaEn: guardado.procesadaEn,
             sirve: guardado.vale,
             porque: guardado.porque,
-            modelo: guardado.modelo
+            modelo: guardado.modelo,
+            // Cuánto dura la clase ya cortada y cuánto costó cortarla. Es lo que
+            // la tabla muestra en vez de repetir la duración del material, que
+            // para una clase ya hecha es el dato que menos importa.
+            duracionFinalSec: guardado.duracionFinalSec,
+            msProceso: guardado.msProceso,
+            tokens: guardado.tokens
         };
         if (!guardado.vale) {
             cls.warnings.push({

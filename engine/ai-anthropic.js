@@ -12,6 +12,7 @@
  */
 
 const ai = require('./ai-local');
+const tokens = require('./tokens');
 
 const DEFAULTS = {
     url: 'https://api.anthropic.com/v1/messages',
@@ -21,8 +22,27 @@ const DEFAULTS = {
 };
 
 /**
- * Una pregunta, una respuesta en JSON. Nunca lanza: contesta `{error}`.
+ * El uso de una respuesta de Claude, en la forma de `engine/tokens.js`.
+ *
+ * Las dos cubetas de caché existen en la API y llegan solo cuando se pide
+ * caché explícito, que acá no se hace: se leen igual para que el día que se
+ * active la cuenta no cambie de sitio.
+ */
+function usoDeClaude(payload) {
+    const uso = payload && payload.usage;
+    if (!uso || typeof uso !== 'object') return null;
+    return {
+        entrada: uso.input_tokens,
+        salida: uso.output_tokens,
+        cacheLectura: uso.cache_read_input_tokens,
+        cacheEscritura: uso.cache_creation_input_tokens
+    };
+}
+
+/**
+ * Una pregunta, una respuesta en JSON. Nunca lanza: contesta `{respuesta:{error}}`.
  * @param {object} config { apiKey, model, system, prompt, numPredict, signal }
+ * @returns {Promise<{respuesta: object, uso: object|null}>}
  */
 async function preguntar(config) {
     let response;
@@ -44,39 +64,44 @@ async function preguntar(config) {
             signal: config.signal || AbortSignal.timeout(config.timeoutMs || DEFAULTS.timeoutMs)
         });
     } catch (err) {
-        if (err.name === 'AbortError') return { error: 'cancelado' };
-        if (err.name === 'TimeoutError') return { error: 'Claude no contestó a tiempo' };
-        return { error: `no se pudo hablar con Claude: ${err.message}` };
+        if (err.name === 'AbortError') return { respuesta: { error: 'cancelado' }, uso: null };
+        if (err.name === 'TimeoutError') return { respuesta: { error: 'Claude no contestó a tiempo' }, uso: null };
+        return { respuesta: { error: `no se pudo hablar con Claude: ${err.message}` }, uso: null };
     }
 
     if (!response.ok) {
         const detalle = await response.text().catch(() => '');
-        if (response.status === 401) return { error: 'La clave de Anthropic no es válida.' };
-        if (response.status === 404) return { error: `Anthropic no conoce el modelo «${config.model}».` };
-        if (response.status === 429) return { error: 'Anthropic está limitando los pedidos (429). Esperá un momento.' };
-        return { error: `Claude contestó ${response.status}. ${detalle.slice(0, 200)}`.trim() };
+        const falla = mensaje => ({ respuesta: { error: mensaje }, uso: null });
+        if (response.status === 401) return falla('La clave de Anthropic no es válida.');
+        if (response.status === 404) return falla(`Anthropic no conoce el modelo «${config.model}».`);
+        if (response.status === 429) return falla('Anthropic está limitando los pedidos (429). Esperá un momento.');
+        return falla(`Claude contestó ${response.status}. ${detalle.slice(0, 200)}`.trim());
     }
 
     let payload;
     try {
         payload = await response.json();
     } catch (err) {
-        return { error: 'Claude devolvió algo que no es JSON.' };
+        return { respuesta: { error: 'Claude devolvió algo que no es JSON.' }, uso: null };
     }
+
+    // El uso viaja aunque la respuesta no sirva: los tokens se cobran igual.
+    const uso = usoDeClaude(payload);
 
     const texto = ((payload && payload.content) || [])
         .filter(parte => parte.type === 'text')
         .map(parte => parte.text)
         .join('');
-    if (!texto) return { error: 'el modelo contestó vacío' };
+    if (!texto) return { respuesta: { error: 'el modelo contestó vacío' }, uso };
 
     const parsed = ai.parseJson(texto);
-    if (!parsed) return { error: `el modelo no contestó JSON: ${texto.slice(0, 160)}` };
-    return parsed;
+    if (!parsed) return { respuesta: { error: `el modelo no contestó JSON: ${texto.slice(0, 160)}` }, uso };
+    return { respuesta: parsed, uso };
 }
 
 /** Un cliente atado a UNA clave y UN modelo. */
 function cliente(config) {
+    const uso = tokens.contador();
     return {
         model: config.model,
         proveedor: 'anthropic',
@@ -84,9 +109,10 @@ function cliente(config) {
         // La API aguanta varias a la vez de sobra; cuatro es rápido sin
         // coquetear con el límite de pedidos por minuto.
         paralelo: 4,
-        ask: params => {
-            if (!config.apiKey) return Promise.resolve({ error: 'Falta la clave de Anthropic (Ajustes).' });
-            return preguntar({
+        uso,
+        ask: async params => {
+            if (!config.apiKey) return { error: 'Falta la clave de Anthropic (Ajustes).' };
+            const res = await preguntar({
                 apiKey: config.apiKey,
                 model: config.model,
                 system: params.system,
@@ -94,6 +120,8 @@ function cliente(config) {
                 numPredict: params.numPredict,
                 signal: params.signal
             });
+            tokens.sumar(uso, res.uso);
+            return res.respuesta;
         }
     };
 }
@@ -102,7 +130,7 @@ function cliente(config) {
 async function probar(config) {
     if (!config.apiKey) return { ok: false, reason: 'Falta la clave. Empieza con sk-ant-…' };
     const desde = Date.now();
-    const res = await preguntar({
+    const { respuesta, uso } = await preguntar({
         apiKey: config.apiKey,
         model: config.model,
         system: 'Contestás SOLO JSON válido.',
@@ -110,8 +138,17 @@ async function probar(config) {
         numPredict: 30,
         timeoutMs: 30000
     });
-    if (res.error) return { ok: false, reason: res.error };
-    return { ok: true, ms: Date.now() - desde, reason: `Contestó en ${((Date.now() - desde) / 1000).toFixed(1)} s.` };
+    if (respuesta.error) return { ok: false, reason: respuesta.error };
+
+    const ms = Date.now() - desde;
+    const gasto = uso ? tokens.totales(tokens.sumar(tokens.contador(), uso)) : null;
+    return {
+        ok: true,
+        ms,
+        tokens: gasto,
+        reason: `Contestó en ${(ms / 1000).toFixed(1)} s.` +
+            (gasto ? ` Informa tokens (${gasto.total} en esta consulta).` : ' No informó tokens.')
+    };
 }
 
-module.exports = { cliente, probar, DEFAULTS };
+module.exports = { cliente, probar, usoDeClaude, DEFAULTS };

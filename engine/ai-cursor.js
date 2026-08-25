@@ -23,6 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const ai = require('./ai-local');
+const tokens = require('./tokens');
 
 const DEFAULTS = {
     // Los modelos con razonamiento tardan más que Ollama en el peor caso, y un
@@ -72,9 +73,61 @@ function entorno() {
 }
 
 /**
- * Una pregunta, una respuesta en JSON. Nunca lanza: contesta `{error}`.
+ * El uso de una respuesta del CLI, traducido a la forma de `engine/tokens.js`.
+ *
+ * Medido contra `cursor-agent 2026.08.11`: el sobre trae
+ * `usage:{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`, y en
+ * modo impresión casi todo el prompt cae en `cacheWriteTokens` —una consulta
+ * trivial dio `inputTokens: 2` y `cacheWriteTokens: 31354`—. Por eso las cuatro
+ * cubetas viajan enteras y sumarlas es cosa de `tokens.totales`.
+ *
+ * Devuelve null si el sobre no trae `usage`: una versión del CLI que deje de
+ * informarlo tiene que verse como "no informa", no como "gastó cero".
+ */
+function usoDelSobre(sobre) {
+    const uso = sobre && sobre.usage;
+    if (!uso || typeof uso !== 'object') return null;
+    return {
+        entrada: uso.inputTokens,
+        salida: uso.outputTokens,
+        cacheLectura: uso.cacheReadTokens,
+        cacheEscritura: uso.cacheWriteTokens
+    };
+}
+
+/**
+ * El sobre del CLI, abierto: la respuesta del modelo y lo que costó.
+ *
+ * Si lo que salió no es un sobre se intenta leerlo como la respuesta pelada,
+ * que es lo que devolvía `--output-format text`. No es paranoia gratuita: es la
+ * forma de que una versión del CLI que cambie el sobre siga cortando bien, solo
+ * que sin poder decir los tokens.
+ *
+ * @returns {[object, object|null]} lo que espera `cerrar`
+ */
+function desenvolver(salida) {
+    const sobre = ai.parseJson(salida);
+    if (!sobre) return [{ error: `el modelo no contestó JSON: ${String(salida).trim().slice(0, 160)}` }, null];
+
+    if (typeof sobre.result !== 'string') {
+        // No es un sobre: es la respuesta del modelo tal cual.
+        return [sobre, null];
+    }
+    if (sobre.is_error) {
+        return [{ error: `el Cursor CLI falló: ${String(sobre.result).slice(0, 160)}` }, null];
+    }
+
+    const parsed = ai.parseJson(sobre.result);
+    if (!parsed) return [{ error: `el modelo no contestó JSON: ${sobre.result.trim().slice(0, 160)}` }, usoDelSobre(sobre)];
+    // El uso viaja aunque la respuesta no sirva: los tokens se gastaron igual.
+    return [parsed, usoDelSobre(sobre)];
+}
+
+/**
+ * Una pregunta, una respuesta en JSON. Nunca lanza: contesta `{respuesta:{error}}`.
  *
  * @param {object} config { bin, model, system, prompt, signal, timeoutMs }
+ * @returns {Promise<{respuesta: object, uso: object|null}>}
  */
 function preguntar(config) {
     return new Promise(resolve => {
@@ -83,7 +136,13 @@ function preguntar(config) {
         const texto = [config.system, config.prompt].filter(Boolean).join('\n\n');
         const args = [
             '-p', '--trust',
-            '--output-format', 'text',
+            // `json` y no `text` por los tokens: con `text` el CLI escupe la
+            // respuesta pelada y no hay forma de saber qué costó. Con `json`
+            // viene envuelta en un sobre que trae `usage`, y eso es lo único que
+            // permite mostrar el gasto en vez de inventarlo. La respuesta del
+            // modelo es el campo `result` del sobre, así que se desenvuelve acá
+            // y el resto del motor sigue recibiendo lo mismo de antes.
+            '--output-format', 'json',
             // Solo lectura: el criterio contesta números, no toca archivos.
             '--mode', 'ask',
             '--model', config.model,
@@ -100,12 +159,12 @@ function preguntar(config) {
         let err = '';
         let terminado = false;
 
-        const cerrar = respuesta => {
+        const cerrar = (respuesta, uso) => {
             if (terminado) return;
             terminado = true;
             clearTimeout(timer);
             if (config.signal) config.signal.removeEventListener('abort', abortar);
-            resolve(respuesta);
+            resolve({ respuesta, uso: uso || null });
         };
 
         const matar = () => { try { child.kill('SIGKILL'); } catch (e) { /* ya murió */ } };
@@ -132,16 +191,14 @@ function preguntar(config) {
         child.on('exit', code => {
             setTimeout(() => {
                 if (code !== 0) {
+                    // El sobre JSON solo aparece cuando el CLI termina bien.
+                    // Cuando falla escribe una línea suelta ("ActionRequiredError:
+                    // Request blocked…"), así que acá no hay nada que parsear.
                     const detalle = (err || out).trim().split('\n').slice(-3).join(' ');
                     cerrar({ error: `el Cursor CLI salió con ${code}. ${detalle}`.trim() });
                     return;
                 }
-                const parsed = ai.parseJson(out);
-                if (!parsed) {
-                    cerrar({ error: `el modelo no contestó JSON: ${String(out).trim().slice(0, 160)}` });
-                    return;
-                }
-                cerrar(parsed);
+                cerrar(...desenvolver(out));
             }, 150);
         });
     });
@@ -158,6 +215,12 @@ function preguntar(config) {
 function cliente(config) {
     const bin = (config && config.bin) || binario();
     const model = config.model;
+    // Vive en el cliente y no en un global: la corrida arma UN cliente y le
+    // pregunta desde varias etapas, así que este contador es exactamente "lo
+    // que gastó esta corrida". Con un global, dos mediciones en paralelo
+    // (`tools/bench-models.js`) se sumarían entre ellas.
+    const uso = tokens.contador();
+
     return {
         model,
         proveedor: 'cursor',
@@ -166,6 +229,7 @@ function cliente(config) {
         // Más es invitar al límite de uso — midiendo el curso entero ya se vio
         // al CLI empezar a fallar tras cuarenta minutos de consultas seguidas.
         paralelo: 3,
+        uso,
         ask: async params => {
             if (!bin) return { error: 'No está el Cursor CLI en esta Mac.' };
             const pedido = {
@@ -176,14 +240,18 @@ function cliente(config) {
                 timeoutMs: (config && config.timeoutMs) || DEFAULTS.timeoutMs
             };
             const primera = await preguntar(pedido);
+            tokens.sumar(uso, primera.uso);
             // Un reintento, y solo uno. Midiendo el curso entero, tras cuarenta
             // minutos de consultas el CLI empezó a fallar suelto y una clase
             // salió "limpia" porque su lectura entera se cayó. Una falla suelta
             // se reintenta; dos seguidas son un problema de verdad y se informa.
             // Lo cancelado no: cancelar es una orden, no una falla.
-            if (!primera.error || primera.error === 'cancelado') return primera;
-            if (params.signal && params.signal.aborted) return primera;
-            return preguntar(pedido);
+            if (!primera.respuesta.error || primera.respuesta.error === 'cancelado') return primera.respuesta;
+            if (params.signal && params.signal.aborted) return primera.respuesta;
+
+            const segunda = await preguntar(pedido);
+            tokens.sumar(uso, segunda.uso);
+            return segunda.respuesta;
         }
     };
 }
@@ -216,15 +284,27 @@ async function probar(config) {
     const bin = binario();
     if (!bin) return { ok: false, reason: 'No está el Cursor CLI en esta Mac. Instalalo con: curl https://cursor.com/install -fsS | bash' };
     const desde = Date.now();
-    const res = await preguntar({
+    const { respuesta, uso } = await preguntar({
         bin,
         model: config.model,
         system: 'Contestás SOLO JSON válido.',
         prompt: 'Contestá exactamente: {"ok": true}',
         timeoutMs: 60000
     });
-    if (res.error) return { ok: false, reason: res.error };
-    return { ok: true, ms: Date.now() - desde, reason: `Contestó en ${((Date.now() - desde) / 1000).toFixed(1)} s.` };
+    if (respuesta.error) return { ok: false, reason: respuesta.error };
+
+    const ms = Date.now() - desde;
+    // El botón Probar es donde se ve, sin procesar nada, si este CLI informa
+    // tokens: si no lo dijera acá habría que arrancar una corrida para
+    // enterarse.
+    const gasto = uso ? tokens.totales(tokens.sumar(tokens.contador(), uso)) : null;
+    return {
+        ok: true,
+        ms,
+        tokens: gasto,
+        reason: `Contestó en ${(ms / 1000).toFixed(1)} s.` +
+            (gasto ? ` Informa tokens (${gasto.total} en esta consulta).` : ' Este CLI no informa tokens.')
+    };
 }
 
-module.exports = { cliente, modelos, probar, binario, parsearLista, DEFAULTS };
+module.exports = { cliente, modelos, probar, binario, parsearLista, desenvolver, usoDelSobre, DEFAULTS };

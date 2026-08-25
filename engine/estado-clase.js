@@ -232,24 +232,49 @@ function actualizar(params) {
 }
 
 /**
+ * Cuánto dura la clase ya cortada, según el plan que quedó guardado.
+ *
+ * Sale del cutplan y no de una copia en el resumen a propósito: el visor puede
+ * mover bordes y regenerar el XML, y ahí `actualizar(['align','cutplan'])`
+ * reescribe el plan. Una copia del número en otro sitio se quedaría con la
+ * duración de la corrida original y la tabla mostraría un corte que ya no
+ * existe.
+ */
+function duracionFinal(estado) {
+    const plan = estado && estado.trabajo && estado.trabajo.cutplan;
+    const total = plan && plan.totals ? plan.totals.keepSec : null;
+    return typeof total === 'number' ? total : null;
+}
+
+/**
  * Lo que la interfaz necesita saber de una clase sin cargar el trabajo entero.
- * @returns {{procesada: boolean, procesadaEn: string|null, vale: boolean, porque: string, modelo: string|null}|null}
+ * @returns {{procesada: boolean, procesadaEn: string|null, vale: boolean, porque: string,
+ *   modelo: string|null, duracionFinalSec: number|null, msProceso: number|null}|null}
  */
 function resumen(cls) {
     const estado = leer(cls.folder);
     if (!estado) return null;
     const estaVigente = vigente(estado, cls);
+    const datos = estado.resumen || {};
     return {
         procesada: true,
         procesadaEn: estado.procesadaEn || null,
         vale: estaVigente.vale,
         porque: estaVigente.porque,
         modelo: estado.modelo || null,
-        clase: estado.clase == null ? null : estado.clase
+        clase: estado.clase == null ? null : estado.clase,
+        duracionFinalSec: duracionFinal(estado),
+        // Lo único de la corrida que no se puede recalcular mirando el disco: si
+        // no se guarda, se pierde. Las clases rescatadas de antes de que esto
+        // existiera no lo tienen, y por eso puede ser null y la tabla lo omite
+        // en vez de mostrar un cero.
+        msProceso: typeof datos.msProceso === 'number' ? datos.msProceso : null,
+        tokens: datos.tokens || null,
+        bloques: typeof datos.bloques === 'number' ? datos.bloques : null
     };
 }
 
 module.exports = {
     ARCHIVO, VERSION, GUARDADOS,
-    ruta, leer, guardar, actualizar, rescatar, hidratar, vigente, huellas, resumen
+    ruta, leer, guardar, actualizar, rescatar, hidratar, vigente, huellas, resumen, duracionFinal
 };

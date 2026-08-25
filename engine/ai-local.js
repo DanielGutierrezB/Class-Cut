@@ -7,10 +7,17 @@
  * corte, un número de bloque—. Si contesta cualquier otra cosa, se descarta y el
  * corte se queda como estaba. Esa es toda la relación de confianza.
  *
- * Todo es local: no sale nada a internet y no hay tokens que gastar. Si Ollama no
- * está corriendo, la app funciona igual con las reglas; solo se pierde el criterio
- * en los casos dudosos, y se dice.
+ * Todo es local: no sale nada a internet y no hay tokens que pagar. Contarlos
+ * igual sirve: es la medida de cuánto prompt se le está mandando, y comparar el
+ * mismo curso contra un proveedor remoto solo tiene sentido si los dos números
+ * salen de la misma cuenta. Ollama los devuelve en cada respuesta
+ * (`prompt_eval_count`, `eval_count`) y hasta ahora se descartaban.
+ *
+ * Si Ollama no está corriendo, la app funciona igual con las reglas; solo se
+ * pierde el criterio en los casos dudosos, y se dice.
  */
+
+const tokens = require('./tokens');
 
 const DEFAULTS = {
     temperature: 0.2,
@@ -72,10 +79,16 @@ function ventanaPara(system, prompt, numPredict) {
  */
 function cliente(config) {
     const settings = { ...DEFAULTS, ...config };
+    const uso = tokens.contador();
     return {
         url: settings.url,
         model: settings.model,
-        ask: params => ask({ ...settings, ...params }),
+        proveedor: 'local',
+        uso,
+        // `ask` suelto sigue existiendo y sigue sin contar nada: lo usan las
+        // herramientas de medición, que hacen su propia cuenta. El contador es
+        // del cliente, que es lo que dura una corrida.
+        ask: params => ask({ ...settings, ...params, onUso: u => tokens.sumar(uso, u) }),
         probe: () => probe(settings)
     };
 }
@@ -118,6 +131,13 @@ async function probe(config) {
  */
 async function ask(config) {
     const params = config;
+    // Cada salida de esta función pasa por acá. Una consulta que falló también
+    // se cuenta —y sin uso—, que es lo que después distingue "no gastó" de "el
+    // proveedor no informa".
+    const anotar = (respuesta, uso) => {
+        if (params.onUso) params.onUso(uso || null);
+        return respuesta;
+    };
     const numPredict = params.numPredict || config.numPredict;
     const body = {
         model: config.model,
@@ -148,29 +168,48 @@ async function ask(config) {
             signal: params.signal || AbortSignal.timeout(config.timeoutMs)
         });
     } catch (err) {
-        if (err.name === 'AbortError') return { error: 'cancelado' };
-        if (err.name === 'TimeoutError') return { error: `el modelo no contestó en ${Math.round(config.timeoutMs / 1000)} s` };
-        return { error: `no se pudo hablar con Ollama: ${err.message}` };
+        if (err.name === 'AbortError') return anotar({ error: 'cancelado' });
+        if (err.name === 'TimeoutError') return anotar({ error: `el modelo no contestó en ${Math.round(config.timeoutMs / 1000)} s` });
+        return anotar({ error: `no se pudo hablar con Ollama: ${err.message}` });
     }
 
     if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        return { error: `Ollama contestó ${response.status}. ${detail.slice(0, 200)}`.trim() };
+        return anotar({ error: `Ollama contestó ${response.status}. ${detail.slice(0, 200)}`.trim() });
     }
 
     let payload;
     try {
         payload = await response.json();
     } catch (err) {
-        return { error: 'Ollama devolvió algo que no es JSON.' };
+        return anotar({ error: 'Ollama devolvió algo que no es JSON.' });
     }
 
+    // Ollama no tiene caché de prompt que informar: las dos cubetas van en cero
+    // y `tokens.totales` las suma igual, así que la cuenta se lee igual que la
+    // de los proveedores que sí la tienen.
+    const uso = usoDeOllama(payload);
+
     const content = payload && payload.message ? payload.message.content : '';
-    if (!content) return { error: 'el modelo contestó vacío' };
+    if (!content) return anotar({ error: 'el modelo contestó vacío' }, uso);
 
     const parsed = parseJson(content);
-    if (!parsed) return { error: `el modelo no contestó JSON: ${String(content).slice(0, 160)}` };
-    return parsed;
+    if (!parsed) return anotar({ error: `el modelo no contestó JSON: ${String(content).slice(0, 160)}` }, uso);
+    return anotar(parsed, uso);
+}
+
+/**
+ * El uso de una respuesta de Ollama, en la forma de `engine/tokens.js`.
+ *
+ * Null si no vinieron los dos contadores: un modelo que no los informe tiene
+ * que verse como "no informa" y no como una consulta gratis.
+ */
+function usoDeOllama(payload) {
+    if (!payload) return null;
+    const entrada = payload.prompt_eval_count;
+    const salida = payload.eval_count;
+    if (!Number.isFinite(entrada) && !Number.isFinite(salida)) return null;
+    return { entrada: entrada || 0, salida: salida || 0, cacheLectura: 0, cacheEscritura: 0 };
 }
 
 /**
@@ -196,4 +235,4 @@ function parseJson(text) {
     return null;
 }
 
-module.exports = { cliente, ask, probe, parseJson, ventanaPara, DEFAULTS, VENTANA };
+module.exports = { cliente, ask, probe, parseJson, ventanaPara, usoDeOllama, DEFAULTS, VENTANA };
