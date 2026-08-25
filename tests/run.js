@@ -24,6 +24,7 @@ const FILES = [
     'actualizar.test.js',
     'pista.test.js',
     'letra.test.js',
+    'onda.test.js',
     'notas.test.js',
     'silencios.test.js',
     'repeticiones.test.js',
@@ -100,7 +101,13 @@ async function main() {
         if (filter && !file.includes(filter)) continue;
         const full = path.join(__dirname, file);
         if (!fs.existsSync(full)) continue;
-        require(full)(t);
+        // Con `await`: los archivos que importan módulos de la ventana son
+        // `async`, y sin esperarlos sus pruebas se anotaban DESPUÉS de arrancar
+        // la corrida. Colaban igual porque la lista se recorre mientras se le
+        // agregan cosas, pero corriendo uno solo con filtro no llegaban a
+        // anotarse y la respuesta era "0 pasaron · 0 fallaron", que se lee como
+        // que todo está bien.
+        await require(full)(t);
     }
 
     for (const item of queue) {

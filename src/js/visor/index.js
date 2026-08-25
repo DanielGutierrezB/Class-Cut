@@ -49,7 +49,10 @@ export async function openReview(id) {
     marcarPaso(PASOS.revisar, true);
     $('rev-title').textContent = 'Cargando…';
 
-    const data = await window.cc.loadReview({ id: target, buckets: 2400 });
+    // Los cubos de la onda: uno por píxel del canvas y no más. Eran 2400 para
+    // una silueta que se dibuja en unos 860 px, así que dos tercios se leían del
+    // disco, viajaban por el puente y se descartaban al juntarlos por columna.
+    const data = await window.cc.loadReview({ id: target, buckets: 1200 });
     if (!data.ok) {
         // Sin esto quedan los datos de la clase anterior y el resto del visor
         // sigue mostrándolos bajo un título que dice que no se pudo abrir: el
@@ -173,6 +176,13 @@ function setReviewTab(tab) {
         // está oculto, el contenedor mide cero y todo ancho se recorta al mínimo.
         ajustarDivision();
         abrirReproductor();
+    }
+    if (tab === 'cortes') {
+        // Y las ondas se repintan al volver, por lo mismo: si se dibujaron
+        // mientras esta pestaña estaba oculta —pasa al mover la selección desde
+        // el reproductor— salieron con la medida de respaldo y quedan estiradas.
+        renderOverview();
+        renderZoom();
     }
 }
 

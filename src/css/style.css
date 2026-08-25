@@ -671,7 +671,10 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 
 .review-main { overflow: auto; padding: 14px 18px 22px; }
 
-.wave-box { margin-bottom: 12px; }
+.wave-box { margin-bottom: 10px; }
+/* El alto vive acá y en ningún otro lado: es lo que mide `onda.js` para armar el
+   búfer de dibujo. Con el alto también en el HTML, cada repintado leía el búfer
+   anterior y lo doblaba hasta romper el canvas. */
 .wave {
     width: 100%;
     display: block;
@@ -680,7 +683,12 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     border-radius: var(--radius-sm);
     cursor: crosshair;
 }
-.wave-label { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
+/* La silueta de la clase entera es para ubicarse, no para medir: alcanza con
+   verla. El tramo ampliado es el que se mira de cerca para mover un borde, así
+   que se queda con el alto. */
+.wave-overview { height: 54px; }
+.wave-zoom { height: 104px; }
+.wave-label { font-size: 11px; color: var(--text-mute); margin-top: 3px; }
 
 .edges { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 12px; }
 .edge { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; }

@@ -209,13 +209,17 @@
                 <aside class="review-list" id="rev-list"></aside>
 
                 <div class="review-main" id="rev-main">
+                    <!-- Sin atributos de tamaño: el alto lo pone el CSS y el
+                         búfer de dibujo lo calcula `onda.js`. Con el alto acá
+                         había dos fuentes de verdad y el canvas se multiplicaba
+                         en cada repintado. -->
                     <div class="wave-box">
-                        <canvas class="wave wave-overview" id="rev-overview" height="72"></canvas>
+                        <canvas class="wave wave-overview" id="rev-overview"></canvas>
                         <div class="wave-label">Clase completa · clic para ir a un bloque</div>
                     </div>
 
                     <div class="wave-box">
-                        <canvas class="wave wave-zoom" id="rev-zoom" height="132"></canvas>
+                        <canvas class="wave wave-zoom" id="rev-zoom"></canvas>
                         <div class="wave-label" id="rev-zoom-label">—</div>
                     </div>
 

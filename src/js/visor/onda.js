@@ -8,15 +8,55 @@ import { setEdge } from './bordes.js';
 
 const ZOOM_MARGIN_SEC = 4;
 
+/**
+ * Un canvas nítido en pantallas retina: el tamaño en pantalla lo pone el CSS y
+ * el búfer de dibujo va multiplicado por la densidad.
+ *
+ * Lo que se mide es SIEMPRE el tamaño en pantalla (`clientWidth/Height`), nunca
+ * los atributos del canvas. Acá vivía el error que rompía el visor: el alto se
+ * leía del atributo `height`, que es justo el que este código sobrescribe con el
+ * alto en píxeles del búfer. En una pantalla 2×, cada repintado leía el doble
+ * del anterior y volvía a doblarlo. El zoom se repinta dos veces por clic —una
+ * enseguida y otra cuando llega el detalle del disco—, así que se cuadruplicaba:
+ * 132 px al abrir, 528 al primer clic, 16.898 al cuarto. Ahí pasa el máximo que
+ * aguanta un canvas y el navegador lo deja en blanco, que es como se veía roto.
+ *
+ * Con el alto en el CSS el círculo se corta: el CSS manda en el tamaño en
+ * pantalla, así que tocar el búfer no puede cambiar lo que se mide.
+ */
+/**
+ * Lo que un canvas de este tamaño necesita de búfer.
+ *
+ * Aparte y sin DOM para poder probarlo (`tests/onda.test.js`). El techo no es
+ * decoración: un canvas más grande que eso no se dibuja mal, se dibuja EN
+ * BLANCO, y con él se va la pantalla entera de revisión. Si alguien vuelve a
+ * meter una medida que se realimenta, esto la deja fea en vez de invisible.
+ */
+export const MAXIMO_PX = 8192;
+
+export function medidaDelCanvas(clientWidth, clientHeight, ratio) {
+    // Los respaldos son para cuando se dibuja con la vista escondida, que mide
+    // cero: se dibuja en el vacío y al mostrarse se vuelve a pintar con la
+    // medida de verdad.
+    const width = clientWidth || 800;
+    const height = clientHeight || 96;
+    const densidad = ratio || 1;
+    return {
+        width,
+        height,
+        bufferWidth: Math.min(MAXIMO_PX, Math.round(width * densidad)),
+        bufferHeight: Math.min(MAXIMO_PX, Math.round(height * densidad))
+    };
+}
+
 function canvasSize(canvas) {
-    const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth || 800;
-    const height = Number(canvas.getAttribute('height')) || 100;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
+    const medida = medidaDelCanvas(canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio);
+    canvas.width = medida.bufferWidth;
+    canvas.height = medida.bufferHeight;
+    const ratio = medida.bufferHeight / medida.height;
     const ctx = canvas.getContext('2d');
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    return { ctx, width, height };
+    return { ctx, width: medida.width, height: medida.height };
 }
 
 function drawPeaks(ctx, peaks, from, to, width, height, color) {
@@ -139,7 +179,11 @@ async function loadZoomWave(ventana) {
         path: rev.data.liveMixPath,
         fromSec: ventana.from,
         toSec: ventana.to,
-        buckets: 1400
+        // Un punto por píxel de canvas alcanza: `drawPeaks` junta todo lo que
+        // caiga en la misma columna, así que pedir el doble es leer disco para
+        // tirarlo. Con ~20 s de ventana quedan 45 puntos por segundo, de sobra
+        // para ver dónde arranca el sonido.
+        buckets: 900
     });
     // Mientras se leía el disco el editor pudo saltar a otro bloque.
     if (!detail || token !== zoomWaveToken) return;
