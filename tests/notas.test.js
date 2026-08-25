@@ -91,6 +91,18 @@ module.exports = t => {
         t.eq(notas.leer(raiz, SECUENCIA).comentarios.map(c => c.comentario).join(','), 'temprano,tarde');
     });
 
+    t.test('guardar lo mismo no vuelve a escribir el archivo', () => {
+        // La fecha de este archivo es lo que decide si hay que reexportar la clase
+        // (`engine/regenerar.js`), y el campo de la nota guarda al salir del foco:
+        // entrar y salir sin tocar nada movía la fecha y ensuciaba esa cuenta.
+        const raiz = raizTemporal();
+        const datos = { bloques: { 1: { note: 'igual' } }, comentarios: [] };
+        notas.guardar(raiz, SECUENCIA, datos);
+        const antes = fs.statSync(workspace.artifact(raiz, SECUENCIA, 'notas')).mtimeMs;
+        notas.guardar(raiz, SECUENCIA, datos);
+        t.eq(fs.statSync(workspace.artifact(raiz, SECUENCIA, 'notas')).mtimeMs, antes);
+    });
+
     t.test('reprocesar la clase no se lleva las notas', () => {
         // El pipeline reescribe el plan y el alineado; esto vive en otro archivo
         // justamente para sobrevivir a eso.

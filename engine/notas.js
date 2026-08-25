@@ -51,6 +51,21 @@ function limpiar(texto) {
         .slice(0, 500);
 }
 
+/**
+ * Lo que hay que comparar para saber si esto es lo mismo que ya está guardado.
+ *
+ * Las fechas quedan afuera —cambian en cada guardado— y los ids también: los
+ * acuña este archivo, así que un comentario que llega sin id es nuevo y su texto
+ * ya lo delata.
+ */
+function contenido(datos) {
+    return JSON.stringify({
+        bloques: (datos && datos.bloques) || {},
+        comentarios: ((datos && datos.comentarios) || [])
+            .map(c => [c.sourceStartSec, c.sourceEndSec, c.texto, c.comentario])
+    });
+}
+
 function guardar(root, sequenceName, datos) {
     const limpio = {
         version: VERSION,
@@ -89,6 +104,15 @@ function guardar(root, sequenceName, datos) {
     }
 
     limpio.comentarios.sort((a, b) => a.sourceStartSec - b.sourceStartSec);
+
+    // Guardar lo mismo otra vez no se escribe. Pasa a cada rato: el campo de la
+    // nota guarda al salir del foco, así que entrar y salir sin escribir nada ya
+    // era una escritura. Y la fecha de este archivo es lo que decide si una clase
+    // hay que reexportarla (`engine/regenerar.js`): moverla sin motivo hace que
+    // el botón anuncie clases atrasadas que en realidad están al día.
+    const guardado = leer(root, sequenceName);
+    if (contenido(guardado) === contenido(limpio)) return guardado;
+
     workspace.writeJson(workspace.artifact(root, sequenceName, 'notas'), limpio);
     return limpio;
 }
@@ -109,13 +133,41 @@ function notaDeBloque(notas, indice, original) {
  * @returns {number|null} segundo en la línea de tiempo del corte
  */
 function enLaLineaDeTiempo(segundoDeOrigen, segmentos) {
+    const s = segmentoDe(segundoDeOrigen, segmentos);
+    return s ? s.timelineStartSec + (segundoDeOrigen - s.sourceStartSec) : null;
+}
+
+function segmentoDe(segundoDeOrigen, segmentos) {
     for (const s of segmentos || []) {
         if (s.keep === false) continue;
-        if (segundoDeOrigen >= s.sourceStartSec && segundoDeOrigen <= s.sourceEndSec) {
-            return s.timelineStartSec + (segundoDeOrigen - s.sourceStartSec);
-        }
+        if (segundoDeOrigen >= s.sourceStartSec && segundoDeOrigen <= s.sourceEndSec) return s;
     }
     return null;
 }
 
-module.exports = { leer, guardar, notaDeBloque, enLaLineaDeTiempo, limpiar, vacio, VERSION };
+/**
+ * Lo mismo, pero con el pedazo entero: un comentario se escribió seleccionando
+ * palabras, y ese pedazo es lo que tiene que durar el marcador.
+ *
+ * La selección se mide en el segmento donde EMPIEZA y se recorta ahí si se pasa
+ * del corte: lo que hay más allá del borde no está en la secuencia, o está en
+ * otro sitio, y un marcador que cruza un corte señala material que no es el que
+ * se comentó.
+ *
+ * @returns {{startSec:number, endSec:number}|null}
+ */
+function tramoEnLaLineaDeTiempo(desdeOrigen, hastaOrigen, segmentos) {
+    const s = segmentoDe(desdeOrigen, segmentos);
+    if (!s) return null;
+    const hasta = isFinite(hastaOrigen) ? hastaOrigen : desdeOrigen;
+    const acotado = Math.min(Math.max(hasta, desdeOrigen), s.sourceEndSec);
+    return {
+        startSec: s.timelineStartSec + (desdeOrigen - s.sourceStartSec),
+        endSec: s.timelineStartSec + (acotado - s.sourceStartSec)
+    };
+}
+
+module.exports = {
+    leer, guardar, notaDeBloque, enLaLineaDeTiempo, tramoEnLaLineaDeTiempo,
+    limpiar, vacio, VERSION
+};
