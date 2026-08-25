@@ -124,6 +124,18 @@
                 </div>
             </div>
 
+            <!-- La barra es de la CORRIDA ENTERA, no de la clase que corre: con
+                 trece clases marcadas lo que se quiere saber es cuánto falta en
+                 total. En qué clase y en qué etapa va lo dice el renglón de
+                 abajo, y el detalle por clase vive en la tabla. -->
+            <div class="corrida" id="run-progreso" hidden>
+                <div class="corrida-barra"><span id="run-barra"></span></div>
+                <div class="corrida-linea">
+                    <span class="corrida-ahora" id="run-ahora">Empezando…</span>
+                    <span class="corrida-cifra" id="run-cifra"></span>
+                </div>
+            </div>
+
             <div class="alerts" id="run-alerts"></div>
 
             <div class="table-wrap">
@@ -135,6 +147,8 @@
                         <th>Estado</th>
                         <th class="num">Bloques</th>
                         <th class="num">Queda</th>
+                        <th class="num" title="Cuánto tardó esta clase en procesarse. El globito abre el desglose por etapa.">Tiempo</th>
+                        <th class="num" title="Cuántos tokens gastó el criterio en esta clase, si el proveedor lo informa.">Tokens</th>
                         <th>Desfase</th>
                         <th>Confianza</th>
                     </tr>

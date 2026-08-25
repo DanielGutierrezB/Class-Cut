@@ -85,7 +85,12 @@ export function construir(segments, opciones) {
 
         const dura = hasta - desde;
         const camara = camaraDe(segment, viewMap, camaras);
-        const notaOriginal = segment.note || segment.cueIn || '';
+        // La nota del marcador, y nada más. Antes se caía al `cueIn`, que no es
+        // una nota: es el arranque del transcript que el Rodecaster guarda detrás
+        // del guion del comentario. El campo mostraba un pedazo de letra cortado
+        // a media palabra como si alguien lo hubiera escrito. Si no hay nota, no
+        // hay: el panel ya tiene su texto para el campo vacío.
+        const notaOriginal = segment.note || '';
         const corregida = notas && notas[segment.blockIndex] && notas[segment.blockIndex].note;
         tramos.push({
             indice: tramos.length,

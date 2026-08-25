@@ -51,7 +51,13 @@ code, .mono {
 .topbar {
     display: flex;
     align-items: center;
-    gap: 24px;
+    /* El hueco se aprieta solo a medida que la ventana se angosta, en vez de
+       aguantar 24px hasta que algo se rompe. Medido: con la ventana en su mínimo
+       (900px) la barra pedía 915px, y flexbox sacaba los 15px que faltaban del
+       único sitio que podía ceder —el nombre de la app, que quedaba en dos
+       líneas—. Tres huecos de 12px menos son 36px que no se le sacan a nadie.
+       De 1180 (el ancho de fábrica) para arriba queda en los 24px de siempre. */
+    gap: clamp(12px, calc(24px - (1180px - 100vw) / 20), 24px);
     padding: 0 18px 0 96px; /* deja lugar a los botones de la ventana en mac */
     height: 52px;
     flex: 0 0 52px;
@@ -61,9 +67,24 @@ code, .mono {
 }
 .topbar button { -webkit-app-region: no-drag; }
 
-.brand { display: flex; align-items: center; gap: 8px; }
-.brand-mark { color: var(--accent); font-size: 15px; }
-.brand-name { font-weight: 600; letter-spacing: -0.01em; }
+/* `min-width: 0` porque sin eso el mínimo de la marca es su tamaño min-content,
+   y como el chip del modelo va en una sola línea su min-content es el nombre
+   entero: la marca no cedía un píxel y el chip nunca llegaba a recortarse. */
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* La marca no es el amortiguador de la barra. Los tres van con `flex: none` para
+   que, cuando el ancho no alcance, lo que ceda sea el chip del modelo y no esto:
+   antes el único elemento con letras que podían acomodarse era el nombre, y a
+   900px "Class Cut" aparecía partido en dos renglones. */
+.brand-mark { color: var(--accent); font-size: 15px; flex: none; }
+/* Cuando no hay criterio, el ✂ puede decirlo. El globito con el motivo va
+   siempre —`no-drag` porque encima de la zona de arrastre no aparece nunca—,
+   pero el ámbar aparece más abajo, en la consulta de ancho de los 1010px: ahí es
+   donde el chip no entra y el aviso se perdía. Arriba de ese ancho el chip ya lo
+   dice con todas las letras, y encendiendo también el ✂ quedaban dos ámbares con
+   el verde del aviso de versión en el medio — tres colores en 250px que se leen
+   como un semáforo. De a uno. */
+.brand-mark.is-falta { -webkit-app-region: no-drag; cursor: default; }
+.brand-name { font-weight: 600; letter-spacing: -0.01em; flex: none; white-space: nowrap; }
 /* El número de versión es el botón de actualizar. Apagado se lee como el dato
    que era antes; encendido avisa. El borde transparente reserva el sitio para
    que al encenderse no se muevan de lugar las cosas de al lado. */
@@ -79,6 +100,7 @@ code, .mono {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex: none;
 }
 .brand-version:hover { color: var(--text-dim); background: var(--surface-3); }
 .brand-version.is-new {
@@ -99,18 +121,23 @@ code, .mono {
    barra entera arrastra la ventana y encima de una zona de arrastre el globito
    con el detalle no aparece nunca. */
 .brand-model {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+    /* Bloque y no `inline-flex`: con flex, el texto va en una caja anónima y
+       `text-overflow` no la alcanza, así que el nombre se cortaba a cuchillo a
+       mitad de letra en vez de terminar en puntos suspensivos. El `line-height`
+       fijo mantiene la píldora en los 23px que medía con flex. */
+    display: inline-block;
+    line-height: 17px;
     padding: 2px 8px;
     border: 1px solid var(--border);
     border-radius: 999px;
     color: var(--text-mute);
     font-size: 11px;
-    /* Ni se encoge ni se parte en dos líneas: en cuanto cede una letra, el que se
-       acomoda en dos líneas es el nombre de la app. Cuando de verdad no entra,
-       desaparece (ver la consulta de ancho más abajo). */
-    flex: none;
+    /* Es lo único de la barra que se encoge: los pasos y los botones no tienen
+       de dónde (una palabra sola cada uno) y la marca tiene `flex: none`. Así el
+       ancho que falta sale siempre del mismo lado y en orden, en vez de que
+       flexbox lo reparta donde le queda más cómodo. */
+    flex: 0 1 auto;
+    min-width: 0;
     white-space: nowrap;
     /* Los modelos de los proveedores traen nombres kilométricos
        (claude-sonnet-5-thinking-high) que empujaban a Diagnóstico fuera de la
@@ -122,9 +149,15 @@ code, .mono {
     -webkit-app-region: no-drag;
     cursor: default;
 }
+/* El punto es lo que más se mira del chip —verde hay criterio, ámbar no lo hay—
+   y se lee de un vistazo aunque el nombre esté cortado. Va primero y con ancho
+   propio para que sea lo último que se pierda, no lo primero. */
 .brand-model::before {
     content: "";
+    display: inline-block;
+    vertical-align: middle;
     width: 6px; height: 6px;
+    margin-right: 5px;
     border-radius: 50%;
     background: currentColor;
 }
@@ -133,11 +166,36 @@ code, .mono {
 .brand-model.is-corriendo::before { background: var(--ok); }
 .brand-model.is-falta { color: var(--warn); border-color: rgba(245, 181, 68, .35); }
 
-/* Con la ventana en su ancho mínimo el cabezal ya venía justo —los cinco pasos
-   no se encogen—, y ahora carga también el botón de Ajustes. Cuando no entra,
-   el modelo se cede: sigue estando en Diagnóstico y en Ajustes. */
-@media (max-width: 1150px) {
+/* Primer escalón: se va el sufijo del proveedor, que `modelo.js` deja en su
+   propio span justamente para esto. El umbral está medido, no puesto a ojo: con
+   el sufijo la barra pide 1108px y tiene 1108, así que un píxel más angosta y el
+   recorte empieza a comerse el final del nombre del modelo, que es lo que
+   distingue una corrida de otra. Son 45px que se sueltan de una y compran otros
+   50px de nombre entero. */
+@media (max-width: 1108px) {
+    .brand-model-prov { display: none; }
+}
+
+/* Modo angosto, el último escalón. Sin el sufijo el chip todavía entra entero
+   hasta los ~1056px y de ahí para abajo se recorta solo. A 1010px le quedan
+   ~110px —unas doce letras y el punto de color, que es lo que de verdad hay que
+   ver de un vistazo— y recortarlo más no informa nada: se cede entero. El dato
+   sigue en el globito, en Ajustes y en Diagnóstico, y lo único urgente —que no
+   haya criterio— lo dice el ✂ en ámbar (ver `modelo.js`). Antes esto pasaba a
+   1150px, con 235px de barra vacía al lado: el chip desaparecía sin que hiciera
+   falta.
+
+   Los pasos y los dos botones aflojan unos píxeles de aire por lado —28px entre
+   los seis—, que es lo que hace falta para que en el mínimo de la ventana entre
+   todo aun con el aviso de versión nueva encendido y un número de versión de dos
+   cifras por tramo: medido sin esto, ese caso pedía 910px de los 900 que hay.
+   Los nombres de los pasos no se tocan: son la navegación de la app. */
+@media (max-width: 1010px) {
     .brand-model { display: none; }
+    /* Acá, y no antes: el ✂ toma el aviso justo cuando el chip lo suelta. */
+    .brand-mark.is-falta { color: var(--warn); }
+    .step { padding: 5px 9px; }
+    .topbar .btn { padding: 6px 10px; }
 }
 
 /* Los pasos son botones: se puede volver a cualquiera que tenga algo que
@@ -394,6 +452,34 @@ code, .mono {
 .grupo-acciones { text-align: right; }
 .grupo-acciones .btn-inline { margin-left: 0; }
 
+/* El triángulo que pliega la carpeta.
+   Ancho fijo y centrado para que el nombre no se mueva un píxel al cambiar ▾
+   por ▸: con cinco carpetas cargadas, ese salto se nota en cada clic. */
+.grupo-plegar {
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    display: inline-block;
+    width: 18px;
+    text-align: center;
+    color: var(--text-mute);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin-right: 4px;
+    cursor: pointer;
+}
+.grupo-plegar:hover { color: var(--accent); }
+/* La celda entera pliega, así que tiene que decirlo con el cursor. */
+.grupo td[data-plegar] { cursor: pointer; }
+.grupo.is-plegada .grupo-meta { color: var(--text-dim); }
+
+/* La duración de una clase ya cortada: el corte manda y el material queda de
+   contexto, debajo y en chico — igual que la secuencia y su carpeta. */
+.col-dur { line-height: 1.25; }
+.dur-final { display: block; }
+.dur-crudo { display: block; font-size: 10.5px; color: var(--text-dim); }
+
 .cell-seq { font-weight: 500; font-size: 12.5px; }
 .cell-folder {
     display: block;
@@ -607,6 +693,61 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     margin-left: 10px;
 }
 .progress span { display: block; height: 100%; background: var(--accent); transition: width .18s; }
+
+/* ── La barra de la corrida ───────────────────────────────────── */
+
+.corrida { padding: 14px 18px 4px; }
+
+.corrida-barra {
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+}
+/* Un segundo de transición y no los .18s de las barritas de fila: acá los
+   saltos son grandes —terminar una clase mueve la barra un tramo entero— y
+   verla deslizarse es justamente lo que dice "está avanzando". */
+.corrida-barra span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 1s linear;
+}
+.corrida.is-listo .corrida-barra span { background: var(--ok); }
+
+.corrida-linea {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 14px;
+    margin-top: 7px;
+    font-size: 12px;
+}
+
+/* El renglón que dice qué está pasando. Respira como las líneas de "pensando"
+   de las herramientas de IA: mientras una etapa tarda minutos sin informar
+   nada, el latido es la única señal de que sigue viva. */
+.corrida-ahora {
+    color: var(--text);
+    animation: corrida-late 2s ease-in-out infinite;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.corrida.is-listo .corrida-ahora { animation: none; color: var(--text-dim); }
+.corrida-cifra { color: var(--text-mute); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+@keyframes corrida-late {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .5; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .corrida-ahora { animation: none; }
+    .corrida-barra span { transition: none; }
+}
 
 .empty {
     padding: 40px 20px;
@@ -859,17 +1000,21 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     margin: 0 0 14px;
 }
 .aj-tarjetas { display: grid; gap: 8px; margin-bottom: 14px; }
+/* Los tres bordes de una tarjeta son tres estados y tienen que leerse en escala:
+   en reposo el suave, que la tarjeta ya se distingue por su fondo; al pasar por
+   encima el de siempre, como la nota del panel de letra; y elegida, el acento.
+   Con el de reposo más fuerte, la elegida no destacaba. */
 .aj-tarjeta {
     display: flex;
     gap: 10px;
     align-items: flex-start;
     padding: 10px 12px;
-    border: 1px solid var(--line);
+    border: 1px solid var(--border-soft);
     border-radius: 10px;
     background: var(--surface-2);
     cursor: pointer;
 }
-.aj-tarjeta:hover { border-color: var(--line-strong); }
+.aj-tarjeta:hover { border-color: var(--border); }
 .aj-tarjeta.is-activa {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
@@ -883,7 +1028,7 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .aj-campo > span { font-size: 12px; color: var(--text-dim); }
 .aj-campo input, .aj-campo select {
     background: var(--surface-3);
-    border: 1px solid var(--line);
+    border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
     font: inherit;

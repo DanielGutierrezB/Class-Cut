@@ -18,8 +18,34 @@ export const state = {
     openId: null,
     scanning: false,
     salidas: [],
-    reviewFirst: null
+    reviewFirst: null,
+    /**
+     * Qué carpetas están plegadas en la tabla.
+     *
+     * Se guardan las PLEGADAS y no las abiertas para que una carpeta recién
+     * agregada aparezca abierta sin tener que acordarse de anotarla: lo normal
+     * al sumar un curso es querer ver sus clases.
+     *
+     * Dura lo que la sesión y no se escribe a disco a propósito: es cómo estás
+     * mirando la tabla ahora, no una preferencia. Guardarlo haría que abrir la
+     * app al día siguiente te escondiera el curso que venías cortando.
+     */
+    colapsadas: new Set()
 };
+
+export function estaColapsada(root) {
+    return state.colapsadas.has(root);
+}
+
+/** Pliega o despliega una carpeta. @returns {boolean} si quedó plegada */
+export function alternarCarpeta(root) {
+    if (state.colapsadas.has(root)) {
+        state.colapsadas.delete(root);
+        return false;
+    }
+    state.colapsadas.add(root);
+    return true;
+}
 
 /** Todas las clases de todas las carpetas, en el orden en que se cargaron. */
 export function clases() {
@@ -59,4 +85,7 @@ export function ponerCarpeta(scan, reemplaza) {
 
 export function quitarCarpeta(root) {
     state.carpetas = state.carpetas.filter(c => c.root !== root);
+    // Y su pliegue con ella: si no, quitar una carpeta y volver a agregarla la
+    // devolvía cerrada, que se lee como que no cargó nada.
+    state.colapsadas.delete(root);
 }

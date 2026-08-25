@@ -36,9 +36,49 @@ export async function refrescar() {
 
     chip.classList.remove(...ESTADOS);
     chip.classList.add(`is-${ai.estado}`);
-    chip.textContent = ai.estado === 'falta' ? 'sin criterio' : etiqueta(ai);
+    escribirChip(chip, ai);
     chip.title = detalle(ai);
     chip.hidden = false;
+
+    // El ✂ también toma el estado, porque el chip no está siempre: por debajo de
+    // 1010px de ventana no entra en la barra, y "sin criterio" —el único estado
+    // que pide hacer algo— es justo el que no se puede perder. La marca ya está
+    // ahí y no ocupa un píxel más. Desde qué ancho se pone ámbar lo decide el
+    // CSS: mientras el chip se vea, el aviso es del chip y el ✂ sigue azul.
+    //
+    // El globito solo cuando avisa: encima de una zona de arrastre no aparece
+    // (la barra entera arrastra la ventana), así que mostrarlo cuesta quitarle
+    // al arrastre el ancho del ✂, y hacer eso para no decir nada no va.
+    const marca = document.querySelector('.brand-mark');
+    const falta = ai.estado === 'falta';
+    marca.classList.toggle('is-falta', falta);
+    marca.title = falta ? detalle(ai) : '';
+}
+
+/**
+ * El chip, en dos piezas: el modelo por un lado y de dónde sale por el otro.
+ *
+ * Separados porque cuando la barra se angosta el sufijo se esconde solo, con una
+ * consulta de ancho y sin recalcular nada acá. Antes era un texto entero y lo
+ * único que la barra podía hacer con él era recortarlo por la derecha, o sea
+ * comerse el final del nombre del modelo —"thinking-high", que es justo lo que
+ * distingue una corrida de otra— para conservar un "· Cursor" que también está
+ * en el globito, en Ajustes y en Diagnóstico.
+ */
+function escribirChip(chip, ai) {
+    if (ai.estado === 'falta') {
+        chip.replaceChildren('sin criterio');
+        return;
+    }
+    const { modelo, proveedor } = etiqueta(ai);
+    if (!proveedor) {
+        chip.replaceChildren(modelo);
+        return;
+    }
+    const sufijo = document.createElement('span');
+    sufijo.className = 'brand-model-prov';
+    sufijo.textContent = ` · ${proveedor}`;
+    chip.replaceChildren(modelo, sufijo);
 }
 
 /** El modelo y, si no es el local, por dónde: cambia el resultado y se ve. */
@@ -47,12 +87,12 @@ function etiqueta(ai) {
     // ya dice Cursor o Claude al lado, y esos píxeles empujaban al resto.
     const corto = String(ai.model || '').replace(/^claude-/, '');
     switch (ai.proveedor) {
-        case 'cursor': return `${corto} · Cursor`;
-        case 'anthropic': return `${corto} · Claude`;
+        case 'cursor': return { modelo: corto, proveedor: 'Cursor' };
+        case 'anthropic': return { modelo: corto, proveedor: 'Claude' };
         case 'local':
         default:
             // Los estados viejos venían sin proveedor: eran siempre el local.
-            return ai.model;
+            return { modelo: String(ai.model || ''), proveedor: null };
     }
 }
 

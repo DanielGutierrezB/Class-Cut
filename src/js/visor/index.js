@@ -5,7 +5,7 @@
  * Este archivo coordina; lo que dibuja está en `onda`, `bordes` y `guion`.
  */
 
-import { $, showView, toast } from '../chrome.js';
+import { $, showView, toast, anotar } from '../chrome.js';
 import { esc, fmtClock, fmtDur, plural } from '../formato.js';
 import { state, clases } from '../estado.js';
 import { marcarPaso, PASOS } from '../pasos.js';
@@ -41,6 +41,12 @@ export async function openReview(id) {
         return;
     }
 
+    // Los bordes movidos y sin guardar viven solo acá: abrir otra clase reemplaza
+    // `rev.segments` con su plan y se van sin dejar rastro. Se pregunta acá y no
+    // en el selector porque a otra clase se llega también desde la tabla, y por
+    // esa puerta se perdían igual.
+    if (rev.dirty && rev.id && target !== rev.id && !(await resolverBordesSinGuardar())) return;
+
     // Cambiar de clase con el reproductor abierto: lo de la clase anterior se
     // suelta antes de cargar nada, o queda un video de 15 GB sonando sin dueño.
     cerrarReproductor();
@@ -70,6 +76,8 @@ export async function openReview(id) {
     rev.data = data;
     rev.id = target;
     rev.dirty = false;
+    // De la clase anterior, y hasta que el motor contesta por esta.
+    rev.atrasadas = null;
     rev.zoomWave = null;
     rev.notas = data.notas || { bloques: {}, comentarios: [] };
     rev.pista = null;
@@ -79,8 +87,54 @@ export async function openReview(id) {
     rev.selected = Math.max(0, rev.segments.findIndex(s => s.confidence !== 'alta'));
 
     fillClassPicker();
-    setReviewTab(rev.tab || 'cortes');
+    // Sin `|| 'cortes'`: el default vive en `rev.tab` (ver `visor/estado.js`) y
+    // acá lo único que corresponde es respetar lo que haya, que la primera vez
+    // es el reproductor y después es lo que el editor eligió.
+    setReviewTab(rev.tab);
     renderReview();
+    refrescarAtrasadas();
+}
+
+/**
+ * Qué hacer con los bordes sin guardar cuando el editor se va a otra clase.
+ *
+ * Lo que escribió ya está en disco —las notas y los comentarios se guardan al
+ * escribirlos—, pero los bordes no: son los únicos cambios que existen solo en
+ * memoria. Guardar solo escribiría un XML que nadie pidió, y seguir de largo es
+ * la pérdida silenciosa que estamos sacando de la app, así que decide el editor.
+ *
+ * @returns {Promise<boolean>} si se puede seguir y cambiar de clase
+ */
+async function resolverBordesSinGuardar() {
+    const elegida = await window.cc.preguntar({
+        titulo: `La clase ${rev.data.classNumber} tiene bordes sin guardar`,
+        mensaje: 'Lo que escribiste ya está guardado. Los bordes que movés, no: viven en esta pantalla hasta que guardás. Si cambiás de clase ahora, esos ajustes se van.',
+        opciones: ['Guardar y cambiar', 'Cambiar sin guardar']
+    });
+    if (elegida === 0) return saveReviewChanges();
+    if (elegida === 1) return true;
+    // Canceló: el selector ya se movió a la otra clase y hay que devolverlo.
+    fillClassPicker();
+    return false;
+}
+
+/**
+ * Cuántas clases más va a dejar al día el botón de guardar.
+ *
+ * Se le pregunta al motor en vez de deducirlo acá: la señal es la fecha de lo
+ * que se escribió contra la del XML exportado, y eso está en el disco, que la
+ * ventana no ve. Se pide al abrir una clase y después de guardar, que son los
+ * dos momentos en que el número puede haber cambiado.
+ */
+async function refrescarAtrasadas() {
+    if (!rev.id) return;
+    const pedida = rev.id;
+    const atrasadas = await window.cc.pendientes(pedida);
+    // Cambiar de clase mientras esto viajaba deja una respuesta que ya no es de
+    // la clase abierta: contarla sería anunciar el trabajo de otra.
+    if (rev.id !== pedida) return;
+    rev.atrasadas = atrasadas;
+    renderReviewHead();
 }
 
 /**
@@ -103,14 +157,25 @@ function fillClassPicker() {
         : porCarpeta.map(g => g.suyas.map(opcion).join('')).join('');
 }
 
-function renderReview() {
+/**
+ * Qué clase es, qué queda por revisar y qué va a hacer Guardar.
+ *
+ * Va aparte del resto porque se repinta solo: cuando llega la cuenta de clases
+ * atrasadas no hay por qué volver a dibujar las ondas de la clase entera.
+ */
+function renderReviewHead() {
     const pending = rev.segments.filter(s => s.keep && s.confidence !== 'alta').length;
 
     $('rev-title').textContent = `Clase ${rev.data.classNumber} · ${plural(rev.segments.filter(s => s.keep).length, 'bloque', 'bloques')}`;
-    $('rev-sub').textContent = pending
+    $('rev-sub').textContent = (pending
         ? `${plural(pending, 'bloque para revisar', 'bloques para revisar')}${rev.dirty ? ' · hay cambios sin guardar' : ''}`
-        : (rev.dirty ? 'Hay cambios sin guardar' : 'Todo revisado');
+        : (rev.dirty ? 'Hay cambios sin guardar' : 'Todo revisado')) + textoDeAtrasadas();
 
+    pintarBotonDeGuardar();
+}
+
+function renderReview() {
+    renderReviewHead();
     renderReviewList();
     renderOverview();
     renderZoom();
@@ -153,7 +218,7 @@ function renderReviewList() {
                 ${aire ? `<span class="badge badge-warn" title="No se dice nada durante esos segundos">⏸ ${Math.round(aire)}s</span>` : ''}
                 ${notas ? `<span class="badge badge-nota" title="Va a salir como marcador en el XML">✎ ${notas}</span>` : ''}
             </span>
-            <span class="rev-item-note">${esc(segment.note || segment.cueIn || '')}</span>
+            ${segment.note ? `<span class="rev-item-note">${esc(segment.note)}</span>` : ''}
         </button>`;
     }).join('');
 }
@@ -162,6 +227,7 @@ function setReviewTab(tab) {
     // Salir de la pestaña no puede dejar una clase sonando por detrás.
     if (rev.tab === 'clase' && tab !== 'clase') cerrarReproductor();
 
+    if (rev.tab !== tab) anotar('visor.pestaña', { de: rev.tab, a: tab });
     rev.tab = tab;
     for (const button of document.querySelectorAll('#rev-tabs .tab')) {
         button.classList.toggle('is-on', button.dataset.tab === tab);
@@ -186,6 +252,50 @@ function setReviewTab(tab) {
     }
 }
 
+/** Las otras clases de la carpeta que este botón va a dejar al día. */
+function otrasAtrasadas() {
+    return (rev.atrasadas && rev.atrasadas.otras) || [];
+}
+
+/** Lo que se le suma al subtítulo para que el número no viva solo en el botón. */
+function textoDeAtrasadas() {
+    const otras = otrasAtrasadas();
+    if (!otras.length) return '';
+    return ` · ${plural(otras.length, 'clase más para regenerar', 'clases más para regenerar')}`;
+}
+
+/**
+ * El botón dice a cuántas clases va a tocar, y el tooltip dice a cuáles y por
+ * qué. Regenerar escribe en la carpeta del cliente: enterarse después de cuántos
+ * XML se rehicieron es justo la sorpresa que no queremos.
+ */
+function pintarBotonDeGuardar() {
+    const button = $('rev-save');
+    // Mientras guarda, el botón está contando eso.
+    if (button.disabled) return;
+
+    const otras = otrasAtrasadas();
+    const afuera = (rev.atrasadas && rev.atrasadas.afuera) || [];
+    const carpeta = rev.atrasadas && rev.atrasadas.carpeta ? rev.atrasadas.carpeta.nombre : '';
+
+    button.textContent = otras.length
+        ? `Guardar y regenerar · ${otras.length + 1} clases`
+        : 'Guardar y regenerar';
+
+    const lineas = otras.length
+        ? [`Rehace el XML de esta clase y de ${plural(otras.length, 'clase más', 'clases más')} de «${carpeta}»:`]
+            .concat(otras.map(p => `· Clase ${p.classNumber} — ${p.motivo}`))
+        : ['Rehace el XML de esta clase con lo que escribiste.',
+            'Las demás de esta carpeta ya están al día.'];
+    if (afuera.length) {
+        // No se tocan: el alcance es esta carpeta. Pero callarlo dejaría clases
+        // atrasadas sin que nadie se enterara, que es el problema de origen.
+        lineas.push(`Hay ${plural(afuera.length, 'clase atrasada', 'clases atrasadas')} en otras carpetas cargadas: abrí una de ahí para regenerarlas.`);
+    }
+    button.title = lineas.join('\n');
+}
+
+/** @returns {Promise<boolean>} si quedó guardado */
 async function saveReviewChanges() {
     const button = $('rev-save');
     button.disabled = true;
@@ -206,17 +316,36 @@ async function saveReviewChanges() {
     });
 
     button.disabled = false;
-    button.textContent = 'Guardar y regenerar';
 
-    if (!result.ok) { toast(result.error); return; }
+    if (!result.ok) { pintarBotonDeGuardar(); toast(result.error); return false; }
     rev.dirty = false;
     rev.data.cutplan = result.cutplan;
     rev.segments = result.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
-    toast(`XML regenerado · ${result.exported.segments} bloques · ${fmtDur(result.exported.keepSec)}`);
+    toast(`XML regenerado · ${result.exported.segments} bloques · ${fmtDur(result.exported.keepSec)}` +
+        textoDeLasOtras(result));
+    // Volver a medir: las que se acaban de regenerar tienen que dejar de contarse.
+    refrescarAtrasadas();
     renderReview();
     // Guardar reescribe los bloques: el reproductor tiene que pasar a mostrar
     // el corte que acaba de quedar y no el de antes de guardar.
     if (rev.tab === 'clase') abrirReproductor();
+    return true;
+}
+
+/** Qué otras clases quedaron al día, dicho después de hacerlo. */
+function textoDeLasOtras(result) {
+    const hechas = result.tambien || [];
+    const fallas = result.fallas || [];
+    let texto = '';
+    if (hechas.length) {
+        texto += ` · y ${plural(hechas.length, 'clase más', 'clases más')} (${hechas.map(h => h.classNumber).join(', ')})`;
+    }
+    // Un XML que no se pudo escribir no puede pasar como regenerado: es
+    // exactamente el caso en que el editor va a Premiere a buscar algo que no está.
+    if (fallas.length) {
+        texto += ` · NO se pudo con ${fallas.map(f => `la ${f.classNumber}`).join(', ')}: ${fallas[0].error}`;
+    }
+    return texto;
 }
 
 /**

@@ -102,7 +102,11 @@ function pintarBloque(bloque) {
     campo.contentEditable = 'true';
     campo.spellcheck = false;
     campo.dataset.bloqueIndex = String(bloque.blockIndex);
-    campo.dataset.vacio = 'Sin nota del marcador. Escribí una…';
+    // Una palabra y en el gris más apagado que hay: el bloque sin nota es lo
+    // normal —dos de cada tres en el curso— así que la invitación aparece en casi
+    // todos los bloques y tiene que dejar leer el texto, no competir con él. Lo
+    // que el campo es se explica en el `title`, que no ocupa lugar.
+    campo.dataset.vacio = 'Comentar';
     campo.textContent = nota.texto;
     campo.title = 'La nota que va a leer el editor en Premiere';
 

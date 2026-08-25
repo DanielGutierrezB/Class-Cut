@@ -7,14 +7,14 @@
  * archivo.
  */
 
-import { $, showView } from './chrome.js';
-import { fmtDur } from './formato.js';
+import { $, showView, anotar } from './chrome.js';
 import { state, clases, findClass, quitarCarpeta } from './estado.js';
 import { addFolder, dropError, wireCarpeta, renderCargadas } from './vista-carpeta.js';
 import {
-    renderScan, renderAlerts, renderRows, renderFoot, wireClases, openDrawer, closeDrawer
+    renderScan, renderAlerts, renderRows, renderFoot, wireClases, openDrawer, closeDrawer,
+    actualizarDuracion
 } from './vista-clases.js';
-import { run, startProcessing, renderRunRows, renderRunFoot } from './vista-corrida.js';
+import { run, startProcessing, alAvanzarEtapa, alCambiarClase } from './vista-corrida.js';
 import { openReview, wireReview } from './visor/index.js';
 import { cerrarReproductor } from './visor/reproductor.js';
 import { rev } from './visor/estado.js';
@@ -29,6 +29,7 @@ const huboCorrida = () => run.total > 0;
 
 /** Ir a un paso. Es lo único que sabe atar una vista con la de al lado. */
 function irAPaso(n) {
+    anotar('paso', { a: n, carpetas: state.carpetas.length, clases: clases().length });
     switch (n) {
         case PASOS.carpetas:
             closeDrawer();
@@ -66,6 +67,9 @@ function irAPaso(n) {
  */
 async function sacarCarpeta(root) {
     closeDrawer();
+    // El motor anota la suya; esta línea dice que salió de un clic en la tabla
+    // y no de que una carpeta se cayera del disco.
+    anotar('tabla.quitar-carpeta', { carpeta: root });
     await window.cc.quitarCarpeta(root);
     quitarCarpeta(root);
     if (!state.carpetas.length) { irAPaso(PASOS.carpetas); return; }
@@ -159,9 +163,7 @@ async function init() {
         // Se busca comparando y no con un selector: el id de una clase es la ruta
         // de su carpeta, y una ruta trae barras, espacios y cualquier cosa que el
         // editor haya escrito. Son trece celdas.
-        for (const cell of document.querySelectorAll('#class-rows [data-dur]')) {
-            if (cell.dataset.dur === p.id) { cell.textContent = fmtDur(p.durationSec); break; }
-        }
+        actualizarDuracion(p.id, p.durationSec);
 
         const cls = findClass(p.id);
         if (cls) {
@@ -180,14 +182,7 @@ async function init() {
         }
     });
 
-    window.cc.onProcessStage(payload => {
-        const entry = run.rows.get(payload.id);
-        if (!entry) return;
-        entry.status = 'trabajando';
-        entry.stage = payload.stage;
-        entry.percent = payload.percent != null ? payload.percent : null;
-        renderRunRows();
-    });
+    window.cc.onProcessStage(alAvanzarEtapa);
 
     window.cc.onProcessClass(payload => {
         // 'modelo' es de la corrida entera y no de una clase; lo que haya que
@@ -199,18 +194,7 @@ async function init() {
             refrescarModelo();
             return;
         }
-        const entry = run.rows.get(payload.id);
-        if (!entry) return;
-        if (payload.phase === 'empieza') {
-            entry.status = 'trabajando';
-        } else {
-            entry.status = 'listo';
-            entry.result = payload.result;
-            entry.stage = null;
-            entry.percent = null;
-        }
-        renderRunRows();
-        renderRunFoot();
+        alCambiarClase(payload);
     });
 }
 
@@ -250,10 +234,17 @@ window.dev = {
     addFolder, abrirClase: openDrawer, abrirVisor: openReview, buscarUpdate,
     // Para poder comparar desde afuera lo que se ve contra lo que dicen los
     // datos: sin esto, verificar el reproductor es mirar la pantalla y opinar.
-    visor: () => rev
+    visor: () => rev,
+    // Lo mismo para la barra de la corrida: si avanza o no avanza es una
+    // cuenta, y desde una captura de pantalla no se puede comprobar.
+    corrida: () => run
 };
 
 init().catch(err => {
+    // Antes de dibujar nada: si la ventana se cayó al arrancar, esta línea es
+    // lo único que va a explicar por qué, y el registro sobrevive porque vive
+    // del otro lado del puente.
+    anotar('ventana.se-cayo', { mensaje: err && err.message });
     // Con clase y no con `style`: la política de seguridad descarta los atributos
     // de estilo, y esta es justo la pantalla que no puede salir ilegible.
     document.body.innerHTML = `<pre class="crash"></pre>`;

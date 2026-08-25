@@ -199,7 +199,7 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     flex-wrap: wrap;
     gap: 4px 14px;
     font-size: 11px;
-    color: var(--dim);
+    color: var(--text-dim);
 }
 .leyenda-item { display: inline-flex; align-items: center; gap: 5px; }
 .leyenda-color {
@@ -271,14 +271,14 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     font-size: 12px;
     font-weight: 600;
 }
-.letra-hint { font-weight: 400; color: var(--dim); font-size: 11px; }
+.letra-hint { font-weight: 400; color: var(--text-dim); font-size: 11px; }
 .letra-body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 6px 14px 20px;
 }
-.letra-vacio { color: var(--dim); font-size: 12px; padding: 12px 0; }
+.letra-vacio { color: var(--text-dim); font-size: 12px; padding: 12px 0; }
 
 /* El color de la cámara entra por el borde y por un fondo muy bajo: es para
    reconocer la toma de un vistazo mientras se lee, no para leer encima de él.
@@ -312,7 +312,7 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
 /* La nota del marcador, editable donde se lee. */
 .letra-nota {
     font-size: 12px;
-    color: var(--fg);
+    color: var(--text);
     padding: 5px 8px;
     margin-bottom: 8px;
     border: 1px solid transparent;
@@ -322,10 +322,15 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
 }
 .letra-nota:hover { border-color: var(--border); }
 .letra-nota:focus { outline: none; border-color: var(--accent); background: var(--bg); }
-/* Vacía no se ve, y sin señal nadie descubre que se puede escribir ahí. */
-.letra-nota:empty::before {
+/* Vacía no se ve, y sin señal nadie descubre que se puede escribir ahí. Va en el
+   gris más apagado de la paleta: es una invitación, no contenido.
+
+   Y se esconde con el foco. `:empty` sigue siendo verdad después del clic —el
+   campo está vacío hasta que se teclea la primera letra—, así que sin esto la
+   invitación queda debajo del cursor mientras se empieza a escribir. */
+.letra-nota:empty:not(:focus)::before {
     content: attr(data-vacio);
-    color: var(--dim);
+    color: var(--text-mute);
 }
 .letra-nota.is-editada { border-left: 2px solid var(--warn); }
 
@@ -333,7 +338,7 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     font-size: 13px;
     line-height: 1.75;
     margin: 0;
-    color: var(--dim);
+    color: var(--text-dim);
 }
 .letra-texto.is-vacio { font-style: italic; font-size: 12px; }
 
@@ -375,7 +380,7 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
 }
 .letra-comentario-cita {
     font-size: 11px;
-    color: var(--dim);
+    color: var(--text-dim);
     font-style: italic;
     margin-bottom: 4px;
 }
@@ -399,7 +404,7 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     padding: 6px 8px;
     font: inherit;
     font-size: 12px;
-    color: var(--fg);
+    color: var(--text);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
