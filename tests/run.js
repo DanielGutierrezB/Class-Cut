@@ -19,6 +19,7 @@ const FILES = [
     'export.test.js',
     'criterio.test.js',
     'modelo-local.test.js',
+    'ia.test.js',
     'actualizar.test.js',
     'pista.test.js',
     'letra.test.js',

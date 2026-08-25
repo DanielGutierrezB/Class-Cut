@@ -19,7 +19,11 @@
  * semilla fija, las dos variantes comparten TODO hasta la primera lectura, así
  * que lo que cambie en los defectos de borde es del repaso y de nada más.
  *
- *   node tools/medir-repaso.js /ruta/al/curso [--clases 1,4,10] [--sin-repaso]
+ * El criterio sale de Ajustes, igual que en la app: esto mide el producto que
+ * el editor tiene configurado, no una copia. Para el A/B entre proveedores
+ * están `--ia local|cursor|anthropic` y `--modelo`.
+ *
+ *   node tools/medir-repaso.js /ruta/al/curso [--clases 1,4,10] [--sin-repaso] [--ia cursor]
  */
 
 const scanner = require('../engine/course-scan');
@@ -28,8 +32,8 @@ const transcribe = require('../engine/transcribe');
 const onset = require('../engine/vendor/audio-onset');
 const decidir = require('../engine/decidir');
 const coherence = require('../engine/coherence');
-const ollamaServer = require('../engine/ollama-server');
-const ai = require('../engine/ai-local');
+const ia = require('../engine/ia');
+const ajustes = require('../engine/ajustes');
 const defectos = require('./defectos');
 
 const root = process.argv[2];
@@ -64,10 +68,12 @@ const limpiando = process.argv.includes('--limpiar');
     if (!classes.length) { console.error('Ninguna clase para medir.'); process.exit(1); }
     await probe.probeClasses(classes);
 
-    const arranque = await ollamaServer.ensure({ model: arg('modelo') || null });
-    if (!arranque.cliente) { console.error(`No hay modelo local: ${arranque.reason}`); process.exit(1); }
-    const cliente = ai.cliente({ url: arranque.cliente.url, model: arranque.model });
-    console.log(`modelo: ${arranque.model} (${arranque.source})\n`);
+    const config = ajustes.leer().ia;
+    if (arg('ia')) config.proveedor = arg('ia');
+    const arranque = await ia.armar({ model: arg('modelo') || null }, ajustes.sanear({ ia: config }).ia);
+    if (!arranque.cliente) { console.error(`No hay criterio: ${arranque.reason}`); process.exit(1); }
+    const cliente = arranque.cliente;
+    console.log(`modelo: ${arranque.model} (${arranque.source || arranque.proveedor})\n`);
 
     const pendientes = Object.fromEntries(TIPOS.map(t => [t, 0]));
     const corregidos = Object.fromEntries(TIPOS.map(t => [t, 0]));
@@ -157,6 +163,6 @@ const limpiando = process.argv.includes('--limpiar');
 
     if (detalle && lineas.length) console.log(`\n${lineas.join('\n')}`);
 
-    ollamaServer.stop();
+    ia.parar();
     process.exit(0);
 })();

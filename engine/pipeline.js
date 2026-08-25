@@ -18,7 +18,7 @@ const exporter = require('./export');
 const workspace = require('./workspace');
 const estadoClase = require('./estado-clase');
 const onset = require('./vendor/audio-onset');
-const ollamaServer = require('./ollama-server');
+const ia = require('./ia');
 
 const STAGES = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
 
@@ -175,10 +175,11 @@ async function processClasses(params) {
 
     // Si el modelo está disponible es una propiedad de la corrida, no de cada
     // clase: se levanta una vez para las trece. Preguntarlo por clase daba trece
-    // avisos idénticos que tapaban los que sí eran distintos.
+    // avisos idénticos que tapaban los que sí eran distintos. Qué proveedor se
+    // usa lo deciden los Ajustes; `ia.armar` es la única puerta.
     const modelo = params.useAi === false
         ? { cliente: null, reason: 'Criterio apagado a pedido.' }
-        : await ollamaServer.ensure({ signal, model: params.model });
+        : await ia.armar({ signal, model: params.model });
     const avisoDelModelo = modelo.cliente ? null : {
         code: 'sin_modelo',
         message: `${modelo.reason} Los cortes salen con las reglas, sin criterio en los casos dudosos.`
@@ -212,7 +213,7 @@ async function processClasses(params) {
         // memoria y un proceso hijo que no deja salir a quien nos llame desde la
         // terminal. La app tiene además su propio apagado por si se la cierra en
         // medio de una corrida.
-        ollamaServer.stop();
+        ia.parar();
     }
 
     // El aviso del modelo va una sola vez, en la primera clase, para que quien
