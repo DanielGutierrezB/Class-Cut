@@ -25,6 +25,13 @@ const FILES = {
     align: 'align.json',
     cutplan: 'cutplan.json',
     coherence: 'coherence.json',
+    // Dónde la clase se queda callada. Sale del audio, tarda casi un segundo de
+    // disco y no cambia nunca: se calcula la primera vez que se abre el visor y
+    // queda guardado.
+    silencios: 'silencios.json',
+    // Lo escribe el editor, no el pipeline: es lo único del Backup que no se
+    // puede volver a calcular, así que reprocesar no lo toca.
+    notas: 'notas.json',
     log: 'run.log',
     populatedXml: 'poblada.xml',
     alignedXml: 'alineada.xml'

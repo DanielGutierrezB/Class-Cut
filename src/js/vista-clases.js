@@ -42,11 +42,23 @@ export function renderAlerts() {
         });
     }
 
-    const done = scan.classes.filter(c => c.alreadyProcessed);
-    if (done.length) {
+    // Lo que la clase trae guardado en su carpeta es la buena noticia: no
+    // importa por dónde se haya entrado, ese trabajo no hay que rehacerlo.
+    const guardadas = scan.classes.filter(c => c.trabajoGuardado && c.trabajoGuardado.sirve);
+    if (guardadas.length) {
         alerts.push({
             level: 'info',
-            message: `${plural(done.length, 'clase ya tiene', 'clases ya tienen')} XML en "The Cutter": procesarlas otra vez lo reemplaza.`
+            message: `${plural(guardadas.length, 'clase trae', 'clases traen')} el trabajo guardado en su carpeta: ` +
+                'procesarlas vuelve a escribir el XML en segundos, sin transcribir de nuevo. ' +
+                'Para rehacerlo todo desde cero está "Reprocesar".'
+        });
+    }
+
+    const soloXml = scan.classes.filter(c => c.alreadyProcessed && !c.trabajoGuardado);
+    if (soloXml.length) {
+        alerts.push({
+            level: 'info',
+            message: `${plural(soloXml.length, 'clase ya tiene', 'clases ya tienen')} XML en "The Cutter": procesarlas otra vez lo reemplaza.`
         });
     }
 
@@ -62,10 +74,27 @@ function viewBadges(views) {
     }).join('');
 }
 
+/** "hace 2 días", "el 18 de agosto". Para una fecha que solo sitúa, no precisa. */
+function cuando(iso) {
+    const fecha = new Date(iso);
+    if (isNaN(fecha)) return '';
+    const dias = Math.floor((Date.now() - fecha.getTime()) / 86400000);
+    if (dias <= 0) return 'hoy';
+    if (dias === 1) return 'ayer';
+    if (dias < 30) return `hace ${dias} días`;
+    return fecha.toLocaleDateString('es', { day: 'numeric', month: 'long' });
+}
+
 function statusBadges(cls) {
     const out = [];
+    const guardado = cls.trabajoGuardado;
+
     if (!cls.processable) out.push('<span class="badge badge-err">no procesable</span>');
-    else if (cls.alreadyProcessed) out.push('<span class="badge badge-ok">ya procesada</span>');
+    else if (guardado && guardado.sirve) {
+        out.push(`<span class="badge badge-ok" title="El trabajo está guardado en la carpeta de la clase: procesarla no vuelve a transcribir.">ya procesada · ${esc(cuando(guardado.procesadaEn))}</span>`);
+    } else if (guardado) {
+        out.push(`<span class="badge badge-warn" title="${esc(guardado.porque)}">hay que rehacerla</span>`);
+    } else if (cls.alreadyProcessed) out.push('<span class="badge badge-ok">ya procesada</span>');
     else out.push('<span class="badge badge-info">lista</span>');
 
     if (cls.duplicate) out.push('<span class="badge badge-warn">duplicada</span>');
@@ -111,17 +140,39 @@ export function renderFoot() {
     const selected = state.scan.classes.filter(c => c.selected);
     const totalSec = selected.reduce((sum, c) => sum + (c.durationSec || 0), 0);
     const blocks = selected.reduce((sum, c) => sum + (c.blockCount || 0), 0);
+    // Las que traen su trabajo son las que van a tardar segundos; el resto son
+    // las que van a pasar por Whisper. Es la diferencia entre esperar un minuto
+    // y esperar una hora, así que se dice antes de apretar.
+    const reusan = selected.filter(c => c.trabajoGuardado && c.trabajoGuardado.sirve).length;
+    const desdeCero = selected.length - reusan;
 
-    $('foot-info').innerHTML = selected.length
-        ? `<strong>${plural(selected.length, 'clase marcada', 'clases marcadas')}</strong> · ${fmtDur(totalSec)} de material · ${plural(blocks, 'bloque', 'bloques')} por cortar`
-        : 'Ninguna clase marcada.';
+    const partes = [];
+    if (selected.length) {
+        partes.push(`<strong>${plural(selected.length, 'clase marcada', 'clases marcadas')}</strong>`);
+        partes.push(`${fmtDur(totalSec)} de material`);
+        partes.push(plural(blocks, 'bloque', 'bloques'));
+        if (reusan && desdeCero) partes.push(`${reusan} ya hechas · ${desdeCero} desde cero`);
+        else if (reusan) partes.push('todas ya hechas');
+    }
+    $('foot-info').innerHTML = partes.length ? partes.join(' · ') : 'Ninguna clase marcada.';
 
     const btn = $('btn-process');
     btn.textContent = selected.length === 1 ? 'Procesar 1 clase' : `Procesar ${selected.length} clases`;
     btn.disabled = selected.length === 0;
     btn.title = selected.length
-        ? 'Transcribe el Live-Mix, alinea los marcadores y escribe el XML cortado.'
+        ? (reusan
+            ? 'Reusa lo que cada clase tenga guardado y escribe el XML. Lo que falte se calcula.'
+            : 'Transcribe el Live-Mix, alinea los marcadores y escribe el XML cortado.')
         : 'Marcá al menos una clase.';
+
+    // Solo tiene sentido ofrecerlo cuando hay algo hecho que tirar.
+    const rehacer = $('btn-reprocess');
+    rehacer.hidden = reusan === 0;
+    rehacer.disabled = selected.length === 0;
+    rehacer.textContent = reusan === selected.length && selected.length > 1
+        ? 'Reprocesar todo'
+        : 'Reprocesar';
+    rehacer.title = 'Ignora el trabajo guardado y lo hace todo de nuevo: vuelve a transcribir y a leer la clase.';
 }
 
 /**
@@ -186,6 +237,18 @@ function drawerHtml(cls) {
         <div class="fact"><div class="fact-label">${esc(k)}</div><div class="fact-value">${esc(v)}</div></div>
     `).join('');
 
+    // Qué trae hecho de antes. Va arriba porque es lo que decide si esta clase
+    // va a tardar segundos o media hora.
+    const guardado = cls.trabajoGuardado;
+    const hecho = !guardado ? '' : alertsHtml([guardado.sirve
+        ? {
+            level: 'info',
+            message: `Procesada ${cuando(guardado.procesadaEn)}${guardado.modelo ? ` con ${guardado.modelo}` : ''}. ` +
+                'El trabajo está guardado en esta carpeta y viaja con ella: procesarla otra vez no vuelve a transcribir.'
+        }
+        : { level: 'warn', message: `${guardado.porque} Lo guardado no se va a usar.` }
+    ]);
+
     const problems = alertsHtml((cls.problems || []).map(p => ({ level: 'err', message: p.message })));
     const warnings = alertsHtml((cls.warnings || []).map(w => ({ level: 'warn', message: w.message })));
 
@@ -220,14 +283,14 @@ function drawerHtml(cls) {
 
     return `
         <div class="facts">${facts}</div>
-        ${problems}${warnings}${nominal}
+        ${hecho}${problems}${warnings}${nominal}
 
         <div class="section-title">Material</div>
         <div class="file-list">${files(cls.videos)}${files(cls.audios)}</div>
 
         <div class="section-title">
             Bloques del director de contenido
-            <button class="btn btn-ghost" id="drawer-reveal" style="float:right;margin-top:-4px">Ver el XML</button>
+            <button class="btn btn-ghost btn-corner" id="drawer-reveal">Ver el XML</button>
         </div>
         ${blocks ? `<div class="blocks">${blocks}</div>` : '<div class="empty">Sin bloques en el XML.</div>'}
     `;

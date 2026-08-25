@@ -7,17 +7,23 @@ import { state } from './estado.js';
 import { closeDrawer } from './vista-clases.js';
 
 const STAGE_LABEL = {
+    reusar: 'Recuperando el trabajo ya hecho',
     transcribir: 'Transcribiendo el Live-Mix',
     alinear: 'Alineando los marcadores',
     afinar: 'Afinando los cortes dudosos',
+    despegar: 'Quitando lo que se dice dos veces',
     revisar: 'Leyendo la clase entera',
+    repasar: 'Arreglando lo que no cierra',
     cortar: 'Calculando los cortes',
     exportar: 'Escribiendo el XML'
 };
 
 export const run = { rows: new Map(), started: 0, total: 0, done: 0, cancelling: false, modelo: null };
 
-export async function startProcessing() {
+/**
+ * @param {boolean} desdeCero ignora el trabajo guardado y lo rehace todo
+ */
+export async function startProcessing(desdeCero) {
     const selected = state.scan.classes.filter(c => c.selected);
     if (!selected.length) return;
 
@@ -31,10 +37,15 @@ export async function startProcessing() {
 
     showView('run');
     setStep(3);
-    $('run-title').textContent = selected.length === 1 ? 'Procesando 1 clase' : `Procesando ${selected.length} clases`;
-    $('run-sub').textContent = $('use-ai').checked
-        ? 'Transcribe, alinea, afina los cortes dudosos y lee la clase entera.'
-        : 'Solo reglas: la IA local está apagada.';
+    const verbo = desdeCero ? 'Reprocesando' : 'Procesando';
+    $('run-title').textContent = selected.length === 1
+        ? `${verbo} 1 clase`
+        : `${verbo} ${selected.length} clases`;
+    $('run-sub').textContent = !$('use-ai').checked
+        ? 'Solo reglas: la IA local está apagada.'
+        : (desdeCero
+            ? 'Desde cero: se ignora lo guardado y se vuelve a transcribir.'
+            : 'Transcribe, alinea, afina los cortes dudosos y lee la clase entera.');
     $('btn-cancel').hidden = false;
     $('btn-open-output').hidden = true;
     $('btn-back').hidden = true;
@@ -45,7 +56,11 @@ export async function startProcessing() {
     finishProcessing(await window.cc.process({
         root: state.scan.root,
         ids: selected.map(c => c.id),
-        useAi: $('use-ai').checked
+        force: Boolean(desdeCero),
+        useAi: $('use-ai').checked,
+        // Vacío es "el mejor que haya": la elección a mano solo pisa el orden de
+        // preferencia cuando el editor de verdad eligió algo.
+        model: $('ai-model').value || null
     }));
 }
 
@@ -133,13 +148,25 @@ export function renderRunRows() {
                 : '<span class="cell-dim">—</span>'}</td>
         </tr>`;
     }).join('');
+
+    pintarProgreso();
+}
+
+/** Le da su ancho a cada barra de progreso recién puesta. */
+function pintarProgreso() {
+    for (const barra of $('run-rows').querySelectorAll('.progress [data-percent]')) {
+        barra.style.width = `${barra.dataset.percent}%`;
+    }
 }
 
 function estadoDeFila(entry) {
     if (entry.status === 'espera') return '<span class="cell-dim">en espera</span>';
     if (entry.status === 'trabajando') {
+        // El ancho no puede ir como atributo `style`: la política de seguridad
+        // de la ventana los descarta y la barra se queda siempre vacía. Viaja
+        // como dato y lo aplica `pintarProgreso` cuando la fila ya está puesta.
         const bar = entry.percent != null
-            ? `<span class="progress"><span style="width:${entry.percent}%"></span></span>`
+            ? `<span class="progress"><span data-percent="${entry.percent}"></span></span>`
             : '';
         return `${esc(STAGE_LABEL[entry.stage] || 'Trabajando')}${bar}`;
     }

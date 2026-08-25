@@ -16,10 +16,11 @@ const decidir = require('./decidir');
 const cutplan = require('./cutplan');
 const exporter = require('./export');
 const workspace = require('./workspace');
+const estadoClase = require('./estado-clase');
 const onset = require('./vendor/audio-onset');
 const ollamaServer = require('./ollama-server');
 
-const STAGES = ['transcribir', 'alinear', 'afinar', 'revisar', 'cortar', 'exportar'];
+const STAGES = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
 
 /**
  * @param {object} params
@@ -42,6 +43,18 @@ async function processClass(params) {
     // Los Backup viejos tenían una carpeta por clase. Se pasan al formato plano
     // antes de buscar nada, para no dar por perdido un transcript que está.
     workspace.migrateBackup(root);
+
+    // Y si la clase trae trabajo guardado de otra vez —procesada desde la
+    // carpeta del día y ahora entrando por la del curso—, se devuelve al Backup
+    // de esta raíz antes de mirar nada. Reprocesar a pedido no lo mira: ahí lo
+    // que se quiere es justamente volver a empezar.
+    let reusado = { restaurados: [], desde: null };
+    if (!params.force) {
+        reusado = estadoClase.hidratar({ root, cls });
+        if (reusado.restaurados.length) {
+            notify('reusar', { restaurados: reusado.restaurados, desde: reusado.desde });
+        }
+    }
 
     // ── 1. Transcribir ──
     let transcript = null;
@@ -108,10 +121,38 @@ async function processClass(params) {
         return { ok: false, error: `No se pudo escribir el XML: ${err.message}` };
     }
 
+    // ── 5. Dejar el trabajo junto al material ──
+    //
+    // Al final y no antes: lo que se guarda es lo que quedó en disco, ya
+    // exportado. Si falla, la corrida sigue siendo buena —el XML está— y lo
+    // único que se pierde es poder saltarse esto la próxima vez.
+    const guardado = estadoClase.guardar({
+        root,
+        cls,
+        resumen: {
+            app: params.appVersion || null,
+            modelo: params.modelName || null,
+            datos: {
+                bloques: plan.totals ? plan.totals.kept : null,
+                offsetSec: alignResult.offset ? alignResult.offset.appliedSec : null
+            }
+        }
+    });
+    if (!guardado.ok) {
+        warnings.push({
+            code: 'estado_no_guardado',
+            message: `El XML quedó bien, pero no se pudo guardar el trabajo en la carpeta de la clase: ${guardado.error}. ` +
+                'Si movés la carpeta, habrá que procesarla de nuevo.'
+        });
+    }
+
     const review = decided.review;
     return {
         ok: true,
         sequenceName: cls.sequenceName,
+        // Qué se saltó por estar ya hecho, para poder decirlo en la corrida.
+        reusado: reusado.restaurados.length ? reusado : null,
+        estadoGuardado: guardado.ok,
         transcript: transcript
             ? { words: transcript.wordCount, language: transcript.language, fromCache: transcript.fromCache }
             : null,
@@ -137,7 +178,7 @@ async function processClasses(params) {
     // avisos idénticos que tapaban los que sí eran distintos.
     const modelo = params.useAi === false
         ? { cliente: null, reason: 'Criterio apagado a pedido.' }
-        : await ollamaServer.ensure({ signal });
+        : await ollamaServer.ensure({ signal, model: params.model });
     const avisoDelModelo = modelo.cliente ? null : {
         code: 'sin_modelo',
         message: `${modelo.reason} Los cortes salen con las reglas, sin criterio en los casos dudosos.`
@@ -154,6 +195,7 @@ async function processClasses(params) {
                 ...params,
                 cls,
                 ai: modelo.cliente,
+                modelName: modelo.model || null,
                 // Quien escucha necesita saber de qué clase es cada etapa:
                 // procesar trece seguidas con un progreso anónimo no dice nada.
                 onStage: (stage, info) => {

@@ -13,11 +13,20 @@ const fs = require('fs');
 const FILES = [
     'rodecaster-xml.test.js',
     'course-scan.test.js',
+    'estado-clase.test.js',
     'transcribe.test.js',
     'align.test.js',
     'export.test.js',
     'criterio.test.js',
-    'modelo-local.test.js'
+    'modelo-local.test.js',
+    'actualizar.test.js',
+    'pista.test.js',
+    'letra.test.js',
+    'notas.test.js',
+    'silencios.test.js',
+    'repeticiones.test.js',
+    'repasar.test.js',
+    'media-server.test.js'
 ];
 
 const filter = process.argv[2] || '';
@@ -41,24 +50,24 @@ function show(value) {
     try { return JSON.stringify(value); } catch (e) { return String(value); }
 }
 
+// Los tests se registran al recorrer los archivos y se corren después, en orden.
+// Es lo que permite esperar a los `async` sin tener que escribir `await t.test`
+// en cada archivo: si no se espera, la promesa se resuelve pasado el resumen y
+// el test cuenta como pasado aunque su aserción falle, que es peor que no tenerlo.
+const queue = [];
+
 const t = {
-    group(name) { currentGroup = name; console.log(`\n${name}`); },
+    group(name) {
+        currentGroup = name;
+        queue.push({ kind: 'group', name });
+    },
 
     test(name, fn) {
-        try {
-            fn();
-            state.pass++;
-            console.log(`  ✓ ${name}`);
-        } catch (err) {
-            state.fail++;
-            state.failures.push({ group: currentGroup, name, message: err.message });
-            console.log(`  ✗ ${name}\n      ${err.message}`);
-        }
+        queue.push({ kind: 'test', group: currentGroup, name, fn });
     },
 
     skip(name, why) {
-        state.skip++;
-        console.log(`  – ${name} (${why})`);
+        queue.push({ kind: 'skip', name, why });
     },
 
     ok(value, message) {
@@ -84,16 +93,44 @@ const t = {
     }
 };
 
-for (const file of FILES) {
-    if (filter && !file.includes(filter)) continue;
-    const full = path.join(__dirname, file);
-    if (!fs.existsSync(full)) continue;
-    require(full)(t);
+async function main() {
+    for (const file of FILES) {
+        if (filter && !file.includes(filter)) continue;
+        const full = path.join(__dirname, file);
+        if (!fs.existsSync(full)) continue;
+        require(full)(t);
+    }
+
+    for (const item of queue) {
+        if (item.kind === 'group') {
+            console.log(`\n${item.name}`);
+            continue;
+        }
+        if (item.kind === 'skip') {
+            state.skip++;
+            console.log(`  – ${item.name} (${item.why})`);
+            continue;
+        }
+        try {
+            await item.fn();
+            state.pass++;
+            console.log(`  ✓ ${item.name}`);
+        } catch (err) {
+            state.fail++;
+            state.failures.push({ group: item.group, name: item.name, message: err.message });
+            console.log(`  ✗ ${item.name}\n      ${err.message}`);
+        }
+    }
+
+    console.log(`\n${state.pass} pasaron · ${state.fail} fallaron · ${state.skip} salteados`);
+    if (state.fail) {
+        console.log('\nFallos:');
+        for (const f of state.failures) console.log(`  ${f.group} → ${f.name}\n    ${f.message}`);
+        process.exit(1);
+    }
 }
 
-console.log(`\n${state.pass} pasaron · ${state.fail} fallaron · ${state.skip} salteados`);
-if (state.fail) {
-    console.log('\nFallos:');
-    for (const f of state.failures) console.log(`  ${f.group} → ${f.name}\n    ${f.message}`);
+main().catch(err => {
+    console.error(`\nEl corredor se cayó: ${err && err.stack ? err.stack : err}`);
     process.exit(1);
-}
+});

@@ -20,6 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const rodecaster = require('./rodecaster-xml');
+const estadoClase = require('./estado-clase');
 
 const OUTPUT_DIR = 'The Cutter';
 const AUDIO_DIR = 'audio';
@@ -167,7 +168,9 @@ function readClass(dir, signature, rootPath) {
         warnings: [],
         selected: true,
         duplicate: false,
-        alreadyProcessed: false
+        alreadyProcessed: false,
+        // Lo que la clase guardó dentro de su carpeta la última vez, si hay.
+        trabajoGuardado: null
     };
 
     if (!pick.chosen) {
@@ -344,6 +347,31 @@ function scan(rootPath) {
         if (cls.sequenceName && done.has(cls.sequenceName)) {
             cls.alreadyProcessed = true;
             cls.processedAt = done.get(cls.sequenceName);
+        }
+
+        // Las clases procesadas antes de que existiera el archivo tienen su
+        // trabajo solo en este Backup: se les da el suyo ahora, antes de que a
+        // alguien se le ocurra mover la carpeta.
+        if (cls.processable) estadoClase.rescatar({ root: resolved, cls });
+
+        // Y lo que la clase se guardó a sí misma, que es lo que sobrevive a
+        // entrar por otra carpeta. Manda sobre el XML de salida: puede haber
+        // trabajo hecho sin XML en ESTA raíz, que es justo el caso que esto
+        // viene a resolver.
+        const guardado = estadoClase.resumen(cls);
+        if (!guardado) continue;
+        cls.alreadyProcessed = true;
+        cls.trabajoGuardado = {
+            procesadaEn: guardado.procesadaEn,
+            sirve: guardado.vale,
+            porque: guardado.porque,
+            modelo: guardado.modelo
+        };
+        if (!guardado.vale) {
+            cls.warnings.push({
+                code: 'trabajo_viejo',
+                message: `${guardado.porque} Se va a rehacer lo que haga falta.`
+            });
         }
     }
 
