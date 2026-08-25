@@ -346,9 +346,8 @@ así que valía preguntarse si dársela mejora los cortes: podría ver que lo qu
 está por dejar afuera se rehace tres minutos después, algo que ninguna ventana
 alcanza.
 
-Se probó, con la clase entera marcada bloque por bloque
-([engine/clase-entera.js](engine/clase-entera.js)), y **no conviene**. Sobre los
-174 bloques del curso:
+Se probó, con la clase entera marcada bloque por bloque, y **no conviene**.
+Sobre los 174 bloques del curso:
 
 | | defectos | consultas | tiempo |
 |---|---|---|---|
@@ -369,18 +368,14 @@ bueno, así que un bloque puede estar clavado donde decía la nota y cortar a mi
 de frase igual. Medido: los mismos 52 defectos moviendo 126 bordes en vez de 98, y
 si además se le deja preguntar al modelo, 114 consultas para terminar con uno más.
 
-Las tres palancas quedan en [engine/cut-refine.js](engine/cut-refine.js)
-(`contexto`, `mirar`, `preguntar`) con el default en lo medido como mejor, y el
-banco que las compara es [tools/banco-contexto.js](tools/banco-contexto.js):
-
-```bash
-node tools/banco-contexto.js "/ruta/al/curso" --clases 1,2,4 --rondas 3
-```
-
-Corre varias rondas alternando el orden y se queda con el mejor tiempo de cada
-una, porque con una sola corrida los tiempos se contradicen entre sí: entre una
-variante y la siguiente cambia la carga de la máquina y el estado del caché de
-Ollama.
+Con la medición cerrada, las variantes perdedoras **se borraron** en vez de
+quedar como palancas: el módulo que armaba la clase entera, el banco que
+comparaba las variantes y las opciones `contexto`, `mirar`, `preguntar` y
+`ordenes` de `cut-refine`. Una rama que producción no ejecuta nunca es código
+que igual hay que leer, probar y no romper; los números quedan acá y en el
+historial, que es donde se consultan. Si algún día se quiere re-medir con otro
+modelo, la rama se saca de git — reescribirla cuesta menos que haberla
+mantenido cableada todo ese tiempo.
 
 ### Cuánta ventana se le pide a Ollama
 

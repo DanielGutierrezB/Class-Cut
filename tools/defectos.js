@@ -4,9 +4,9 @@
  *
  * Es la definición de "corte malo" del proyecto, y vive en un solo lugar a
  * propósito: la usan `medir-cortes.js`, que mide el curso ya procesado, y
- * `banco-contexto.js`, que compara dos formas de preguntarle al modelo. Con una
- * copia en cada uno, un banco podía decir que una variante mejora mientras la
- * medición oficial decía lo contrario, y las dos tenían razón.
+ * `medir-repaso.js`, que reprocesa en memoria. Con una copia en cada uno, un
+ * banco podía decir que una variante mejora mientras la medición oficial decía
+ * lo contrario, y las dos tenían razón.
  *
  * Nada de acá le pregunta a ningún modelo: son reglas sobre el texto y sobre la
  * medición de onda que el motor ya guardó en cada borde.

@@ -7,8 +7,8 @@
  * es lo más barato de verificar que hay: se busca la frase en el transcript y se
  * mira si el borde quedó ahí.
  *
- * Se usa como módulo (lo llama `tools/banco-contexto.js` para medir una corrida
- * en memoria) y como script sobre lo que ya está en el disco:
+ * Se usa como módulo (para medir una corrida en memoria) y como script sobre lo
+ * que ya está en el disco:
  *
  *   node tools/ordenes-cumplidas.js "/ruta/al/curso" [--detalle]
  */

@@ -9,7 +9,6 @@ const speech = require('../engine/speech-edges');
 const refine = require('../engine/cut-refine');
 const coherence = require('../engine/coherence');
 const ai = require('../engine/ai-local');
-const entera = require('../engine/clase-entera');
 const orden = require('../engine/orden-del-cd');
 const fcp = require('../engine/fcp-xml');
 const precision = require('../engine/vendor/marker-precision');
@@ -330,19 +329,8 @@ module.exports = function (t) {
         t.eq(refine.needsCriterion(sinAnclar), true);
     });
 
-    t.test('con «todos» se mira hasta el de confianza alta', () => {
-        // Existe para el banco: `confidence` mide si la nota del CD enganchó con
-        // el transcript, no si el corte quedó bueno, así que valía preguntarse si
-        // saltear esos bloques dejaba cortes malos sin revisar. Medido, no los
-        // deja —de ahí que el default siga siendo 'dudosos'—, pero la palanca se
-        // conserva para poder volver a medirlo con otro modelo.
-        t.eq(refine.needsCriterion(bienAnclado, { mirar: 'todos' }), true);
-        t.eq(refine.needsCriterion(dudoso, { mirar: 'todos' }), true);
-    });
-
     t.test('un bloque que no existe no se mira nunca', () => {
         t.eq(refine.needsCriterion(null), false);
-        t.eq(refine.needsCriterion(null, { mirar: 'todos' }), false);
     });
 
     t.group('IA local · nada de lo que diga se aplica sin validar');
@@ -590,42 +578,6 @@ module.exports = function (t) {
         t.eq(refine.needsCriterion({ ...perfecto, note: 'OUT ANTES DE: "algo"' }), true);
         t.eq(refine.needsCriterion({ ...perfecto, note: 'POST: highlight' }), false,
             'una nota de post no es motivo para revisar');
-    });
-
-    t.group('la clase entera como contexto');
-
-    t.test('trae los bloques marcados y lo que se descarta entre medio', () => {
-        const words = say('esto es el primer bloque completo.', 0)
-            .concat(say('pausa pausa va de nuevo.', 10))
-            .concat(say('y esto es el segundo bloque.', 20));
-        const blocks = [
-            { startSec: 0, endSec: 2, note: 'arranque' },
-            { startSec: 20, endSec: 22, note: '' }
-        ];
-        const texto = entera.texto(blocks, words);
-
-        t.ok(/BLOQUE 1/.test(texto), 'no marcó el bloque 1');
-        t.ok(/BLOQUE 2/.test(texto), 'no marcó el bloque 2');
-        t.ok(/nota del CD: «arranque»/.test(texto), 'perdió la nota del CD');
-        t.ok(/se descarta/.test(texto), 'no mostró lo que se tira entre bloques');
-    });
-
-    t.test('sin bloques o sin palabras no inventa nada', () => {
-        t.eq(entera.texto([], say('algo', 0)), '');
-        t.eq(entera.texto([{ startSec: 0, endSec: 1 }], []), '');
-    });
-
-    t.test('sin clase, el sistema queda igual que antes', () => {
-        t.eq(entera.conLaClase('SISTEMA', ''), 'SISTEMA');
-        t.eq(entera.conLaClase('SISTEMA', null), 'SISTEMA');
-    });
-
-    t.test('con clase, el sistema la lleva detrás y sigue empezando igual', () => {
-        // El prefijo tiene que ser idéntico entre consultas para que Ollama no
-        // vuelva a leer la clase entera en cada borde.
-        const con = entera.conLaClase('SISTEMA', '⟦BLOQUE 1⟧\nhola');
-        t.ok(con.startsWith('SISTEMA'), 'el sistema dejó de ir primero');
-        t.ok(con.includes('⟦BLOQUE 1⟧'), 'no pegó la clase');
     });
 
     t.group('coherencia · el guion final');

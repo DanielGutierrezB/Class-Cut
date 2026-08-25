@@ -374,6 +374,19 @@ function textInside(words, startSec, endSec) {
     return wordsInside(words, startSec, endSec).map(textOf).join(' ').trim();
 }
 
+/**
+ * ¿Un tramo así cortado termina a mitad de frase?
+ *
+ * Es EL criterio de "final colgando" del proyecto: lo usan el detector de
+ * repeticiones para no cambiar un defecto por otro, el repaso para saber qué
+ * arreglar y las herramientas de medición para contarlo. Vivía copiado en cada
+ * uno, y tres copias de la definición son tres maneras de medir distinto.
+ */
+function quedaColgando(words, startSec, endSec) {
+    const dentro = wordsInside(words, startSec, endSec);
+    return Boolean(dentro.length) && !endsSentence(dentro[dentro.length - 1]);
+}
+
 module.exports = {
     isChatter,
     isHardChatter,
@@ -386,6 +399,7 @@ module.exports = {
     snapToSentence,
     wordsInside,
     textInside,
+    quedaColgando,
     spoken,
     textOf,
     esConteo,

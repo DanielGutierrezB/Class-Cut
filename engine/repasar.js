@@ -85,10 +85,9 @@ function abreEnFalso(words, block) {
     return Boolean(dentro.length) && speech.esConector(dentro[0]);
 }
 
-/** ¿Este bloque termina a mitad de frase? */
+/** ¿Este bloque termina a mitad de frase? El criterio vive en `speech-edges`. */
 function quedaColgando(words, block) {
-    const dentro = speech.wordsInside(words, block.startSec, block.endSec);
-    return Boolean(dentro.length) && !speech.endsSentence(dentro[dentro.length - 1]);
+    return speech.quedaColgando(words, block.startSec, block.endSec);
 }
 
 /**

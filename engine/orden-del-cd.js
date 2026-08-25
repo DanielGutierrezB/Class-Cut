@@ -39,6 +39,14 @@ const SCORE_SEGURO = 0.8;
 // otro borde.
 const MARGEN_SEC = 1.5;
 
+// Para dar por CLARA la aparición que gana el desempate, la segunda tiene que
+// quedar bastante más lejos del marcador: la mitad más lejos y además al menos
+// un segundo. Lo segundo importa con retomas pegadas — a 2 y 3 segundos del
+// marcador, cualquier factor solo casi empata y eso sigue siendo una moneda al
+// aire.
+const VENTAJA_DE_LEJANIA = 1.5;
+const VENTAJA_MINIMA_SEC = 1;
+
 /**
  * La orden que la nota le da a UN borde, o null.
  *
@@ -145,7 +153,8 @@ function ubicar(words, orden, blocks, index, options) {
     // Dos tomas casi equidistantes son una moneda al aire: ahí se ofrece la
     // frase como candidata y decide el resto de la maquinaria, que para eso
     // está.
-    const clara = !segunda || lejania(segunda) >= lejania(mejor) * 1.5 + 1;
+    const clara = !segunda
+        || lejania(segunda) >= lejania(mejor) * VENTAJA_DE_LEJANIA + VENTAJA_MINIMA_SEC;
 
     // Y por debajo del listón no se encontró la frase, se encontró otra que se
     // le parece. Un 0.75 en la clase 1 enganchó "y nos entregó el cambio en la

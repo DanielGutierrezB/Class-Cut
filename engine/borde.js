@@ -19,7 +19,12 @@
 const onset = require('./vendor/audio-onset');
 const speech = require('./speech-edges');
 
-const DEFAULTS = { fps: 30, padFrames: 2 };
+// El colchón de aire es el de toda la maquinaria (align, cut-refine,
+// marker-precision): DIEZ cuadros. Acá vivió un 2 que nadie decidió, y el mismo
+// borde quedaba con 333 ms de aire si lo movía el afinado y con 67 si lo movía
+// el detector de repeticiones — exactamente la divergencia silenciosa que este
+// módulo existe para impedir.
+const DEFAULTS = { fps: 30, padFrames: 10 };
 
 function opt(options, key) {
     if (options && options[key] !== undefined && options[key] !== null) return options[key];

@@ -20,11 +20,21 @@
 
 const precision = require('./vendor/marker-precision');
 const anchor = require('./vendor/marker-anchor');
-const onset = require('./vendor/audio-onset');
 const speech = require('./speech-edges');
-const claseEntera = require('./clase-entera');
+const borde = require('./borde');
 const ordenDelCd = require('./orden-del-cd');
 
+// Tres decisiones de acá salieron de medir sobre los 174 bloques del curso, no
+// de elegir a ojo, y las variantes perdedoras ya no están cableadas:
+//
+// - El modelo ve la VENTANA (~60 palabras alrededor del corte), no la clase
+//   entera de fondo. Con la clase cambiaban 2 defectos de 174 —ruido— a 2.8× el
+//   tiempo; de 33 consultas, 30 contestaban lo mismo. El cuello no es cuánto ve,
+//   es qué opciones tiene.
+// - La regla se les pasa solo a los bloques DUDOSOS. Pasársela a todos dejaba
+//   los defectos igual (52 y 52) moviendo 126 bordes en vez de 98.
+// - Las órdenes escritas del CD ("OUT ANTES DE: …") se APLICAN. Ignorarlas era
+//   lo que se hacía antes, y se midió que aplicarlas cumple más sin empeorar.
 const DEFAULTS = {
     fps: 30,
     padFrames: 10,
@@ -35,34 +45,7 @@ const DEFAULTS = {
     clearMargin: 1.5,
     neighbourWords: 40,
     // Lo mínimo que puede quedar de un bloque después de afinar los dos bordes.
-    minBlockSec: 1,
-    // ── Lo que sigue está medido, no elegido a ojo. El banco es
-    //    `tools/banco-contexto.js`; los números, sobre los 174 bloques del curso.
-
-    // Cuánto ve el modelo al decidir: 'ventana' son las ~60 palabras alrededor
-    // del corte; 'clase' le pone además la clase entera de fondo, con los bloques
-    // marcados, para que pueda ver si algo se rehace más adelante.
-    //
-    // Va en 'ventana' aunque la clase entera entre de sobra (unos 3700 tokens,
-    // contra los ~20k que aguanta el default de Ollama). Medido: cambia 2 de 174
-    // defectos —dentro del ruido— y cuesta 2.8× el tiempo (108s contra 38s en
-    // seis clases, mejor de tres rondas). De 33 consultas, en 30 contesta lo
-    // mismo que con la ventana: el cuello no es cuánto ve, es qué opciones tiene
-    // para elegir.
-    contexto: 'ventana',
-    // A qué bloques se les pasa la regla determinista: 'todos' o solo los
-    // 'dudosos'. Abrirla a todos parecía gratis y sensato —la regla es aritmética
-    // sobre el transcript— pero medido deja los defectos igual (52 y 52) moviendo
-    // 126 bordes en vez de 98. Mover bordes que estaban bien, para nada.
-    mirar: 'dudosos',
-    // A cuáles se les gasta una consulta al modelo cuando la regla no despega.
-    // Con 'todos' y `mirar: 'todos'` son 114 consultas en vez de 67 para terminar
-    // con un defecto MÁS.
-    preguntar: 'todos',
-    // Qué hacer con un "OUT ANTES DE: …" escrito por el CD: 'aplicar' lo lleva
-    // ahí, 'ignorar' es lo que se hacía antes y está para poder medir la
-    // diferencia.
-    ordenes: 'aplicar'
+    minBlockSec: 1
 };
 
 function opt(options, key) {
@@ -85,15 +68,13 @@ function opt(options, key) {
  * la frase. Mirarlos no sale caro: lo que cuesta es preguntarle al modelo, y eso
  * lo sigue decidiendo `clearMargin`, que solo se activa cuando hay empate.
  */
-function needsCriterion(block, options) {
+function needsCriterion(block) {
     if (!block) return false;
-    if (opt(options, 'mirar') === 'todos') return true;
     // Una orden escrita del CD se mira siempre, aunque el bloque haya enganchado
     // perfecto: engancharon los marcadores, que es otra cosa que lo que la nota
     // pide. Sin esta salida, el bloque 13 de la clase 1 —confianza alta y un
     // "OUT ANTES DE" escrito— no se miraba nunca.
-    if (opt(options, 'ordenes') === 'aplicar'
-        && (ordenDelCd.para(block, 'IN') || ordenDelCd.para(block, 'OUT'))) return true;
+    if (ordenDelCd.para(block, 'IN') || ordenDelCd.para(block, 'OUT')) return true;
     if (block.confidence !== 'alta') return true;
     for (const edge of [block.in, block.out]) {
         if (!edge) continue;
@@ -300,7 +281,7 @@ async function refineEdge(params) {
     // Si el CD escribió dónde va este corte, eso no se somete a votación: la
     // ventana que ve el modelo son ~60 palabras y la frase que pide suele caer
     // fuera, así que sin esto la orden no llegaba a ser ni una opción.
-    const orden = opt(options, 'ordenes') === 'aplicar' ? ordenDelCd.para(block, kind) : null;
+    const orden = ordenDelCd.para(block, kind);
     const pedido = orden
         ? ordenDelCd.ubicar(words, orden, blocks, index, { ...options, referencia: result.timeSec })
         : null;
@@ -357,11 +338,6 @@ async function refineEdge(params) {
         return result;
     }
 
-    if (params.puedePreguntar === false) {
-        result.reason = `hay ${usable.length} cortes parecidos y este bloque enganchó bien: se deja donde está`;
-        return result;
-    }
-
     // Empate: acá es donde vale preguntar. Se le muestran los mismos candidatos
     // que juegan por regla, sin los que dejan chatter: si se le pasa la lista sin
     // filtrar, el modelo elige uno de esos y el bloque vuelve a cerrar en "Pausa."
@@ -398,7 +374,7 @@ async function refineEdge(params) {
 
     result.askedModel = true;
     const response = await params.ai.ask({
-        system: claseEntera.conLaClase(prompt.systemMsg, params.claseTexto),
+        system: prompt.systemMsg,
         prompt: prompt.prompt,
         signal: params.signal
     });
@@ -422,45 +398,8 @@ async function refineEdge(params) {
  * Afina los bordes dudosos de una clase. Muta los bloques del alineado (que es el
  * objeto que después se guarda y se dibuja) y devuelve el resumen.
  *
- * @param {object} params { alignResult, words, options, ai, onProgress, signal }
+ * @param {object} params { alignResult, words, wav, options, ai, onProgress, signal }
  */
-/**
- * Vuelve a medir el frame contra el audio después de mover un borde.
- *
- * Sin esto, un corte elegido acá se aplicaría con el tiempo de la palabra que da
- * el transcript, sin el colchón de aire y sin el ajuste al ataque real del
- * sonido: se oiría el corte.
- *
- * Devuelve la medición entera y no solo el tiempo porque `edge.audio` —cuánto
- * aire quedó entre el corte y el sonido— hay que reescribirlo. Quedándose solo
- * con el tiempo, el borde se movía pero seguía llevando la medición del lugar
- * donde estaba antes, y todo lo que lee ese campo (el diagnóstico, la vara de
- * `tools/medir-cortes.js`) juzgaba una posición que ya no existía.
- */
-function remeasure(edge, params) {
-    const { words, wav, kind, options } = params;
-    if (!wav) return { timeSec: edge.timeSec, audio: null };
-
-    const limits = speech.wordLimits(words, edge.timeSec, kind);
-    const measured = onset.measure(wav, edge.timeSec, kind, {
-        fps: opt(options, 'fps'),
-        padFrames: opt(options, 'padFrames'),
-        minTime: limits.minTime,
-        maxTime: limits.maxTime
-    });
-    if (!measured || measured.applyTime == null) return { timeSec: edge.timeSec, audio: null };
-
-    return {
-        timeSec: measured.applyTime,
-        audio: {
-            appliedSec: Math.round(measured.applyTime * 1000) / 1000,
-            airFrames: measured.airFrames == null ? null : measured.airFrames,
-            code: measured.code || null,
-            message: measured.message || null
-        }
-    };
-}
-
 async function refineClass(params) {
     const { alignResult, words, wav, options } = params;
     const blocks = alignResult.blocks || [];
@@ -469,21 +408,10 @@ async function refineClass(params) {
         porOrden: 0, consultas: 0, fallosDelModelo: 0
     };
 
-    // Una sola vez y antes de mover nada: si se recalculara después de cada borde
-    // el texto cambiaría en cada consulta y Ollama tendría que releerlo entero.
-    const claseTexto = opt(options, 'contexto') === 'clase'
-        ? claseEntera.texto(blocks, words)
-        : '';
-
     for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        if (!needsCriterion(block, options)) continue;
+        if (!needsCriterion(block)) continue;
         stats.revisados++;
-
-        // La regla la pasa cualquiera; la consulta al modelo se la gana el que
-        // de verdad quedó dudoso.
-        const puedePreguntar = opt(options, 'preguntar') === 'todos'
-            || needsCriterion(block, { ...options, mirar: 'dudosos' });
 
         for (const kind of ['IN', 'OUT']) {
             const edge = kind === 'IN' ? block.in : block.out;
@@ -492,7 +420,6 @@ async function refineClass(params) {
 
             const refined = await refineEdge({
                 words, edge, block, blocks, index: i, kind, options,
-                claseTexto, puedePreguntar,
                 ai: params.ai,
                 signal: params.signal
             });
@@ -512,14 +439,15 @@ async function refineClass(params) {
 
             if (!refined.changed) continue;
             stats.cambiados++;
-            edge.decidedBy = refined.decidedBy;
-            const medido = remeasure({ timeSec: refined.timeSec }, { words, wav, kind, options });
-            edge.timeSec = medido.timeSec;
-            if (medido.audio) edge.audio = medido.audio;
-            edge.alignedSec = Math.round(edge.timeSec * 1000) / 1000;
-            edge.shiftSec = Math.round((edge.alignedSec - edge.originalSec) * 1000) / 1000;
-            if (kind === 'IN') block.startSec = edge.alignedSec;
-            else block.endSec = edge.alignedSec;
+            // El tiempo elegido es el de una palabra del transcript: aplicarlo a
+            // pelo dejaría el corte sin colchón de aire y sin el ajuste al ataque
+            // real del sonido. `borde.aplicar` lo mide contra la onda y reescribe
+            // `edge.audio`, que es lo que leen el diagnóstico y la vara de
+            // `tools/medir-cortes.js`.
+            borde.aplicar({
+                block, kind, timeSec: refined.timeSec, words, wav, options,
+                decidedBy: refined.decidedBy
+            });
         }
 
         if (params.onProgress) params.onProgress({ index: i, total: blocks.length, stats });
@@ -533,7 +461,6 @@ module.exports = {
     refineClass,
     refineEdge,
     withSentenceCandidates,
-    remeasure,
     needsCriterion,
     scoreCandidate,
     dropsChatter,

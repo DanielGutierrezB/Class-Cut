@@ -29,7 +29,6 @@ const borde = require('./borde');
 
 const DEFAULTS = {
     fps: 30,
-    padFrames: 2,
     // Cuántas palabras del bloque siguiente se buscan en el anterior. Con menos
     // de esto cualquier muletilla compartida da positivo; con más, dos tomas que
     // divergen a mitad de frase dejan de reconocerse.
@@ -250,12 +249,6 @@ function recortar(block, timeSec, params) {
     });
 }
 
-/** ¿El bloque termina a mitad de frase? */
-function colgando(words, block) {
-    const dentro = speech.wordsInside(words, block.startSec, block.endSec);
-    return Boolean(dentro.length) && !speech.endsSentence(dentro[dentro.length - 1]);
-}
-
 /**
  * Recorta y comprueba, con el deshacer incluido.
  *
@@ -270,14 +263,14 @@ function colgando(words, block) {
  */
 function aplicarRecorte(params) {
     const { block, siguiente, timeSec, words, wav, options, exigencia } = params;
-    const colgabaAntes = colgando(words, block);
+    const colgabaAntes = speech.quedaColgando(words, block.startSec, block.endSec);
     const memoria = borde.recordar(block, 'OUT');
 
     const nuevo = recortar(block, timeSec, { words, wav, options });
     if (nuevo == null) return null;
 
     const sigueRepitiendo = Boolean(solapeEntre(words, block, siguiente, exigencia || options));
-    if (sigueRepitiendo || (!colgabaAntes && colgando(words, block))) {
+    if (sigueRepitiendo || (!colgabaAntes && speech.quedaColgando(words, block.startSec, block.endSec))) {
         borde.deshacer(memoria);
         return null;
     }
