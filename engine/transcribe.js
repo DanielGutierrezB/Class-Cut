@@ -419,10 +419,8 @@ async function transcribeClass(params) {
     // audio solo no distingue un silencio de la voz del director hablando lejos
     // del micrófono, que mide exactamente igual. Y va DESPUÉS de corregirlas,
     // para que las pausas se recorten contra los mismos tiempos que se guardan.
-    workspace.writeJson(
-        workspace.artifact(root, sequenceName, 'silencios'),
-        silencios.deLaClase(wavPath, { palabras: result.words })
-    );
+    // `rehacer` porque las palabras acaban de cambiar: el cache que hubiera miente.
+    silencios.asegurar({ root, sequenceName, wavPath, palabras: result.words, rehacer: true });
 
     const transcript = {
         version: TRANSCRIPT_VERSION,

@@ -20,6 +20,7 @@
  */
 
 const waveform = require('./waveform');
+const workspace = require('./workspace');
 
 /** Puntos por segundo al mirar un tramo de cerca. Con 20, un hueco se ubica a 0,05 s. */
 const POR_SEGUNDO = 20;
@@ -57,12 +58,15 @@ function percentil(valores, p) {
 /**
  * Cuán fuerte suena esta clase, para tener contra qué comparar.
  *
- * @returns {number|null} null si el archivo no se pudo leer
+ * Devuelve también la duración: sale de la misma pasada por el archivo, y
+ * pedirla aparte era leer el WAV una segunda vez para un solo número.
+ *
+ * @returns {{nivel:number, duracionSec:number}|null} null si no se pudo leer
  */
 function referencia(wavPath) {
     const w = waveform.peaks(wavPath, PUNTOS_DE_REFERENCIA);
     if (!w || !w.peaks.length) return null;
-    return percentil(w.peaks, 0.9);
+    return { nivel: percentil(w.peaks, 0.9), duracionSec: w.durationSec || 0 };
 }
 
 /**
@@ -177,44 +181,58 @@ function hastaQueAlguienHabla(tramos, palabras, minimoSec) {
  */
 function deLaClase(wavPath, opciones) {
     const minimo = (opciones && opciones.minimoSec) || MINIMO_SEC;
-    const nivel = referencia(wavPath);
-    if (!nivel) return { nivel: 0, minimoSec: minimo, tramos: [] };
+    const ref = referencia(wavPath);
+    if (!ref || !ref.nivel) return { nivel: 0, minimoSec: minimo, tramos: [] };
+    if (!ref.duracionSec) return { nivel: ref.nivel, minimoSec: minimo, tramos: [] };
 
-    const info = waveform.peaks(wavPath, 64);
-    const duracion = info ? info.durationSec : 0;
-    if (!duracion) return { nivel, minimoSec: minimo, tramos: [] };
-
-    const candidatas = enTramo(wavPath, { desdeSec: 0, hastaSec: duracion, nivel, minimoSec: minimo });
+    const candidatas = enTramo(wavPath, {
+        desdeSec: 0, hastaSec: ref.duracionSec, nivel: ref.nivel, minimoSec: minimo
+    });
 
     return {
-        nivel: Math.round(nivel * 10000) / 10000,
+        nivel: Math.round(ref.nivel * 10000) / 10000,
         minimoSec: minimo,
-        duracionSec: Math.round(duracion * 100) / 100,
+        duracionSec: Math.round(ref.duracionSec * 100) / 100,
         tramos: hastaQueAlguienHabla(candidatas, opciones && opciones.palabras, minimo)
     };
 }
 
 /**
- * Las pausas que caen dentro de un tramo, recortadas a él.
+ * Las pausas de una clase, con el cache y su política de frescura en un solo
+ * lugar.
  *
- * Recortar importa: una pausa que arranca antes del borde de un bloque solo
- * cuenta como aire muerto por la parte que quedó adentro del corte.
+ * Leer el audio son 800 ms, así que el resultado se guarda como artefacto. Lo
+ * escribían dos: la transcripción (que sabe cuándo las palabras cambiaron) y el
+ * visor (que sabe cuándo el mínimo quedó viejo), cada uno con su mitad de la
+ * política — y una política repartida es dos maneras de equivocarse.
+ *
+ * `rehacer` lo pasa quien acaba de re-transcribir: las pausas se recortan
+ * contra las palabras, y con palabras nuevas el cache miente aunque el mínimo
+ * coincida.
+ *
+ * @param {object} params { root, sequenceName, wavPath, palabras, rehacer }
+ * @returns {object|null} lo mismo que `deLaClase`, o null sin Live-Mix
  */
-function dentroDe(tramos, desdeSec, hastaSec, minimoSec) {
-    const minimo = minimoSec == null ? MINIMO_SEC : minimoSec;
-    const redondo = n => Math.round(n * 100) / 100;
+function asegurar(params) {
+    const { root, sequenceName, wavPath, palabras, rehacer } = params;
+    if (!wavPath) return null;
 
-    return (tramos || []).reduce((salida, t) => {
-        const desde = Math.max(t.desdeSec, desdeSec);
-        const hasta = Math.min(t.hastaSec, hastaSec);
-        if (hasta - desde >= minimo) {
-            salida.push({ desdeSec: redondo(desde), hastaSec: redondo(hasta), duracionSec: redondo(hasta - desde) });
-        }
-        return salida;
-    }, []);
+    const artefacto = workspace.artifact(root, sequenceName, 'silencios');
+    if (!rehacer) {
+        const guardadas = workspace.readJson(artefacto);
+        if (guardadas && guardadas.minimoSec === MINIMO_SEC) return guardadas;
+    }
+
+    const halladas = deLaClase(wavPath, { palabras });
+    try {
+        workspace.writeJson(artefacto, halladas);
+    } catch (err) {
+        // Que no se pueda escribir el cache no es motivo para no mostrarlas.
+    }
+    return halladas;
 }
 
 module.exports = {
-    deLaClase, dentroDe, enTramo, referencia, hastaQueAlguienHabla,
+    deLaClase, enTramo, referencia, hastaQueAlguienHabla, asegurar,
     POR_SEGUNDO, FRACCION, MINIMO_SEC, PUENTE_SEC
 };

@@ -21,28 +21,6 @@ const estadoClase = require('./estado-clase');
 const CONTEXT_SEC = 12;
 
 /**
- * Las pausas de la clase, calculadas la primera vez y guardadas.
- *
- * Leer el audio son 800 ms y el resultado no depende del corte, así que abrir
- * el visor veinte veces mientras se revisa no puede pagarlo veinte veces. Si el
- * artefacto quedó de una versión con otro mínimo, se rehace.
- */
-function pausasDe(root, sequenceName, wavPath, palabras) {
-    if (!wavPath) return null;
-
-    const guardadas = workspace.readJson(workspace.artifact(root, sequenceName, 'silencios'));
-    if (guardadas && guardadas.minimoSec === silencios.MINIMO_SEC) return guardadas;
-
-    const halladas = silencios.deLaClase(wavPath, { palabras });
-    try {
-        workspace.writeJson(workspace.artifact(root, sequenceName, 'silencios'), halladas);
-    } catch (err) {
-        // Que no se pueda escribir el cache no es motivo para no mostrarlas.
-    }
-    return halladas;
-}
-
-/**
  * Todo lo que el visor dibuja de una clase.
  * @param {object} params { root, cls, buckets }
  */
@@ -106,8 +84,12 @@ function loadReview(params) {
         notas: notas.leer(root, sequenceName),
         // Dónde no se dice nada. El panel las intercala en el texto: leyendo el
         // transcript corrido, diez segundos de silencio son invisibles y el
-        // video parece ir atrasado.
-        silencios: pausasDe(root, sequenceName, cls.liveMixPath, transcript ? transcript.words : null),
+        // video parece ir atrasado. El cache y su frescura los maneja `silencios`.
+        silencios: silencios.asegurar({
+            root, sequenceName,
+            wavPath: cls.liveMixPath,
+            palabras: transcript ? transcript.words : null
+        }),
         waveform: wave
     };
 }

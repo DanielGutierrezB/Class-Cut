@@ -66,7 +66,7 @@ module.exports = t => {
             { seg: 3, vol: 1 }, { seg: 6, vol: 0 }, { seg: 3, vol: 1 }
         ]);
         const hallados = silencios.enTramo(f, {
-            desdeSec: 0, hastaSec: 12, nivel: silencios.referencia(f)
+            desdeSec: 0, hastaSec: 12, nivel: silencios.referencia(f).nivel
         });
         t.eq(hallados.length, 1);
         t.near(hallados[0].desdeSec, 3, 0.2, 'arranca donde se calló');
@@ -80,7 +80,7 @@ module.exports = t => {
             { seg: 2, vol: 1 }, { seg: 1, vol: 0 }, { seg: 2, vol: 1 }
         ]);
         t.eq(silencios.enTramo(f, {
-            desdeSec: 0, hastaSec: 5, nivel: silencios.referencia(f), minimoSec: 2
+            desdeSec: 0, hastaSec: 5, nivel: silencios.referencia(f).nivel, minimoSec: 2
         }).length, 0);
     });
 
@@ -93,7 +93,7 @@ module.exports = t => {
             { seg: 2, vol: 1 }
         ]);
         const hallados = silencios.enTramo(f, {
-            desdeSec: 0, hastaSec: 12.1, nivel: silencios.referencia(f)
+            desdeSec: 0, hastaSec: 12.1, nivel: silencios.referencia(f).nivel
         });
         t.eq(hallados.length, 1, 'una sola pausa, no dos');
         t.near(hallados[0].duracionSec, 8.1, 0.4);
@@ -102,7 +102,7 @@ module.exports = t => {
     t.test('un tramo sin silencios no inventa ninguno', () => {
         const f = escribirWav(wav('seguido'), [{ seg: 6, vol: 1 }]);
         t.eq(silencios.enTramo(f, {
-            desdeSec: 0, hastaSec: 6, nivel: silencios.referencia(f)
+            desdeSec: 0, hastaSec: 6, nivel: silencios.referencia(f).nivel
         }).length, 0);
     });
 
@@ -175,29 +175,6 @@ module.exports = t => {
     t.test('lo que queda demasiado corto al recortar deja de ser pausa', () => {
         const dicho = [{ start: 1.0, end: 1.5, text: 'ya' }];
         t.eq(silencios.hastaQueAlguienHabla([{ desdeSec: 0, hastaSec: 6, duracionSec: 6 }], dicho).length, 0);
-    });
-
-    t.group('recortar las pausas a un bloque');
-
-    const tramos = [{ desdeSec: 10, hastaSec: 20, duracionSec: 10 }];
-
-    t.test('una pausa entera adentro se conserva', () => {
-        t.eq(silencios.dentroDe(tramos, 5, 30)[0].duracionSec, 10);
-    });
-
-    t.test('una pausa que cruza el borde cuenta solo por lo que quedó', () => {
-        // El corte empieza en el 15: los cinco segundos de antes no están en la
-        // clase exportada y contarlos exageraría el aire muerto.
-        t.eq(silencios.dentroDe(tramos, 15, 30)[0].duracionSec, 5);
-    });
-
-    t.test('lo que queda fuera del bloque no aparece', () => {
-        t.eq(silencios.dentroDe(tramos, 30, 40).length, 0);
-    });
-
-    t.test('un resto demasiado corto deja de ser pausa', () => {
-        // Solo un segundo cae adentro, y un segundo es respirar.
-        t.eq(silencios.dentroDe(tramos, 19, 30).length, 0);
     });
 
     // Los WAV quedan en el temporal del sistema, como en el resto de la suite:
