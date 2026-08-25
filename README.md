@@ -205,6 +205,50 @@ verdad, y la regla vieja se llevaba ese "Uno" y ese "Tres" por delante — la fr
 que presenta el bloque, justo. En cifra (`3, 2, 1`) sí vale una sola: Whisper
 escribe en cifra el conteo y en letra el número hablado.
 
+### La claqueta es un piso, no una sugerencia
+
+El parser nunca la convirtió en bloque (se reconoce por el comentario del
+marcador y se saltea), pero eso no alcanzaba: el bloque 1 puede **abrirse hacia
+atrás** y tragársela. En la clase 6 el modelo eligió un corte 7,4 s antes del
+marcador y la clase empezaba con `Claqueta 6, clase 6. 3, 2, 1. Ya…`.
+
+La claqueta es la referencia para sincronizar y todo lo que pasa hasta que suena
+—acomodar la cámara, "¿grabando?", el dicho, el golpe— es preparación. Así que
+ahora es un **suelo**: ningún IN puede caer antes, y lo respetan las tres etapas
+que mueven un borde — el alineado (que es quien lo calcula, porque es quien busca
+la claqueta en el audio), el afinado y el repaso. Se toma lo más tardío que se
+sepa de ella: el golpe si se oyó, el final del dicho, o donde el CD puso el
+marcador; cualquiera de los tres que quede afuera se oye en la clase.
+
+En el afinado se filtra el **candidato**, no se corrige el resultado: si el
+modelo llega a ver la opción de abrir ahí, la elige. Es exactamente lo que pasó.
+
+Y se agregó un defecto a la vara (`tools/defectos.js`): **la claqueta dentro del
+corte**. Hasta ahora no se medía —"Claqueta" no es charla del director ni un
+conteo, es su propia categoría— así que el peor defecto posible era invisible
+para todas las mediciones.
+
+### La charla del director tiene que venir suelta
+
+`ok`, `listo`, `vale`, `ya`, `bueno` son órdenes al editor cuando vienen sueltas
+y habla normal cuando no ("ya está listo", "bueno, sigamos"). El código lo decía
+en un comentario —"solo cuentan como orden si vienen **sueltas**, después de un
+silencio"— pero solo comprobaba el silencio.
+
+Costó una frase entera. En la clase 6, "Ya" abría `Ya Clauco nos entregó los
+planos de nuestra casa` a 0,35 s del conteo, justo en el umbral: contaba como
+orden, y eso **bloqueaba el retraer** del ajuste a frase, que entonces daba por
+perdido el arranque y saltaba a la frase siguiente. El bloque se comía la primera
+oración completa.
+
+Ahora se pide lo que decía el comentario: suelta es cerrar su propia frase
+("Ok.", "Ya.", "Listo.") o no tener nada detrás. Con más palabras pegadas es
+habla. Y los sitios que preguntaban sin pasar la palabra de al lado ahora la
+pasan: sin ella no hay forma de saber si viene suelta.
+
+Medido sobre el curso por el camino determinista completo: los defectos quedan
+en 45, los mismos que antes (ninguna regresión) y con la frase recuperada.
+
 ### Lo que se dice dos veces
 
 El profesor arranca una idea, no le sale, y la vuelve a decir. El CD marca los dos
@@ -668,6 +712,47 @@ comentario sobre material que después quedó afuera no se pierde, pero tampoco
 viaja al XML final —un marcador suelto ahí confunde más de lo que ayuda—; vuelve
 a aparecer si el bloque se recupera.
 
+### Guardar deja al día toda la carpeta, no solo la clase abierta
+
+Los comentarios se guardan al instante, pero al XML llegan solo al exportar, y
+exportar pasaba únicamente por apretar «Guardar y regenerar» **estando en esa
+clase**. Quien comentaba en la clase 3, seguía a la 7 y guardaba ahí, se llevaba
+a Premiere el XML de la 3 sin sus comentarios y sin ninguna señal de que faltaba
+algo: la peor forma de perder trabajo de una persona.
+
+Ahora el botón deja al día todas las que lo necesiten. Cuáles lo necesitan se
+**mide** en vez de reexportar todo a ciegas: la fecha del `notas.json` de cada
+clase contra la del XML exportado. Si se escribió después de la última
+exportación, esa clase está atrasada ([engine/regenerar.js](engine/regenerar.js)).
+Se compara contra el XML y no contra el `procesadaEn` del `class-cut.json`
+porque el XML es el archivo que el editor importa, y porque guardar una nota no
+mueve esa fecha.
+
+- **El alcance es la carpeta de la clase abierta.** Pueden haber varias
+  cargadas a la vez, y un botón apretado dentro de una clase no puede salir a
+  escribir XML en la carpeta de otro cliente. Las atrasadas de las otras
+  carpetas se cuentan y se dicen en el tooltip, pero no se tocan.
+- **El botón dice qué va a hacer antes** (`Guardar y regenerar · 3 clases`, con
+  el detalle y el motivo de cada una en el tooltip) **y qué hizo después**, en el
+  aviso. Un XML que no se pudo escribir se nombra aparte: pasar por regenerado
+  es justo el caso en que alguien va a Premiere a buscar algo que no está.
+- **Lo que se reexporta sale del plan guardado de cada clase, no del alineado.**
+  Los bordes que el editor movió viven en el plan; el alineado se queda con lo
+  que calculó la herramienta. Reexportar desde el alineado le devolvería a la
+  clase los cortes automáticos, que es peor que el problema original.
+- Reexportar no recalcula nada: reconstruye el plan y reescribe el XML, unos
+  milisegundos por clase. El material no se toca nunca.
+
+Guardar la misma nota dos veces no reescribe el archivo, porque su fecha es
+justo la señal: el campo de la nota guarda al salir del foco, así que entrar y
+salir sin escribir nada anunciaba clases atrasadas que estaban al día.
+
+Y al revés: los **bordes** son lo único de la revisión que vive solo en memoria.
+Cambiar de clase con bordes movidos y sin guardar los tiraba en silencio, así
+que ahora se pregunta —guardar y cambiar, cambiar sin guardar, o quedarse—. Se
+pregunta al abrir la clase nueva y no en el selector, porque a otra clase se
+llega también desde la tabla y por esa puerta se perdían igual.
+
 Detalles que valen la pena:
 
 - **No se transcodifica nada.** Los archivos del Rodecaster son H.264 en MP4, que
@@ -699,6 +784,127 @@ bytes que nunca llegan en el orden que pidió.
 > dentro de una plantilla de HTML **queda en el DOM y no se aplica nunca**, sin
 > ningún error. Los estilos calculados se ponen tocando `.style` desde el código
 > (así se pintan la tira de bloques y las barras de progreso).
+
+## Las pistas del XML cortado
+
+Quedan por papel y no por el orden en que el Rodecaster numeró los archivos:
+
+```
+V3   la cámara del profesor OTRA VEZ, solo en los bloques de pantalla → el recuadro
+V2   el grabador de pantalla
+V1   la cámara del profesor
+A1   Live-Mix
+```
+
+En V1 y V2 se enciende la que el bloque eligió y la otra queda **puesta pero
+apagada** en su sitio: cambiar de plano sigue siendo un clic y ninguna tapa a la
+buena. Antes V1 iba siempre encendida como base; ahora en un bloque de pantalla
+queda apagada, para que el bloque tenga una sola imagen a pantalla completa.
+
+V3 solo lleva clips en los bloques que van con la pantalla — en los demás no hay
+nada que meter en la esquina, y una pista con clips apagados de punta a punta es
+ruido. Si la clase se grabó con una sola cámara, V3 no existe.
+
+### Una nota es lo que escribió el CD, y nada más
+
+El comentario de un marcador IN del Rodecaster viene con el formato
+`nota - cue`: adelante lo que escribió el CD, detrás el arranque de lo que se
+dice, que es transcript. `parseInComment` los separa desde siempre, pero cuando
+la nota estaba vacía **todo lo que la muestra se caía al cue**, y el campo de la
+nota mostraba un pedazo de letra cortado a media palabra como si alguien lo
+hubiera escrito. En el curso hay **73 bloques con nota de 181**: en los otros 108
+lo que se leía era transcript.
+
+El respaldo estaba en cuatro sitios, y el peor no era de la interfaz:
+`clase-entera.js` le pasaba el cue al modelo anunciado como `nota del CD:`, así
+que el modelo leía como directiva las mismas palabras que dos líneas abajo le
+llegaban como contenido del bloque. Los otros tres eran la pista del visor
+(`pista.js`), la lista de bloques y el marcador del XML del corte.
+
+El cue **no se borró del modelo**: es lo que ancla los bordes contra el
+transcript (`cueIn`/`cueOut`) y sigue mostrándose en la ficha de la clase con su
+nombre, `entra:` / `sale:`. Lo que se sacó es que se muestre y se exporte *como
+si fuera una nota*.
+
+### Todos los bloques llevan marcador, en dos formas
+
+Los límites de cada bloque ya los dicen los cortes entre clips, así que por un
+rato pareció que un marcador sin texto era ruido y podía no salir. **No**: en
+Premiere los marcadores no son solo para leer, son **cómo se recorre la
+secuencia**. Se salta de marcador en marcador, y si falta el de un bloque ese
+bloque no se alcanza con esa navegación. Con "solo los que dicen algo", 12 de los
+15 bloques de la clase 1 quedaban fuera del recorrido.
+
+Así que salen todos, con dos formas según lo que digan:
+
+- **Con texto** —la nota del CD o la que corrigió el editor— el marcador abarca
+  el bloque **de borde a borde**: se lee de un vistazo a qué tramo se refiere sin
+  buscar la raya con zoom. Antes duraba un frame; los diez segundos del marcador
+  de origen fueron un paso intermedio y quedaron sin efecto acá.
+- **Sin texto** va **corto y sin comentario**, solo con el nombre de la vista
+  (`PV`, `R`): está para saltar, y no tiene nada que decir. Nada de texto
+  inventado y nada de cue. Sin duración el formato escribe `out` en `-1`, que es
+  su manera de decir "esto es un punto".
+
+En las dos, el color es el que le puso el CD (el `pproColor` ARGB viaja tal cual).
+La clase 1 da **16 marcadores: 15 de bloque —3 largos, 12 cortos— y 1 de
+selección**.
+
+Aparte van los **comentarios de selección de texto**, que son otro objeto: no son
+de un bloque sino de un pedazo de letra. Duran **lo que dura la selección** y
+salen **blancos**, para no confundirlos con los del CD. Si la selección se pasa
+del borde del bloque se recorta ahí: más allá del corte el material no está en la
+secuencia, o está en otro sitio.
+
+El blanco va como entero y no como el nombre `white` porque solo los enteros
+escriben `pproColor`, que es lo único que evita que Premiere ajuste el color al
+más parecido de su paleta. Y el entero no es inventado: `0xFFFFFFFF`
+(`4294967295`) es exactamente el que el Rodecaster le pone a sus propios
+marcadores blancos —los de claqueta, 28 en el material del curso—, así que se
+sabe que Premiere lo lee como blanco porque es Premiere quien lo escribió.
+
+Los dos XML espejo no cambian: `poblada.xml` y `alineada.xml` son el original
+—los marcadores del CD como los dejó, en su sitio y movidos— y ahí van todos y
+con los diez segundos que traían. Sirven para ver si el problema ya estaba antes
+de que tocáramos nada, y para eso tienen que ser fieles.
+
+Los marcadores son de las cosas que no se pueden revisar mirando la app:
+[tools/ver-marcadores.js](tools/ver-marcadores.js) arma el XML del corte de una
+clase de verdad y lo escribe en `/tmp` para poder abrirlo y leerlo, sin tocar
+`The Cutter`. Agrega un comentario de selección inventado —en memoria, el archivo
+de notas del usuario no se toca— para que el marcador blanco también se vea.
+
+```bash
+node tools/ver-marcadores.js "/ruta/al/curso" [nombre-de-secuencia]
+```
+
+### Los efectos del recuadro: hasta dónde llega un XML
+
+Esto es un límite del formato y conviene saberlo antes de pelearse con él. Un XML
+de intercambio FCP7 solo puede llevar **Basic Motion (posición, escala,
+rotación), Opacidad y Crop**, que Premiere mapea a sus efectos intrínsecos; todo
+lo demás se descarta al importar y lo dice en el informe de traducción
+([documentación de Adobe](https://helpx.adobe.com/premiere-pro/using/importing-xml-project-files-final.html)).
+
+O sea:
+
+- **El recuadro cuadrado en la esquina, con su escala y su posición: sí se puede.**
+  Sale por Basic Motion + Crop y aterriza en el Motion intrínseco de Premiere, que
+  además es exactamente el control para reacomodar al profesor a mano — está
+  siempre arriba en Controles de efectos, sin agregar nada.
+- **Un efecto "Transform" propio: no.** Es nativo de Premiere y no existe en el
+  formato. Lo que se quería de él —poder mover el recuadro— ya lo da el Motion.
+- **"Rounded Crop" / bordes redondeados: no.** También es nativo. Se resuelve con
+  un **preset de efecto** que se arrastra sobre los clips de V3 (una vez, y queda
+  guardado), o con un script en Premiere como el que ya existe para Resolve
+  ([resolve/colorear-clips.py](resolve/colorear-clips.py)).
+
+Los números de la geometría (cuánta escala, cuánto crop, en qué esquina) están
+pendientes de calibrar contra Premiere: la unidad del `center` de Basic Motion no
+se puede adivinar sin verla, y una posición mal puesta manda el recuadro fuera de
+cuadro. La forma barata de resolverlo es al revés: armar el recuadro a mano en
+Premiere una vez, exportar esa secuencia como XML de FCP7 y leer de ahí los
+valores exactos.
 
 ## Colores
 
