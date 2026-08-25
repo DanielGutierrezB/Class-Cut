@@ -203,6 +203,20 @@ module.exports = t => {
         }
     });
 
+    t.test('un repo sin releases dice que no hay nada, no que falló', async () => {
+        // Los releases viven en el mismo repo que el código, así que mientras no se
+        // publique ninguno GitHub contesta 404. Eso es "todavía no hay nada", y
+        // llamarlo error deja el botón avisando de una avería que no existe.
+        const gh = await fakeGitHub((req, res) => { res.writeHead(404); res.end('Not Found'); });
+        try {
+            const res = await conBase(gh.url, { currentVersion: '0.1.0' });
+            t.ok(!res.hay);
+            t.ok(!/404|No se pudo/.test(res.motivo), res.motivo);
+        } finally {
+            await gh.close();
+        }
+    });
+
     t.group('descargar el instalador');
 
     t.test('baja el archivo y avisa cómo va', async () => {

@@ -87,7 +87,9 @@ function getJson(url, options) {
         }, response => {
             if (response.statusCode !== 200) {
                 response.resume();
-                reject(new Error(`GitHub respondió ${response.statusCode}`));
+                const fallo = new Error(`GitHub respondió ${response.statusCode}`);
+                fallo.statusCode = response.statusCode;
+                reject(fallo);
                 return;
             }
             let body = '';
@@ -116,6 +118,12 @@ async function check(params) {
     try {
         release = await getJson(url, params);
     } catch (err) {
+        // Un repo sin ningún release contesta 404 a /releases/latest. Eso no es que
+        // la consulta falló: es que todavía no hay nada publicado, y decirlo como
+        // error deja al botón mostrando una avería donde no la hay.
+        if (err.statusCode === 404) {
+            return { hay: false, motivo: 'Todavía no hay ninguna versión publicada.' };
+        }
         return { hay: false, motivo: `No se pudo consultar si hay novedades: ${err.message}` };
     }
 
