@@ -112,6 +112,13 @@ code, .mono {
        desaparece (ver la consulta de ancho más abajo). */
     flex: none;
     white-space: nowrap;
+    /* Los modelos de los proveedores traen nombres kilométricos
+       (claude-sonnet-5-thinking-high) que empujaban a Diagnóstico fuera de la
+       pantalla: pasado este ancho, puntos suspensivos y el nombre completo en
+       el globito. */
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     -webkit-app-region: no-drag;
     cursor: default;
 }
@@ -127,9 +134,9 @@ code, .mono {
 .brand-model.is-falta { color: var(--warn); border-color: rgba(245, 181, 68, .35); }
 
 /* Con la ventana en su ancho mínimo el cabezal ya venía justo —los cinco pasos
-   no se encogen—, así que agregarle cien píxeles empuja a "Diagnóstico" afuera
-   de la pantalla. Ahí el modelo se cede: sigue estando en Diagnóstico. */
-@media (max-width: 1040px) {
+   no se encogen—, y ahora carga también el botón de Ajustes. Cuando no entra,
+   el modelo se cede: sigue estando en Diagnóstico y en Ajustes. */
+@media (max-width: 1150px) {
     .brand-model { display: none; }
 }
 
@@ -767,6 +774,55 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .finding-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; }
 .finding-tipo { font-weight: 600; font-size: 11.5px; }
 .finding-fix { color: var(--text-mute); margin-top: 3px; }
+
+/* ─── Ajustes ───────────────────────────────────────────────────── */
+
+.aj-intro {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin: 0 0 14px;
+}
+.aj-tarjetas { display: grid; gap: 8px; margin-bottom: 14px; }
+.aj-tarjeta {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-2);
+    cursor: pointer;
+}
+.aj-tarjeta:hover { border-color: var(--line-strong); }
+.aj-tarjeta.is-activa {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+}
+.aj-tarjeta input { margin-top: 3px; accent-color: var(--accent); }
+.aj-tarjeta-texto { display: grid; gap: 2px; font-size: 12.5px; }
+.aj-tarjeta-texto .cell-dim { font-size: 11.5px; line-height: 1.45; }
+
+.aj-config { display: grid; gap: 10px; margin-bottom: 14px; }
+.aj-campo { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; }
+.aj-campo > span { font-size: 12px; color: var(--text-dim); }
+.aj-campo input, .aj-campo select {
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 7px 10px;
+    width: 100%;
+}
+.aj-campo input:focus, .aj-campo select:focus { outline: none; border-color: var(--accent); }
+.aj-aviso { font-size: 12px; color: var(--warn); margin: 0; }
+
+.aj-acciones { display: flex; align-items: center; gap: 10px; }
+.aj-espacio { flex: 1; }
+.aj-resultado { font-size: 12px; color: var(--text-mute); }
+.aj-resultado.is-ok { color: var(--ok); }
+.aj-resultado.is-mal { color: var(--err); }
 
 /* ─── Actualización ─────────────────────────────────────────────── */
 

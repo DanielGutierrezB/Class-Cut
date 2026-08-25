@@ -36,9 +36,24 @@ export async function refrescar() {
 
     chip.classList.remove(...ESTADOS);
     chip.classList.add(`is-${ai.estado}`);
-    chip.textContent = ai.estado === 'falta' ? 'sin modelo' : ai.model;
+    chip.textContent = ai.estado === 'falta' ? 'sin criterio' : etiqueta(ai);
     chip.title = detalle(ai);
     chip.hidden = false;
+}
+
+/** El modelo y, si no es el local, por dónde: cambia el resultado y se ve. */
+function etiqueta(ai) {
+    // Sin el prefijo del fabricante: "claude-" no distingue nada en un chip que
+    // ya dice Cursor o Claude al lado, y esos píxeles empujaban al resto.
+    const corto = String(ai.model || '').replace(/^claude-/, '');
+    switch (ai.proveedor) {
+        case 'cursor': return `${corto} · Cursor`;
+        case 'anthropic': return `${corto} · Claude`;
+        case 'local':
+        default:
+            // Los estados viejos venían sin proveedor: eran siempre el local.
+            return ai.model;
+    }
 }
 
 function detalle(ai) {

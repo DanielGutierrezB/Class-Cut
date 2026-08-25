@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('cc', {
     modelos: () => ipcRenderer.invoke('modelos'),
     modelo: preferido => ipcRenderer.invoke('modelo', preferido),
 
+    ajustesLeer: () => ipcRenderer.invoke('ajustes-leer'),
+    ajustesGuardar: datos => ipcRenderer.invoke('ajustes-guardar', datos),
+    iaProbar: config => ipcRenderer.invoke('ia-probar', config),
+    cursorModelos: () => ipcRenderer.invoke('cursor-modelos'),
+
     updateCheck: () => ipcRenderer.invoke('update-check'),
     updateDownload: payload => ipcRenderer.invoke('update-download', payload),
     updateCancel: () => ipcRenderer.invoke('update-cancel'),

@@ -18,6 +18,7 @@ import { run, startProcessing, renderRunRows, renderRunFoot } from './vista-corr
 import { openReview, wireReview } from './visor/index.js';
 import { rev } from './visor/estado.js';
 import { showDoctor } from './diagnostico.js';
+import { showAjustes } from './ajustes.js';
 import { init as initActualizar, buscar as buscarUpdate } from './actualizar.js';
 import { refrescar as refrescarModelo } from './modelo.js';
 
@@ -91,6 +92,7 @@ async function init() {
 
     $('drawer-close').onclick = closeDrawer;
     $('btn-doctor').onclick = showDoctor;
+    $('btn-ajustes').onclick = showAjustes;
     initActualizar(info.version);
     $('modal-close').onclick = () => { $('modal').hidden = true; };
     $('modal').onclick = e => { if (e.target.id === 'modal') $('modal').hidden = true; };

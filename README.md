@@ -337,11 +337,38 @@ viene pegado, porque el "en tercero" está ahí y se lee de corrido. Esa es la
 guarda — la misma que ya usaba [tools/defectos.js](tools/defectos.js) para
 contarlos.
 
+### El criterio se elige en Ajustes
+
+El criterio —quién decide los cortes dudosos y lee el guion— es una preferencia
+de la máquina, no de la clase. En **Ajustes** (arriba a la derecha) hay tres:
+
+- **Modelo local.** El que viene con la app. Sin internet, sin cuentas, y con la
+  semilla fija reprocesar da el corte idéntico. Es el default de fábrica.
+- **Cursor CLI.** La cuenta de Cursor del editor, con el modelo que tenga
+  contratado (Sonnet, GPT, el que sea). El CLI corre en modo impresión y de
+  solo lectura, en un directorio vacío propio: contesta números, no ve archivos.
+- **API de Claude.** Directo a Anthropic con la clave del editor. La clave se
+  guarda en esta Mac y solo viaja a `api.anthropic.com`.
+
+**Probar** funciona antes de Guardar: se pega la clave o se elige el modelo, se
+ve que contesta y cuánto tarda, y recién ahí uno se lo queda. Los proveedores
+remotos declaran ventana grande (`contextoGrande`), y con eso el motor les da
+la clase ENTERA de fondo al decidir cada corte y les pasa el guion completo en
+una sola lectura — con el local eso se midió y no conviene (abajo); con una
+ventana de un millón de tokens, ver que lo que se está por descartar se rehace
+tres minutos después es exactamente lo que el modelo chico no podía.
+
+Lo que se pierde con un proveedor remoto es el determinismo bit a bit: no hay
+semilla que fijar por el CLI, así que reprocesar da un corte equivalente pero
+no idéntico (por la API se pide `temperature: 0`, que es lo más cerca). Las
+herramientas de medición usan la MISMA puerta que la app (`engine/ia.js`), con
+`--ia` y `--modelo` para los A/B.
+
 ### Cuánto tiene que ver el modelo
 
-Al afinar un borde, el modelo ve unas 60 palabras alrededor del corte. La clase
-entera también le entraría —unos 3700 tokens, contra los ~20k que aguanta el
-default de Ollama, medido con [tools/medir-contexto.js](tools/medir-contexto.js)—
+Al afinar un borde, el modelo LOCAL ve unas 60 palabras alrededor del corte. La
+clase entera también le entraría —unos 3700 tokens, contra los ~20k que aguanta
+el default de Ollama, medido con [tools/medir-contexto.js](tools/medir-contexto.js)—
 así que valía preguntarse si dársela mejora los cortes: podría ver que lo que
 está por dejar afuera se rehace tres minutos después, algo que ninguna ventana
 alcanza.
@@ -369,13 +396,17 @@ de frase igual. Medido: los mismos 52 defectos moviendo 126 bordes en vez de 98,
 si además se le deja preguntar al modelo, 114 consultas para terminar con uno más.
 
 Con la medición cerrada, las variantes perdedoras **se borraron** en vez de
-quedar como palancas: el módulo que armaba la clase entera, el banco que
-comparaba las variantes y las opciones `contexto`, `mirar`, `preguntar` y
-`ordenes` de `cut-refine`. Una rama que producción no ejecuta nunca es código
-que igual hay que leer, probar y no romper; los números quedan acá y en el
-historial, que es donde se consultan. Si algún día se quiere re-medir con otro
-modelo, la rama se saca de git — reescribirla cuesta menos que haberla
-mantenido cableada todo ese tiempo.
+quedar como palancas: el banco que las comparaba y las opciones `contexto`,
+`mirar`, `preguntar` y `ordenes` de `cut-refine`. Una rama que producción no
+ejecuta nunca es código que igual hay que leer, probar y no romper; los números
+quedan acá y en el historial, que es donde se consultan.
+
+La historia siguió: `clase-entera.js` VOLVIÓ del historial cuando aparecieron
+los proveedores de ventana grande — exactamente el "si algún día se re-mide con
+otro modelo, la rama se saca de git" que decía este párrafo. Pero volvió como
+capacidad, no como opción: se enciende sola cuando el cliente declara
+`contextoGrande`, y con el modelo local sigue apagada, que es lo que la
+medición dijo.
 
 ### Cuánta ventana se le pide a Ollama
 

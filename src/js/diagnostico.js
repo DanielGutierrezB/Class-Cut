@@ -19,7 +19,7 @@ export async function showDoctor() {
             : `<span class="badge ${tool.required ? 'badge-err' : 'badge-warn'}">${tool.required ? 'falta' : 'todavía no hace falta'}</span> <span class="cell-dim">buscado en: ${esc(tool.searched.join(', '))}</span>`
         ]);
     }
-    if (doc.ai) rows.push(['Modelo local (Ollama)', insigniaModelo(doc.ai)]);
+    if (doc.ai) rows.push([nombreDelCriterio(doc.ai), insigniaModelo(doc.ai)]);
 
     openModal('Diagnóstico', `<div class="kv">${rows.map(([k, v]) =>
         `<div class="kv-row"><div class="kv-key">${esc(k)}</div><div class="kv-val">${v}</div></div>`).join('')}</div>`);
@@ -27,6 +27,16 @@ export async function showDoctor() {
     // A mano se contesta siempre, aunque la respuesta sea que no hay nada:
     // apretar un botón y que no pase nada se lee como que está roto.
     $('doctor-update').onclick = () => buscar(true);
+}
+
+/** El renglón dice por dónde va el criterio, que ahora se elige en Ajustes. */
+function nombreDelCriterio(ai) {
+    switch (ai.proveedor) {
+        case 'cursor': return 'Criterio (Cursor CLI)';
+        case 'anthropic': return 'Criterio (API de Claude)';
+        case 'local':
+        default: return 'Criterio (modelo local)';
+    }
 }
 
 /**

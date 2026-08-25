@@ -23,6 +23,9 @@ const notas = require('./engine/notas');
 const estadoClase = require('./engine/estado-clase');
 const waveform = require('./engine/waveform');
 const ollamaServer = require('./engine/ollama-server');
+const ia = require('./engine/ia');
+const ajustes = require('./engine/ajustes');
+const aiCursor = require('./engine/ai-cursor');
 const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
 const devShot = require('./dev-shot');
@@ -124,7 +127,7 @@ app.on('window-all-closed', () => {
 
 // El modelo es un proceso aparte y no se entera de que la app cerró: sin esto
 // queda cargado ocupando memoria hasta que alguien lo mate a mano.
-app.on('before-quit', () => { ollamaServer.stop(); });
+app.on('before-quit', () => { ia.parar(); });
 
 // ─── Puente con la ventana ────────────────────────────────────────────
 
@@ -141,9 +144,28 @@ ipcMain.handle('doctor', async () => {
     // los bordes dudosos y la lectura del guion. Por eso se informa aparte, y sin
     // levantar el servidor: abrir Diagnóstico no debería cargar un modelo en
     // memoria.
-    report.ai = ollamaServer.estado();
+    report.ai = ia.estado();
     return report;
 });
+
+// ─── Ajustes ──────────────────────────────────────────────────────────
+
+ipcMain.handle('ajustes-leer', () => ajustes.leer());
+
+ipcMain.handle('ajustes-guardar', (event, datos) => {
+    try {
+        return { ok: true, ajustes: ajustes.guardar(datos) };
+    } catch (err) {
+        return { ok: false, error: `No se pudieron guardar los ajustes: ${err.message}` };
+    }
+});
+
+// Prueba una configuración SIN guardarla: el editor primero ve que contesta y
+// recién después decide quedársela.
+ipcMain.handle('ia-probar', (event, config) => ia.probar(config || {}));
+
+// Los modelos que ofrece el Cursor CLI, para el selector de Ajustes.
+ipcMain.handle('cursor-modelos', () => aiCursor.modelos());
 
 // ─── Actualizaciones ──────────────────────────────────────────────────
 
@@ -216,10 +238,10 @@ ipcMain.handle('update-install', async (event, target) => {
 // bajarse uno con Ollama sin cerrar la app.
 ipcMain.handle('modelos', async () => ollamaServer.modelos());
 
-// Con cuál está corriendo, para el cabezal. Lleva el elegido a mano porque esa
-// preferencia vive en la ventana: sin ella acá se contestaría el del orden de
-// preferencia y el cabezal mostraría un modelo que no es el que se va a usar.
-ipcMain.handle('modelo', async (event, preferido) => ollamaServer.estado(preferido || null));
+// Con cuál está corriendo, para el cabezal. Contesta por el proveedor activo
+// en Ajustes; el `preferido` solo aplica al local, donde el selector de la
+// corrida puede pisar el modelo.
+ipcMain.handle('modelo', async (event, preferido) => ia.estado(preferido || null));
 
 /**
  * Un sí o no para lo que no se puede deshacer. Va por el diálogo del sistema y
