@@ -19,13 +19,12 @@
             <span class="brand-model" id="brand-model" hidden></span>
         </div>
 
-        <ol class="steps" id="steps">
-            <li class="step is-current" data-step="1"><span class="step-num">1</span>Agregar carpeta</li>
-            <li class="step" data-step="2"><span class="step-num">2</span>Clases</li>
-            <li class="step" data-step="3"><span class="step-num">3</span>Procesar</li>
-            <li class="step" data-step="4"><span class="step-num">4</span>Revisar cortes</li>
-            <li class="step" data-step="5"><span class="step-num">5</span>Exportar XML</li>
-        </ol>
+        <nav class="steps" id="steps" aria-label="Pasos">
+            <button class="step is-current" type="button" data-step="1"><span class="step-num">1</span>Carpetas</button>
+            <button class="step" type="button" data-step="2"><span class="step-num">2</span>Clases</button>
+            <button class="step" type="button" data-step="3"><span class="step-num">3</span>Procesar</button>
+            <button class="step" type="button" data-step="4"><span class="step-num">4</span>Revisar cortes</button>
+        </nav>
 
         <button class="btn btn-ghost" id="btn-ajustes">Ajustes</button>
         <button class="btn btn-ghost" id="btn-doctor">Diagnóstico</button>
@@ -53,9 +52,14 @@
                 <p class="dropzone-hint">
                     Las clases se reconocen por su contenido —un XML del Rodecaster con
                     <code>Audio</code> y <code>Video</code> al lado—, no por el nombre de la carpeta.
+                    Podés sumar todas las carpetas que quieras.
                 </p>
             </div>
             <p class="drop-error" id="drop-error" hidden></p>
+            <div class="drop-cargadas" id="drop-cargadas" hidden>
+                <span id="drop-cargadas-info"></span>
+                <button class="btn btn-ghost" id="btn-ver-clases">Ver las clases</button>
+            </div>
         </section>
 
         <!-- Paso 2 -->
@@ -63,12 +67,12 @@
             <div class="subbar">
                 <div class="subbar-main">
                     <h2 class="subbar-title" id="scan-title">—</h2>
-                    <button class="path-chip" id="scan-path" title="Ver en el Finder"></button>
+                    <span class="subbar-sub" id="scan-sub"></span>
                 </div>
                 <div class="subbar-actions">
                     <button class="btn btn-ghost" id="btn-select-all">Marcar todas</button>
                     <button class="btn btn-ghost" id="btn-select-none">Desmarcar</button>
-                    <button class="btn btn-ghost" id="btn-change">Cambiar carpeta</button>
+                    <button class="btn btn-ghost" id="btn-add-folder">Agregar carpeta…</button>
                 </div>
             </div>
 
@@ -81,7 +85,7 @@
                         <th class="col-check"><input type="checkbox" id="check-all" aria-label="Marcar todas"></th>
                         <th class="col-num">#</th>
                         <th>Secuencia</th>
-                        <th>Día</th>
+                        <th id="th-dia">Día</th>
                         <th class="num">Cám.</th>
                         <th class="num">Audio</th>
                         <th class="num">Duración</th>

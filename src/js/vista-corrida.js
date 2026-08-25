@@ -1,10 +1,11 @@
 'use strict';
 /** Paso 3: procesar las clases marcadas y contar cómo fue. */
 
-import { $, setStep, showView, alertsHtml } from './chrome.js';
+import { $, showView, alertsHtml } from './chrome.js';
 import { esc, fmtDur, plural } from './formato.js';
-import { state } from './estado.js';
-import { closeDrawer } from './vista-clases.js';
+import { state, marcadas, ponerCarpeta } from './estado.js';
+import { closeDrawer, renderScan } from './vista-clases.js';
+import { marcarPaso, PASOS } from './pasos.js';
 
 const STAGE_LABEL = {
     reusar: 'Recuperando el trabajo ya hecho',
@@ -24,7 +25,7 @@ export const run = { rows: new Map(), started: 0, total: 0, done: 0, cancelling:
  * @param {boolean} desdeCero ignora el trabajo guardado y lo rehace todo
  */
 export async function startProcessing(desdeCero) {
-    const selected = state.scan.classes.filter(c => c.selected);
+    const selected = marcadas();
     if (!selected.length) return;
 
     closeDrawer();
@@ -36,7 +37,7 @@ export async function startProcessing(desdeCero) {
     run.modelo = null;
 
     showView('run');
-    setStep(3);
+    marcarPaso(PASOS.procesar, true);
     const verbo = desdeCero ? 'Reprocesando' : 'Procesando';
     $('run-title').textContent = selected.length === 1
         ? `${verbo} 1 clase`
@@ -54,7 +55,6 @@ export async function startProcessing(desdeCero) {
     renderRunFoot();
 
     finishProcessing(await window.cc.process({
-        root: state.scan.root,
         ids: selected.map(c => c.id),
         force: Boolean(desdeCero),
         useAi: $('use-ai').checked,
@@ -77,8 +77,19 @@ function finishProcessing(response) {
         return;
     }
 
-    state.outputDir = response.outputDir;
-    $('btn-open-output').hidden = false;
+    // Las carpetas se releyeron al terminar: la tabla tiene que mostrar las
+    // clases como procesadas, y el paso de Revisar tiene que quedar habilitado
+    // sin salir y volver a entrar.
+    for (const fresca of (response.carpetas || [])) ponerCarpeta(fresca, []);
+    if (response.carpetas && response.carpetas.length) renderScan();
+
+    state.salidas = response.salidas || [];
+    const salida = $('btn-open-output');
+    salida.hidden = false;
+    salida.textContent = state.salidas.length > 1
+        ? `Abrir ${state.salidas.length} carpetas de salida`
+        : 'Abrir "The Cutter"';
+    salida.title = state.salidas.map(s => s.dir).join('\n');
 
     const exported = response.results.filter(r => r.ok);
     if (exported.length) {
@@ -96,7 +107,10 @@ function finishProcessing(response) {
         ? `Cancelado · ${exported.length} de ${run.total} listas`
         : `Listo · ${exported.length} de ${run.total} ${exported.length === 1 ? 'clase exportada' : 'clases exportadas'}`;
     $('run-sub').textContent = `En ${fmtDur(seconds)} · los XML están en "The Cutter"`;
-    setStep(5);
+    // Sigue siendo el paso 3: escribir los XML es en lo que termina procesar, no
+    // un sitio aparte al que se va. Lo que cambia es que ahora Revisar quedó
+    // habilitado en el cabezal.
+    marcarPaso(PASOS.procesar, true);
 
     $('run-alerts').innerHTML = alertsHtml(avisosDeLaCorrida(response).slice(0, 12));
 }

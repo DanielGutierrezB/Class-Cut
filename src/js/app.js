@@ -7,42 +7,89 @@
  * archivo.
  */
 
-import { $, setStep, showView } from './chrome.js';
+import { $, showView } from './chrome.js';
 import { fmtDur } from './formato.js';
-import { state, findClass } from './estado.js';
-import { addFolder, dropError, wireDropzone } from './vista-carpeta.js';
+import { state, clases, findClass, quitarCarpeta } from './estado.js';
+import { addFolder, dropError, wireCarpeta, renderCargadas } from './vista-carpeta.js';
 import {
-    renderAlerts, renderRows, renderFoot, wireClases, openDrawer, closeDrawer
+    renderScan, renderAlerts, renderRows, renderFoot, wireClases, openDrawer, closeDrawer
 } from './vista-clases.js';
 import { run, startProcessing, renderRunRows, renderRunFoot } from './vista-corrida.js';
 import { openReview, wireReview } from './visor/index.js';
+import { cerrarReproductor } from './visor/reproductor.js';
 import { rev } from './visor/estado.js';
+import { marcarPaso, refrescarPasos, wirePasos, PASOS } from './pasos.js';
 import { showDoctor } from './diagnostico.js';
 import { showAjustes } from './ajustes.js';
 import { init as initActualizar, buscar as buscarUpdate } from './actualizar.js';
 import { refrescar as refrescarModelo } from './modelo.js';
 
+/** ¿Hubo una corrida en esta sesión? Es lo que hace visitable el paso 3. */
+const huboCorrida = () => run.total > 0;
+
+/** Ir a un paso. Es lo único que sabe atar una vista con la de al lado. */
+function irAPaso(n) {
+    switch (n) {
+        case PASOS.carpetas:
+            closeDrawer();
+            cerrarReproductor();
+            dropError('');
+            renderCargadas();
+            showView('drop');
+            marcarPaso(PASOS.carpetas, huboCorrida());
+            return;
+        case PASOS.clases:
+            cerrarReproductor();
+            renderScan();
+            showView('classes');
+            marcarPaso(PASOS.clases, huboCorrida());
+            return;
+        case PASOS.procesar:
+            cerrarReproductor();
+            showView('run');
+            marcarPaso(PASOS.procesar, huboCorrida());
+            return;
+        case PASOS.revisar:
+            // El visor decide con qué clase abre y marca su propio paso.
+            openReview(null);
+            return;
+        default: {
+            const desconocido = n;
+            throw new Error(`Paso sin manejar: ${desconocido}`);
+        }
+    }
+}
+
+/**
+ * Saca una carpeta de la lista. No borra nada del disco: lo que se hizo sigue
+ * guardado en la carpeta de cada clase, y volver a agregarla lo recupera.
+ */
+async function sacarCarpeta(root) {
+    closeDrawer();
+    await window.cc.quitarCarpeta(root);
+    quitarCarpeta(root);
+    if (!state.carpetas.length) { irAPaso(PASOS.carpetas); return; }
+    renderScan();
+    refrescarPasos(huboCorrida());
+}
+
 async function init() {
     const info = await window.cc.appInfo();
 
-    wireDropzone();
-    wireClases();
-    wireReview();
+    wireCarpeta({ alCargar: () => irAPaso(PASOS.clases) });
+    wireClases({ alQuitarCarpeta: sacarCarpeta });
+    wireReview({ alVolver: () => irAPaso(PASOS.clases) });
+    wirePasos({ irA: irAPaso, corrida: huboCorrida });
 
     $('btn-pick').onclick = async () => {
         const folder = await window.cc.pickFolder();
         if (folder) addFolder(folder);
     };
-    $('btn-change').onclick = () => {
-        closeDrawer();
-        state.scan = null;
-        dropError('');
-        showView('drop');
-        setStep(1);
-    };
+    $('btn-add-folder').onclick = () => irAPaso(PASOS.carpetas);
+    $('btn-ver-clases').onclick = () => irAPaso(PASOS.clases);
 
     const marcarTodas = on => {
-        for (const c of state.scan.classes) c.selected = on && c.processable;
+        for (const c of clases()) c.selected = on && c.processable;
         renderRows();
         renderFoot();
     };
@@ -55,11 +102,13 @@ async function init() {
         // La corrida baja el modelo al terminar (ver `engine/pipeline.js`), así
         // que el cabezal no puede seguir diciendo que está corriendo.
         refrescarModelo();
+        // Y ahora hay clases procesadas: el paso de Revisar se puede visitar.
+        refrescarPasos(huboCorrida());
     };
     $('btn-process').onclick = () => procesar(false);
     // Tirar horas de transcripción no puede pasar por un clic distraído.
     $('btn-reprocess').onclick = async () => {
-        const cuantas = state.scan.classes.filter(c => c.selected).length;
+        const cuantas = clases().filter(c => c.selected).length;
         const ok = await window.cc.confirmar({
             titulo: cuantas === 1 ? 'Reprocesar la clase marcada' : `Reprocesar ${cuantas} clases`,
             mensaje: 'Se ignora el trabajo guardado y se vuelve a hacer todo: transcribir el audio ' +
@@ -75,12 +124,13 @@ async function init() {
         await window.cc.cancelProcess();
     };
     $('btn-back').onclick = () => {
-        showView('classes');
-        setStep(2);
+        irAPaso(PASOS.clases);
         $('btn-cancel').disabled = false;
     };
     $('btn-open-output').onclick = () => {
-        if (state.outputDir) window.cc.openPath(state.outputDir);
+        // Si la corrida mezcló carpetas, se abren todas: la mitad de los XML en
+        // una carpeta que no se abre es peor que abrir dos ventanas del Finder.
+        for (const salida of state.salidas) window.cc.openPath(salida.dir);
     };
     $('btn-review').onclick = () => openReview(state.reviewFirst);
 
@@ -106,8 +156,12 @@ async function init() {
     // Las duraciones llegan de a una mientras ffprobe mide: la tabla ya está en
     // pantalla y se va completando sola.
     window.cc.onScanProgress(p => {
-        const cell = document.querySelector(`[data-dur="${p.id}"]`);
-        if (cell) cell.textContent = fmtDur(p.durationSec);
+        // Se busca comparando y no con un selector: el id de una clase es la ruta
+        // de su carpeta, y una ruta trae barras, espacios y cualquier cosa que el
+        // editor haya escrito. Son trece celdas.
+        for (const cell of document.querySelectorAll('#class-rows [data-dur]')) {
+            if (cell.dataset.dur === p.id) { cell.textContent = fmtDur(p.durationSec); break; }
+        }
 
         const cls = findClass(p.id);
         if (cls) {
@@ -119,7 +173,7 @@ async function init() {
                 processable: p.processable
             });
         }
-        if (p.done === p.total && state.scan) {
+        if (p.done === p.total && state.carpetas.length) {
             renderAlerts();
             renderRows();
             renderFoot();

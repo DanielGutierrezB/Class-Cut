@@ -5,13 +5,9 @@ import { esc } from './formato.js';
 
 export const $ = id => document.getElementById(id);
 
-export function setStep(current) {
-    for (const el of document.querySelectorAll('.step')) {
-        const n = Number(el.dataset.step);
-        el.classList.toggle('is-current', n === current);
-        el.classList.toggle('is-done', n < current);
-    }
-}
+// Quién está en cada paso del cabezal y a cuál se puede ir vive en `pasos.js`:
+// dejó de ser "pintar el número que toca" cuando los pasos se volvieron
+// navegables en las dos direcciones.
 
 export function showView(name) {
     for (const el of document.querySelectorAll('.view')) {

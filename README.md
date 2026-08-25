@@ -10,24 +10,44 @@ dijo, calcula los cortes y escribe el XML. Nada del material original se toca.
 
 ## Cómo funciona
 
-1. **Agregar carpeta** — el curso completo, un día o una sola clase; la app
-   reconoce las clases por su estructura (un XML del Rodecaster con `Audio/` y
-   `Video/` al lado), no por el nombre de la carpeta.
-2. **Clases** — tabla con lo que encontró: número de clase (sale del nombre de
-   secuencia del XML), duración real medida con ffprobe, bloques del CD y avisos.
+1. **Carpetas** — el curso completo, un día o una sola clase, y **todas las que
+   quieras a la vez**; la app reconoce las clases por su estructura (un XML del
+   Rodecaster con `Audio/` y `Video/` al lado), no por el nombre de la carpeta.
+2. **Clases** — tabla con lo que encontró, agrupada por carpeta: número de clase
+   (sale del nombre de secuencia del XML), duración real medida con ffprobe,
+   bloques del CD y avisos.
 3. **Procesar** — transcribe `Live-Mix.wav` con Whisper local, ubica la claqueta,
    alinea cada marcador con el audio y decide dónde el corte tiene sentido (ver
-   **Cortes con criterio**).
+   **Cortes con criterio**). Cada clase escribe su XML en el `The Cutter/` de SU
+   carpeta, así que una corrida puede mezclar carpetas sin que se cruce nada.
 4. **Revisar cortes** — waveform, bloques y transcript para ajustar antes de
    exportar; el **guion final**, que es la clase cortada leída de corrido con lo
    que no cierra marcado en su bloque; y **ver la clase**, que la reproduce
    montada (ver **El reproductor**).
-5. **Exportar XML** — una sola carpeta `The Cutter/` en la raíz agregada, con el
-   XML final de cada clase y un `Backup/` con lo que se usó para generarlo.
+
+Los cuatro son sitios, no etapas: los del cabezal son botones y se entra y sale
+en cualquier orden. Abrir una carpeta con clases ya procesadas y darle a
+**Revisar cortes** funciona sin volver a procesar nada — que era lo que antes
+obligaba a repetir una hora de trabajo para poder mirar lo que ya estaba hecho.
+Un paso apagado significa que ahí todavía no hay nada, y el globito dice qué
+falta.
 
 Y cada clase se queda con una copia de su propio trabajo, dentro de su carpeta
 (ver **El trabajo viaja con la clase**), para que volver a entrar por otro lado
 no cueste otra hora de Whisper.
+
+### Varias carpetas a la vez
+
+Dos carpetas cargadas no pueden solaparse, porque el mismo material en dos
+raíces son dos filas para la misma clase y dos `The Cutter` distintos. La regla
+es la contención (`engine/carpetas.js`): si agregás el curso y ya tenías cargado
+`Day_1`, el curso **reemplaza** al día porque lo contiene; si agregás `Day_1` y
+el curso ya está, se dice que ya está y no se agrega nada; y la misma carpeta
+otra vez se relee en su lugar.
+
+Por eso el id de una clase es la ruta de su carpeta y no su nombre de secuencia:
+dos cursos distintos pueden traer una "Clase 01" cada uno, y con el nombre como
+id la segunda pisaba a la primera en todos los mapas de la ventana.
 
 ## Cortes con criterio
 

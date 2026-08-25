@@ -5,9 +5,10 @@
  * Este archivo coordina; lo que dibuja está en `onda`, `bordes` y `guion`.
  */
 
-import { $, setStep, showView, toast } from '../chrome.js';
+import { $, showView, toast } from '../chrome.js';
 import { esc, fmtClock, fmtDur, plural } from '../formato.js';
-import { state } from '../estado.js';
+import { state, clases } from '../estado.js';
+import { marcarPaso, PASOS } from '../pasos.js';
 import { rev, actual, alRedibujar, cambio } from './estado.js';
 import { renderOverview, renderZoom } from './onda.js';
 import { setEdge, renderEdges, renderDecided, renderTranscript, playEdge } from './bordes.js';
@@ -18,16 +19,34 @@ import { wireLetra } from './panel-letra.js';
 import { aireEn } from './letra.js';
 import { comentariosEn } from './pista.js';
 
+/** Las que se pueden abrir: las que tienen algo hecho, de cualquier carpeta. */
+function revisables() {
+    return clases().filter(c => c.alreadyProcessed || (c.trabajoGuardado && c.trabajoGuardado.sirve));
+}
+
+/**
+ * Abre el visor.
+ *
+ * Sin id se elige sola: la marcada que esté procesada, y si no, cualquiera que
+ * lo esté. Antes hacía falta pasar por una corrida para llegar acá, así que
+ * abrir una carpeta ya procesada obligaba a procesarla de nuevo para poder
+ * mirarla.
+ */
 export async function openReview(id) {
-    const target = id || (state.scan.classes.find(c => c.selected && c.alreadyProcessed) || {}).id;
-    if (!target) return;
+    const listas = revisables();
+    const target = id
+        || (listas.find(c => c.selected) || listas[0] || {}).id;
+    if (!target) {
+        toast('Ninguna clase está procesada todavía.');
+        return;
+    }
 
     // Cambiar de clase con el reproductor abierto: lo de la clase anterior se
     // suelta antes de cargar nada, o queda un video de 15 GB sonando sin dueño.
     cerrarReproductor();
 
     showView('review');
-    setStep(4);
+    marcarPaso(PASOS.revisar, true);
     $('rev-title').textContent = 'Cargando…';
 
     const data = await window.cc.loadReview({ id: target, buckets: 2400 });
@@ -61,11 +80,24 @@ export async function openReview(id) {
     renderReview();
 }
 
+/**
+ * El selector de clase, agrupado por carpeta.
+ *
+ * Con varias cargadas, una lista plana de "Clase 1, Clase 1, Clase 2…" no dice
+ * de dónde es cada una; los grupos del `<select>` lo resuelven sin ocupar sitio.
+ */
 function fillClassPicker() {
-    $('rev-class').innerHTML = state.scan.classes
-        .filter(c => c.processable)
-        .map(c => `<option value="${esc(c.id)}" ${c.id === rev.id ? 'selected' : ''}>Clase ${c.classNumber} · ${esc(c.sequenceName)}</option>`)
-        .join('');
+    const opcion = c => `<option value="${esc(c.id)}" ${c.id === rev.id ? 'selected' : ''}>` +
+        `Clase ${c.classNumber} · ${esc(c.sequenceName)}</option>`;
+
+    const porCarpeta = state.carpetas
+        .map(scan => ({ scan, suyas: scan.classes.filter(c => c.processable) }))
+        .filter(g => g.suyas.length);
+
+    $('rev-class').innerHTML = porCarpeta.length > 1
+        ? porCarpeta.map(g =>
+            `<optgroup label="${esc(g.scan.rootName)}">${g.suyas.map(opcion).join('')}</optgroup>`).join('')
+        : porCarpeta.map(g => g.suyas.map(opcion).join('')).join('');
 }
 
 function renderReview() {
@@ -183,13 +215,18 @@ async function saveReviewChanges() {
  * y no sobre cada elemento: si no, mover un borde con el teclado vuelve a atar
  * un oyente por bloque cada vez.
  */
-export function wireReview() {
+export function wireReview(callbacks) {
     alRedibujar(renderReview);
 
     for (const button of document.querySelectorAll('#rev-tabs .tab')) {
         button.onclick = () => setReviewTab(button.dataset.tab);
     }
-    $('rev-back').onclick = () => { cerrarReproductor(); showView('run'); setStep(5); };
+    // Volver es volver a la tabla, que es el centro de todo: antes iba a la
+    // pantalla de la última corrida, que después de revisar ya no dice nada.
+    $('rev-back').onclick = () => {
+        cerrarReproductor();
+        if (callbacks && callbacks.alVolver) callbacks.alVolver();
+    };
     $('rev-save').onclick = saveReviewChanges;
     $('rev-class').onchange = event => openReview(event.target.value);
 

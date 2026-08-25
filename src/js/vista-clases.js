@@ -1,9 +1,9 @@
 'use strict';
-/** Paso 2: la tabla de clases y el detalle de una. */
+/** Paso 2: la tabla de clases, agrupada por carpeta, y el detalle de una. */
 
 import { $, alertsHtml } from './chrome.js';
 import { esc, fmtDur, fmtClock, plural } from './formato.js';
-import { state, findClass } from './estado.js';
+import { state, clases, findClass, marcadas } from './estado.js';
 
 const KIND_LABEL = {
     course: 'Curso',
@@ -12,29 +12,46 @@ const KIND_LABEL = {
     empty: 'Sin clases'
 };
 
+/** Cómo se lee una carpeta en su encabezado: "Curso · 3 días · 13 clases". */
+function comoSeLee(scan) {
+    const partes = [KIND_LABEL[scan.kind] || 'Carpeta'];
+    if (scan.dayCount) partes.push(plural(scan.dayCount, 'día', 'días'));
+    partes.push(plural(scan.classCount, 'clase', 'clases'));
+    return partes.join(' · ');
+}
+
 export function renderScan() {
-    const scan = state.scan;
-    if (!scan) return;
+    if (!state.carpetas.length) return;
 
-    const parts = [KIND_LABEL[scan.kind] || 'Carpeta'];
-    if (scan.dayCount) parts.push(plural(scan.dayCount, 'día', 'días'));
-    parts.push(plural(scan.classCount, 'clase', 'clases'));
-    $('scan-title').textContent = parts.join(' · ');
-
-    const pathBtn = $('scan-path');
-    pathBtn.textContent = scan.root;
-    pathBtn.onclick = () => window.cc.reveal(scan.root);
+    const todas = clases();
+    const dura = todas.reduce((suma, c) => suma + (c.durationSec || 0), 0);
+    // La barra de arriba cuenta el total; de cada carpeta habla su encabezado en
+    // la tabla. Antes acá vivía el nombre y la ruta de LA carpeta, en singular.
+    $('scan-title').textContent =
+        `${plural(state.carpetas.length, 'carpeta', 'carpetas')} · ${plural(todas.length, 'clase', 'clases')}`;
+    $('scan-sub').textContent = `${fmtDur(dura)} de material`;
 
     renderAlerts();
     renderRows();
     renderFoot();
 }
 
+/**
+ * Los avisos de todas las carpetas juntos.
+ *
+ * Se cuentan sobre el total y no por carpeta: al editor le importa cuántas
+ * clases le faltan, no en cuál de las dos carpetas están. El detalle de cada
+ * una vive en su fila.
+ */
 export function renderAlerts() {
-    const scan = state.scan;
-    const alerts = (scan.warnings || []).map(w => ({ level: 'warn', message: w.message }));
+    const todas = clases();
+    const alerts = state.carpetas.flatMap(scan =>
+        (scan.warnings || []).map(w => ({
+            level: 'warn',
+            message: state.carpetas.length > 1 ? `${scan.rootName}: ${w.message}` : w.message
+        })));
 
-    const blocked = scan.classes.filter(c => !c.processable);
+    const blocked = todas.filter(c => !c.processable);
     if (blocked.length) {
         alerts.push({
             level: 'err',
@@ -42,23 +59,20 @@ export function renderAlerts() {
         });
     }
 
-    // Lo que la clase trae guardado en su carpeta es la buena noticia: no
-    // importa por dónde se haya entrado, ese trabajo no hay que rehacerlo.
-    const guardadas = scan.classes.filter(c => c.trabajoGuardado && c.trabajoGuardado.sirve);
-    if (guardadas.length) {
+    const guardadas = todas.filter(c => c.trabajoGuardado && c.trabajoGuardado.sirve);
+    const soloXml = todas.filter(c => c.alreadyProcessed && !c.trabajoGuardado);
+    // Las dos noticias buenas van juntas y en una línea: son la mayoría de las
+    // filas y antes ocupaban tres renglones de aviso arriba de la tabla, todos
+    // los días, diciendo algo que las insignias de cada fila ya dicen.
+    if (guardadas.length || soloXml.length) {
+        const partes = [];
+        if (guardadas.length) {
+            partes.push(`${plural(guardadas.length, 'clase trae', 'clases traen')} su trabajo guardado: procesarlas escribe el XML en segundos`);
+        }
+        if (soloXml.length) partes.push(`${soloXml.length} ya tiene XML en "The Cutter"`);
         alerts.push({
             level: 'info',
-            message: `${plural(guardadas.length, 'clase trae', 'clases traen')} el trabajo guardado en su carpeta: ` +
-                'procesarlas vuelve a escribir el XML en segundos, sin transcribir de nuevo. ' +
-                'Para rehacerlo todo desde cero está "Reprocesar".'
-        });
-    }
-
-    const soloXml = scan.classes.filter(c => c.alreadyProcessed && !c.trabajoGuardado);
-    if (soloXml.length) {
-        alerts.push({
-            level: 'info',
-            message: `${plural(soloXml.length, 'clase ya tiene', 'clases ya tienen')} XML en "The Cutter": procesarlas otra vez lo reemplaza.`
+            message: `${partes.join(' · ')}. Para rehacer todo desde cero está "Reprocesar".`
         });
     }
 
@@ -104,9 +118,40 @@ function statusBadges(cls) {
     return out.join('');
 }
 
-export function renderRows() {
-    const scan = state.scan;
-    $('class-rows').innerHTML = scan.classes.map(cls => `
+/**
+ * El encabezado de una carpeta.
+ *
+ * Existe para poder tener varias cargadas sin perderse: dice de dónde salen las
+ * filas que siguen, y lleva lo que antes vivía en la barra de arriba y valía
+ * para una sola carpeta —verla en el Finder, quitarla, marcarla entera—.
+ */
+function grupoHtml(scan, conDia) {
+    const suyas = scan.classes;
+    const usables = suyas.filter(c => c.processable);
+    const marcadasAca = usables.filter(c => c.selected).length;
+    const dura = suyas.reduce((suma, c) => suma + (c.durationSec || 0), 0);
+
+    return `
+        <tr class="grupo" data-root="${esc(scan.root)}">
+            <td class="col-check">
+                <input type="checkbox" data-grupo="${esc(scan.root)}"
+                       ${usables.length && marcadasAca === usables.length ? 'checked' : ''}
+                       ${usables.length ? '' : 'disabled'}
+                       aria-label="Marcar las clases de esta carpeta">
+            </td>
+            <td colspan="${conDia ? 7 : 6}">
+                <button class="grupo-nombre" data-reveal="${esc(scan.root)}" title="Ver en el Finder">${esc(scan.rootName)}</button>
+                <span class="grupo-meta">${esc(comoSeLee(scan))} · ${fmtDur(dura)}</span>
+            </td>
+            <td colspan="2" class="grupo-acciones">
+                <button class="btn btn-ghost btn-inline" data-quitar="${esc(scan.root)}"
+                        title="Saca esta carpeta de la lista. No borra nada del disco.">Quitar</button>
+            </td>
+        </tr>`;
+}
+
+function filaHtml(cls, conDia) {
+    return `
         <tr data-id="${esc(cls.id)}" class="${cls.processable ? '' : 'is-blocked'} ${state.openId === cls.id ? 'is-open' : ''}">
             <td class="col-check">
                 <input type="checkbox" data-check="${esc(cls.id)}" ${cls.selected ? 'checked' : ''} ${cls.processable ? '' : 'disabled'}
@@ -117,19 +162,34 @@ export function renderRows() {
                 <span class="cell-seq">${esc(cls.sequenceName || cls.folderName)}</span>
                 <span class="cell-folder">${esc(cls.folderName)}</span>
             </td>
-            <td class="cell-dim">${esc(cls.dayName || '—')}</td>
+            ${conDia ? `<td class="cell-dim cell-dia" title="${esc(cls.dayName || '')}">${esc(cls.dayName || '—')}</td>` : ''}
             <td class="num cell-num">${cls.videos.length}</td>
             <td class="num cell-num">${cls.audios.length}${cls.liveMixPath ? '' : ' ⚠'}</td>
             <td class="num cell-num" data-dur="${esc(cls.id)}">${fmtDur(cls.durationSec)}</td>
             <td class="num cell-num">${cls.blockCount || '—'}</td>
             <td>${viewBadges(cls.views)}</td>
             <td>${statusBadges(cls)}</td>
-        </tr>`).join('');
+        </tr>`;
+}
+
+export function renderRows() {
+    // El encabezado va siempre, aunque haya una sola carpeta: es donde vive
+    // "Quitar", y con una sola no había forma de sacarla. Y así la tabla se lee
+    // igual con una carpeta o con cinco, en vez de tener dos diseños.
+    //
+    // La columna del día, en cambio, solo existe si alguna clase está dentro de
+    // uno: cuando la carpeta ES el día, esa columna eran trece guiones seguidos.
+    const conDia = clases().some(c => c.dayName);
+    $('th-dia').hidden = !conDia;
+
+    $('class-rows').innerHTML = state.carpetas.map(scan =>
+        grupoHtml(scan, conDia) + scan.classes.map(cls => filaHtml(cls, conDia)).join('')
+    ).join('');
     syncCheckAll();
 }
 
 export function syncCheckAll() {
-    const usable = state.scan.classes.filter(c => c.processable);
+    const usable = clases().filter(c => c.processable);
     const selected = usable.filter(c => c.selected);
     const box = $('check-all');
     box.checked = usable.length > 0 && selected.length === usable.length;
@@ -137,7 +197,7 @@ export function syncCheckAll() {
 }
 
 export function renderFoot() {
-    const selected = state.scan.classes.filter(c => c.selected);
+    const selected = marcadas();
     const totalSec = selected.reduce((sum, c) => sum + (c.durationSec || 0), 0);
     const blocks = selected.reduce((sum, c) => sum + (c.blockCount || 0), 0);
     // Las que traen su trabajo son las que van a tardar segundos; el resto son
@@ -149,6 +209,10 @@ export function renderFoot() {
     const partes = [];
     if (selected.length) {
         partes.push(`<strong>${plural(selected.length, 'clase marcada', 'clases marcadas')}</strong>`);
+        // De cuántas carpetas salen: procesar mezclando dos deja los XML en dos
+        // "The Cutter" distintos, y eso se dice antes y no después.
+        const deCuantas = new Set(selected.map(c => c.root)).size;
+        if (deCuantas > 1) partes.push(`de ${deCuantas} carpetas`);
         partes.push(`${fmtDur(totalSec)} de material`);
         partes.push(plural(blocks, 'bloque', 'bloques'));
         if (reusan && desdeCero) partes.push(`${reusan} ya hechas · ${desdeCero} desde cero`);
@@ -180,23 +244,45 @@ export function renderFoot() {
  * cada vez que se dibuja: las filas se rehacen enteras en cada render y volver a
  * atarlas es trabajo que crece con la cantidad de clases.
  */
-export function wireClases() {
+export function wireClases(callbacks) {
     const host = $('class-rows');
+    const alQuitar = (callbacks && callbacks.alQuitarCarpeta) || (() => {});
 
     host.addEventListener('change', e => {
         const id = e.target.dataset.check;
-        if (!id) return;
-        const cls = findClass(id);
-        if (cls) cls.selected = e.target.checked;
+        if (id) {
+            const cls = findClass(id);
+            if (cls) cls.selected = e.target.checked;
+            renderFoot();
+            syncCheckAll();
+            return;
+        }
+
+        // La casilla del encabezado marca la carpeta entera: con dos cursos
+        // cargados, "marcar todas" es demasiado y una por una es demasiado poco.
+        const root = e.target.dataset.grupo;
+        if (!root) return;
+        const scan = state.carpetas.find(c => c.root === root);
+        if (!scan) return;
+        for (const cls of scan.classes) {
+            if (cls.processable) cls.selected = e.target.checked;
+        }
+        renderRows();
         renderFoot();
-        syncCheckAll();
     });
 
-    host.addEventListener('click', e => {
-        // El clic en la casilla marca, no abre el detalle.
-        if (e.target.dataset.check != null) return;
+    host.addEventListener('click', async e => {
+        // El clic en una casilla marca, no abre el detalle.
+        if (e.target.dataset.check != null || e.target.dataset.grupo != null) return;
+
+        const ver = e.target.closest('[data-reveal]');
+        if (ver) { window.cc.reveal(ver.dataset.reveal); return; }
+
+        const quitar = e.target.closest('[data-quitar]');
+        if (quitar) { await alQuitar(quitar.dataset.quitar); return; }
+
         const row = e.target.closest('tr');
-        if (row) openDrawer(row.dataset.id);
+        if (row && row.dataset.id) openDrawer(row.dataset.id);
     });
 }
 

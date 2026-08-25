@@ -140,11 +140,12 @@ code, .mono {
     .brand-model { display: none; }
 }
 
+/* Los pasos son botones: se puede volver a cualquiera que tenga algo que
+   mostrar. Apagado significa "todavía no hay nada ahí", no "ya pasaste". */
 .steps {
     display: flex;
     align-items: center;
-    gap: 4px;
-    list-style: none;
+    gap: 2px;
     margin-left: auto;
 }
 .step {
@@ -152,11 +153,20 @@ code, .mono {
     align-items: center;
     gap: 7px;
     padding: 5px 11px;
+    border: 1px solid transparent;
     border-radius: 999px;
+    background: transparent;
     color: var(--text-mute);
+    font: inherit;
     font-size: 12px;
     white-space: nowrap;
+    cursor: pointer;
 }
+.step:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.step:disabled { cursor: default; }
+/* El que no se puede visitar se apaga del todo, para que la diferencia entre
+   "acá no hay nada" y "acá podés entrar" se vea sin leer. */
+.step:disabled:not(.is-current) { opacity: .45; }
 .step-num {
     display: grid;
     place-items: center;
@@ -248,6 +258,23 @@ code, .mono {
     color: var(--text-mute);
     line-height: 1.65;
 }
+
+/* Lo que ya está cargado, debajo de la zona de soltar: agregar una segunda
+   carpeta no puede dejar la duda de si se perdió la primera. */
+.drop-cargadas {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--text-dim);
+    max-width: min(620px, 100%);
+}
+.drop-cargadas span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dropzone-hint code {
     background: var(--surface-2);
     padding: 1px 5px;
@@ -271,44 +298,36 @@ code, .mono {
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 14px 20px;
+    padding: 9px 20px;
     border-bottom: 1px solid var(--border-soft);
 }
 .subbar-main { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
-.subbar-title { font-size: 15px; font-weight: 600; white-space: nowrap; }
-.path-chip {
-    font: inherit;
+.subbar-title { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.subbar-sub {
     font-size: 11.5px;
     color: var(--text-mute);
-    background: transparent;
-    border: 0;
-    padding: 2px 0;
-    cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 46ch;
-    text-align: left;
 }
-.path-chip:hover { color: var(--accent); text-decoration: underline; }
 .subbar-actions { margin-left: auto; display: flex; gap: 8px; flex: 0 0 auto; }
 
 .alerts { padding: 0 20px; }
-.alerts:not(:empty) { padding: 12px 20px 0; display: grid; gap: 7px; }
+.alerts:not(:empty) { padding: 9px 20px 0; display: grid; gap: 6px; }
 .alert {
     display: flex;
     align-items: flex-start;
     gap: 9px;
-    padding: 9px 13px;
+    padding: 7px 11px;
     border-radius: var(--radius-sm);
-    font-size: 12.5px;
+    font-size: 12px;
     border: 1px solid transparent;
 }
 .alert-warn { background: rgba(245, 181, 68, .09); border-color: rgba(245, 181, 68, .28); color: #f8d79a; }
 .alert-err { background: rgba(242, 100, 107, .09); border-color: rgba(242, 100, 107, .3); color: #ffc9cc; }
 .alert-info { background: var(--surface-2); border-color: var(--border); color: var(--text-dim); }
 
-.table-wrap { flex: 1; min-height: 0; overflow: auto; padding: 14px 20px 20px; }
+.table-wrap { flex: 1; min-height: 0; overflow: auto; padding: 10px 20px 16px; }
 
 .grid { width: 100%; border-collapse: separate; border-spacing: 0; }
 .grid thead th {
@@ -339,18 +358,64 @@ code, .mono {
 .grid tbody tr.is-open { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 .grid tbody tr.is-blocked { opacity: .58; }
 .grid tbody td {
-    padding: 11px 12px;
+    padding: 6px 12px;
     border-bottom: 1px solid var(--border-soft);
     vertical-align: middle;
 }
 .grid tbody tr:first-child td:first-child { border-top-left-radius: var(--radius-sm); }
 .grid tbody tr:first-child td:last-child { border-top-right-radius: var(--radius-sm); }
 
-.cell-seq { font-weight: 500; }
-.cell-folder { display: block; font-size: 11px; color: var(--text-mute); margin-top: 2px; }
+/* El encabezado de una carpeta. No es una fila más: no se puede abrir, no se
+   subraya al pasar por encima y se pega arriba mientras se recorre su grupo. */
+.grid tbody tr.grupo {
+    background: var(--bg);
+    cursor: default;
+    position: sticky;
+    top: 30px;
+    z-index: 1;
+}
+.grid tbody tr.grupo:hover { background: var(--bg); }
+.grid tbody tr.grupo td {
+    padding: 10px 12px 5px;
+    border-bottom: 1px solid var(--border);
+}
+.grupo-nombre {
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+}
+.grupo-nombre:hover { color: var(--accent); text-decoration: underline; }
+.grupo-meta { font-size: 11.5px; color: var(--text-mute); margin-left: 10px; }
+.grupo-acciones { text-align: right; }
+.grupo-acciones .btn-inline { margin-left: 0; }
+
+.cell-seq { font-weight: 500; font-size: 12.5px; }
+.cell-folder {
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-mute);
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 44ch;
+}
 .cell-num { font-variant-numeric: tabular-nums; }
 .cell-dim { color: var(--text-dim); }
-.class-no { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* El día es una carpeta con nombre largo ("Day_2 RODECASTER_Video") y solo hace
+   falta reconocerlo: si se le deja partir la línea, estira todas las filas. */
+.cell-dia {
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.class-no { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 input[type="checkbox"] {
     appearance: none;
@@ -381,6 +446,9 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     font-size: 10.5px;
     font-weight: 600;
     letter-spacing: .02em;
+    /* Una insignia partida en dos líneas estira la fila entera: "ya procesada ·
+       hoy" hacía cada fila un 40% más alta que las demás. */
+    white-space: nowrap;
 }
 .badge + .badge { margin-left: 4px; }
 .badge-ok { background: rgba(62, 207, 142, .15); color: var(--ok); }
@@ -395,8 +463,8 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .footbar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 12px 20px;
+    gap: 14px;
+    padding: 9px 20px;
     border-top: 1px solid var(--border);
     background: var(--surface);
 }
