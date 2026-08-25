@@ -347,8 +347,21 @@ de la máquina, no de la clase. En **Ajustes** (arriba a la derecha) hay tres:
 - **Cursor CLI.** La cuenta de Cursor del editor, con el modelo que tenga
   contratado (Sonnet, GPT, el que sea). El CLI corre en modo impresión y de
   solo lectura, en un directorio vacío propio: contesta números, no ve archivos.
-- **API de Claude.** Directo a Anthropic con la clave del editor. La clave se
-  guarda en esta Mac y solo viaja a `api.anthropic.com`.
+- **API de Claude.** Directo a Anthropic. **Iniciar sesión** abre el navegador,
+  el editor autoriza con su cuenta y la app crea una clave y la guarda sola —
+  sin ir a la consola a copiar nada. También se puede pegar una clave a mano.
+
+Los secretos van al **Llavero de macOS**, nunca a un JSON: un archivo de
+ajustes es texto plano que viaja en cada backup. La ventana ni siquiera los ve
+—le llega "hay clave guardada", sí o no— y el proceso principal los lee del
+Llavero recién al armar el cliente. Los ajustes viejos que tuvieran la clave en
+el archivo migran solos en la primera lectura.
+
+Con un proveedor remoto las consultas van **en paralelo** (3 por el CLI, 4 por
+la API): contra una API cada consulta es un viaje de red y esperarlas de a una
+es tirar el tiempo de todas menos una. Con el local siguen en fila a propósito,
+porque compiten por la misma máquina. El techo de la mejora lo ponen las dos
+lecturas del guion, que son una sola llamada grande cada una.
 
 **Probar** funciona antes de Guardar: se pega la clave o se elige el modelo, se
 ve que contesta y cuánto tarda, y recién ahí uno se lo queda. Los proveedores

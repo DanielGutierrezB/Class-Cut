@@ -81,6 +81,9 @@ function cliente(config) {
         model: config.model,
         proveedor: 'anthropic',
         contextoGrande: true,
+        // La API aguanta varias a la vez de sobra; cuatro es rápido sin
+        // coquetear con el límite de pedidos por minuto.
+        paralelo: 4,
         ask: params => {
             if (!config.apiKey) return Promise.resolve({ error: 'Falta la clave de Anthropic (Ajustes).' });
             return preguntar({

@@ -162,6 +162,10 @@ function cliente(config) {
         model,
         proveedor: 'cursor',
         contextoGrande: true,
+        // Cada consulta es un proceso y un viaje de red: tres a la vez van bien.
+        // Más es invitar al límite de uso — midiendo el curso entero ya se vio
+        // al CLI empezar a fallar tras cuarenta minutos de consultas seguidas.
+        paralelo: 3,
         ask: async params => {
             if (!bin) return { error: 'No está el Cursor CLI en esta Mac.' };
             const pedido = {

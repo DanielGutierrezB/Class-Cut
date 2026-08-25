@@ -18,6 +18,7 @@
  */
 
 const speech = require('./speech-edges');
+const { enTandas } = require('./ia');
 
 const COHERENCE_VERSION = 1;
 
@@ -233,20 +234,26 @@ async function reviewClass(params) {
             ? { ...(options || {}), maxWordsPerCall: opt(options, 'maxWordsContextoGrande') }
             : options;
         const chunks = chunk(script, porLlamada);
-        for (let i = 0; i < chunks.length; i++) {
-            if (params.onProgress) params.onProgress({ chunk: i + 1, total: chunks.length });
+        let listos = 0;
+
+        // Con contexto grande el guion entra en una sola llamada y no hay nada
+        // que paralelizar; con el local van en fila. Esto trabaja cuando una
+        // clase larga se parte en tandas contra un proveedor remoto.
+        await enTandas((params.ai && params.ai.paralelo) || 1, chunks, async parte => {
             stats.llamadas++;
             const response = await params.ai.ask({
                 system: SYSTEM,
-                prompt: buildPrompt(chunks[i], script),
+                prompt: buildPrompt(parte, script),
                 numPredict: opt(options, 'numPredict'),
                 signal: params.signal
             });
-            if (response && response.error) { stats.fallos++; continue; }
+            listos++;
+            if (params.onProgress) params.onProgress({ chunk: listos, total: chunks.length });
+            if (response && response.error) { stats.fallos++; return; }
             const found = validateFindings(response, script);
             stats.hallazgosIa += found.length;
             findings.push(...found);
-        }
+        });
     }
 
     // Un mismo problema puede salir por regla y por modelo: se deja uno.

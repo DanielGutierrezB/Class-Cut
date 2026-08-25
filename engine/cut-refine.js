@@ -24,6 +24,7 @@ const speech = require('./speech-edges');
 const borde = require('./borde');
 const claseEntera = require('./clase-entera');
 const ordenDelCd = require('./orden-del-cd');
+const { enTandas } = require('./ia');
 
 // Tres decisiones de acá salieron de medir sobre los 174 bloques del curso, no
 // de elegir a ojo, y las variantes perdedoras ya no están cableadas:
@@ -422,11 +423,14 @@ async function refineClass(params) {
         ? claseEntera.texto(blocks, words)
         : '';
 
-    for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
-        if (!needsCriterion(block, words)) continue;
-        stats.revisados++;
+    const elegidos = blocks
+        .map((block, i) => ({ block, i }))
+        .filter(({ block }) => needsCriterion(block, words));
+    stats.revisados = elegidos.length;
+    let terminados = 0;
 
+    /** Los dos bordes de UN bloque, en orden: el OUT depende de dónde quedó el IN. */
+    async function afinarBloque({ block, i }) {
         for (const kind of ['IN', 'OUT']) {
             const edge = kind === 'IN' ? block.in : block.out;
             if (!edge) continue;
@@ -465,8 +469,16 @@ async function refineClass(params) {
             });
         }
 
-        if (params.onProgress) params.onProgress({ index: i, total: blocks.length, stats });
+        terminados++;
+        if (params.onProgress) params.onProgress({ index: terminados, total: elegidos.length, stats });
     }
+
+    // Con el modelo local van en fila (compiten por la misma máquina); contra
+    // un proveedor remoto, de a `paralelo`. Cada tarea toca SOLO su bloque, así
+    // que correrlas juntas no pisa nada; lo único que varía es cuánto del
+    // vecino ya está afinado cuando se arma su extracto para el prompt — con un
+    // proveedor sin semilla, ese orden tampoco era reproducible en fila.
+    await enTandas((params.ai && params.ai.paralelo) || 1, elegidos, afinarBloque);
 
     alignResult.refine = stats;
     return stats;
