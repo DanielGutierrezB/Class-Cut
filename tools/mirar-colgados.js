@@ -51,9 +51,28 @@ function clases() {
         .filter(Boolean);
 }
 
+/**
+ * Desde dónde puntuó el motor este borde.
+ *
+ * No es donde el borde quedó. `cut-refine` puntúa penalizando la distancia al
+ * sitio que el borde ocupaba ANTES de afinarlo, y afinar es justamente lo que
+ * lo movió: repetir la cuenta desde el final es preguntarle a la regla si le
+ * gusta el sitio al que ella misma lo llevó, y desde ahí siempre gana otro
+ * candidato. El motor lo guarda desde que esto se midió; en un artefacto viejo
+ * no está, y entonces lo que sale de acá es una aproximación y hay que decirlo.
+ *
+ * @returns {{sec: number, fiel: boolean}}
+ */
+function anclaDe(block, kind) {
+    const edge = kind === 'IN' ? block.in : block.out;
+    const guardada = edge && edge.refine && edge.refine.anchorSec;
+    if (typeof guardada === 'number') return { sec: guardada, fiel: true };
+    return { sec: kind === 'IN' ? block.startSec : block.endSec, fiel: false };
+}
+
 /** Los candidatos que se le habrían ofrecido a ese borde, con el mismo código. */
 function candidatosDe(words, block, kind) {
-    const at = kind === 'IN' ? block.startSec : block.endSec;
+    const at = anclaDe(block, kind).sec;
     const cue = kind === 'IN' ? block.cueIn : block.cueOut;
     const raw = precision.buildCandidates(words, at, kind, {
         ...OPCIONES,
@@ -87,6 +106,7 @@ const cuenta = { total: 0, ofrecido: 0, noOfrecido: 0 };
 const porQuien = {};
 const arreglables = [];
 const ejemplos = [];
+let aproximados = 0;
 
 for (const cls of clases()) {
     let anterior = null;
@@ -114,15 +134,18 @@ for (const cls of clases()) {
 
         // ¿La regla sola, sin modelo, habría elegido uno de los que cierran? Es
         // la cuenta que dice cuánto se arregla con solo dejar pasar el bloque.
+        const ancla = anclaDe(block, 'OUT');
+        if (!ancla.fiel) aproximados++;
         const puntuados = candidatos
-            .map(c => ({ c, s: refine.scoreCandidate(c, cls.words, 'OUT', block.endSec) }))
+            .map(c => ({ c, s: refine.scoreCandidate(c, cls.words, 'OUT', ancla.sec) }))
             .sort((a, b) => b.s - a.s);
         const ganaUnoBueno = buenos.some(b => b.frontier === puntuados[0].c.frontier);
         if (quien === 'ni se miró' && ganaUnoBueno) arreglables.push(`clase ${cls.name.slice(0, 2)} b${block.index + 1}`);
 
         ejemplos.push(`  clase ${cls.name.slice(0, 2)} bloque ${block.index + 1}: SE OFRECÍA ` +
             `(${buenos.length}/${candidatos.length} cierran) · ${quien}` +
-            `${ganaUnoBueno ? ' · la regla habría acertado' : ''}\n      quedó: …${cola}`);
+            `${ganaUnoBueno ? ` · la regla habría acertado${ancla.fiel ? '' : ' (anclaje aproximado)'}` : ''}` +
+            `\n      quedó: …${cola}`);
     }
 }
 
@@ -132,6 +155,11 @@ console.log(`  el corte bueno nunca se ofreció   : ${cuenta.noOfrecido}\n`);
 console.log('  quién decidió ese borde:');
 for (const [quien, n] of Object.entries(porQuien).sort((a, b) => b[1] - a[1])) {
     console.log(`    ${quien.padEnd(12)} ${n}`);
+}
+if (aproximados) {
+    console.log(`\n  ⚠ ${aproximados} de ${cuenta.ofrecido} bordes vienen de un artefacto anterior a que el ` +
+        'motor guardara desde dónde puntuó: en esos, la elección se repite desde donde el borde ' +
+        'terminó y "la regla habría acertado" es una pista, no una prueba. Reprocesá para medirlo bien.');
 }
 console.log(`\n  se arreglarían solo con dejar pasar el bloque al afinado: ${arreglables.length}`);
 if (arreglables.length) console.log(`    ${arreglables.join(', ')}`);

@@ -300,6 +300,12 @@ function makeBlock(inMarker, outMarker, timebase, idx) {
         cueIn: parsedIn.cue,
         count: parsedIn.count,
         hasCount: parsedIn.hasCount,
+        // Cuánto duraba el marcador de entrada en el XML del CD. En este curso
+        // son 300 frames (10 s) y viaja para que el XML de salida los devuelva
+        // con esa misma duración: un marcador de un frame es invisible en la
+        // línea de tiempo de Premiere, y el CD lo puso con largo a propósito.
+        inSpanFrames: inMarker.spanFrames || 0,
+        inSpanSec: (inMarker.spanFrames || 0) / timebase,
         cueOut: parsedOut.cue,
         inComment: inMarker.comment,
         outComment: outMarker ? outMarker.comment : null,

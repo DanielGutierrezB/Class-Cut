@@ -53,7 +53,9 @@ const DEFAULTS = {
     // Un bloque más largo que esto ya no es un fragmento suelto: aunque repita
     // lo que viene después, tiene material propio y lo decide quien edita.
     maximoDelFragmentoSec: 8,
-    parecidoDelFragmento: 0.8
+    parecidoDelFragmento: 0.8,
+    // El suelo de la clase, que lo pone la claqueta (`align.js` lo calcula).
+    pisoSec: null
 };
 
 // Qué se sabe arreglar de cada cosa que reporta la lectura. Lo que no está acá
@@ -190,15 +192,20 @@ function abrirLaFrase(block, ctx) {
     const { words, wav, options, blocks } = ctx;
     if (!block.in || !abreAMitad(words, block)) return null;
 
-    // Hasta dónde se puede retroceder sin entrar en el bloque de antes.
+    // Hasta dónde se puede retroceder sin entrar en el bloque de antes ni en la
+    // claqueta, que es el suelo de la clase entera (ver `clap-detect.js`).
     const previo = elAnterior(blocks || [], block);
-    const piso = previo
-        ? Math.max(block.startSec - opt(options, 'maximoQueSeEstiraSec'),
-            previo.endSec + opt(options, 'margenAlSiguienteSec'))
-        : block.startSec - opt(options, 'maximoQueSeEstiraSec');
+    const deLaClaqueta = opt(options, 'pisoSec');
+    const piso = Math.max(
+        previo
+            ? Math.max(block.startSec - opt(options, 'maximoQueSeEstiraSec'),
+                previo.endSec + opt(options, 'margenAlSiguienteSec'))
+            : block.startSec - opt(options, 'maximoQueSeEstiraSec'),
+        deLaClaqueta == null ? -Infinity : deLaClaqueta
+    );
     if (piso >= block.startSec) return null;
 
-    const margen = { ...(options || {}), maxShiftSec: block.startSec - piso };
+    const margen = { ...(options || {}), maxShiftSec: block.startSec - piso, minTime: piso };
     const ajuste = speech.snapToSentence(words, block.startSec, 'IN', margen);
     const destino = ajuste.candidates.retract;
     if (destino == null || destino >= block.startSec || destino < piso) return null;

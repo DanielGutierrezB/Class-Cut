@@ -49,7 +49,10 @@ const DEFAULTS = {
     clearMargin: 1.5,
     neighbourWords: 40,
     // Lo mínimo que puede quedar de un bloque después de afinar los dos bordes.
-    minBlockSec: 1
+    minBlockSec: 1,
+    // Antes de este segundo no hay clase: lo calcula `align.js` desde la
+    // claqueta y llega por las opciones. `null` es "no se sabe dónde está".
+    pisoSec: null
 };
 
 function opt(options, key) {
@@ -145,6 +148,12 @@ function renumbered(candidates) {
 function fitsInBlock(candidate, block, kind, options) {
     const minimo = opt(options, 'minBlockSec');
     if (kind === 'IN') {
+        // Antes de la claqueta no hay clase. Se filtra acá y no se corrige
+        // después para que el modelo no vea siquiera la opción de abrir ahí: en
+        // la clase 6 eligió un corte 7,4 s antes del marcador y el corte final
+        // empezaba con "Claqueta 6, clase 6. 3, 2, 1. Ya…".
+        const piso = opt(options, 'pisoSec');
+        if (piso != null && candidate.time < piso) return false;
         return block.endSec == null || candidate.time <= block.endSec - minimo;
     }
     return block.startSec == null || candidate.time >= block.startSec + minimo;
@@ -435,6 +444,14 @@ async function refineClass(params) {
             const edge = kind === 'IN' ? block.in : block.out;
             if (!edge) continue;
             edge.timeSec = kind === 'IN' ? block.startSec : block.endSec;
+            // Desde dónde se puntúa. `scoreCandidate` penaliza la distancia al
+            // borde que había ANTES de afinar, así que sin guardarlo no se puede
+            // volver a correr la elección: `tools/mirar-colgados.js` la repetía
+            // desde donde el borde terminó, que es justo el sitio al que lo movió
+            // la elección que se quería juzgar. Con ese anclaje corrido, la
+            // herramienta decía "la regla habría acertado" en bordes donde la
+            // regla, puntuando de verdad, había elegido otra cosa.
+            const anchorSec = edge.timeSec;
 
             const refined = await refineEdge({
                 words, edge, block, blocks, index: i, kind, options,
@@ -453,7 +470,8 @@ async function refineClass(params) {
                 decidedBy: refined.decidedBy,
                 reason: refined.reason,
                 candidates: refined.candidateCount,
-                askedModel: refined.askedModel
+                askedModel: refined.askedModel,
+                anchorSec
             };
 
             if (!refined.changed) continue;

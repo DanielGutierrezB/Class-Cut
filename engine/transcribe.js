@@ -28,12 +28,16 @@ const paths = require('./paths');
 const workspace = require('./workspace');
 const onset = require('./vendor/audio-onset');
 const silencios = require('./silencios');
+const speech = require('./speech-edges');
 
 // 2: las palabras se guardan como {start, end, text} y ya vienen corregidas
 //    contra el audio (`audio-onset.alignWords`).
 // 3: sin VAD, que arruinaba los tiempos de cada palabra, y leyendo el audio ya
 //    convertido a 16 kHz mono, que es como Whisper lo quiere.
-const TRANSCRIPT_VERSION = 3;
+// 4: sin arrastrar el texto de una ventana a la siguiente (`-mc 0`). Los
+//    transcripts de la 3 pueden traer tramos enteros sin puntuación, y de la
+//    puntuación viven los cortes: hay que rehacerlos.
+const TRANSCRIPT_VERSION = 4;
 // Una palabra repetida idéntica más veces que esto es un bucle de whisper en un
 // silencio, no algo que alguien dijo.
 const MAX_REPEATS = 3;
@@ -291,7 +295,28 @@ function runWhisper(wavPath, options) {
         '-sow',
         '-of', outBase,
         '-np',
-        '-pp'
+        '-pp',
+        // Sin arrastrar el texto de una ventana a la siguiente. whisper.cpp le
+        // pasa a cada ventana de 30 s lo que transcribió en la anterior, y en
+        // material de clase eso se traba: en cuanto una ventana sale sin
+        // puntuación, la siguiente la imita porque es lo que trae en el prompt, y
+        // no se recupera nunca más. Medido sobre la clase 6 del curso, el MISMO
+        // audio con y sin esto: 70 palabras cerrando frase contra 247, y un tramo
+        // de 1112 s (de 3:44 a 22:16, dieciocho minutos y medio) sin un solo
+        // punto contra el peor de 76 s. Y de la puntuación viven los cortes —es
+        // lo que `speech-edges` mira para no terminar un bloque a mitad de
+        // frase—, así que sin ella los ocho bloques de la clase quedaban
+        // colgando por definición y ningún candidato mejor existía.
+        //
+        // Lo mismo arregla los bucles, que son la otra cara del prompt trabado:
+        // 127 palabras colapsadas por repetición contra 1. Y tarda un 33% menos,
+        // porque son menos tokens de prompt por ventana.
+        //
+        // Lo que se pierde es la coherencia de un nombre propio entre ventanas.
+        // Medido en el mismo audio, no se notó: "Cloud Code" y "EARS" salen igual
+        // en las dos, y a cambio aparece el "Tres, dos, uno." de una toma que la
+        // versión con contexto no escribía.
+        '-mc', '0'
     ];
 
     return new Promise((resolve, reject) => {
@@ -437,6 +462,11 @@ async function transcribeClass(params) {
         language: result.language,
         wordCount: result.words.length,
         loopsRemoved: result.loopsRemoved,
+        // Cuánta puntuación de cierre quedó. Se guarda y no se recalcula al
+        // vuelo porque es la medida que dice si este transcript sirve para
+        // cortar, y quererla después obligaría a releer las palabras de las
+        // trece clases cada vez que alguien compara dos corridas.
+        puntuacion: speech.densidadDeCierres(result.words),
         audioAlign,
         words: result.words,
         segments: result.segments
@@ -447,6 +477,7 @@ async function transcribeClass(params) {
     workspace.writeJson(target, transcript);
     workspace.appendLog(workspace.artifact(root, sequenceName, 'log'),
         `transcript: ${transcript.wordCount} palabras · idioma ${transcript.language} · modelo ${transcript.engine.model}` +
+        ` · ${(transcript.puntuacion.ratio * 100).toFixed(1)}% cierran frase (pozo de ${transcript.puntuacion.pozoSec}s)` +
         (audioAlign ? ` · ${audioAlign.movedStarts || 0} arranques corregidos contra el audio` : ' · SIN corregir contra el audio') +
         (transcript.loopsRemoved ? ` · ${transcript.loopsRemoved} repeticiones colapsadas` : ''));
 

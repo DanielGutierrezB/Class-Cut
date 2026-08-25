@@ -27,6 +27,7 @@ if (!root) {
 }
 
 const baseline = {
+    claqueta: 0,
     chatter: 66,
     colgando: 103,
     conector: 7,
@@ -77,7 +78,13 @@ let total = 0;
 
 for (const cls of clases()) {
     let anterior = null;
-    for (const block of cls.align.blocks || []) {
+    // Sin los bloques apagados, igual que `defectos.contarClase`. Un bloque
+    // apagado es una arrancada en falso que ya se descartó: sigue en el plan con
+    // su marca pero no sale en la clase, así que contar sus defectos es contar
+    // como problema justo lo que se resolvió sacándolo. Las dos cuentas del
+    // proyecto decían números distintos por esto — el lote informaba 1 repetido
+    // y esta tabla 2, y el de más estaba en un bloque que no se exporta.
+    for (const block of (cls.align.blocks || []).filter(b => b.enabled !== false)) {
         total++;
         for (const [tipo, texto] of defectos.revisarBloque(cls.words, block, anterior)) {
             cuenta[tipo]++;
@@ -88,6 +95,11 @@ for (const cls of clases()) {
 }
 
 console.log(`\n${total} bloques medidos · vara: los ${baseline.total} de antes de "Cortes con criterio"\n`);
+// La claqueta se contaba y no se imprimía, así que el peor defecto que existe
+// —la clase que abre con "Claqueta 6, clase 6. 3, 2, 1."— era el único que esta
+// tabla no podía mostrar. La vara es 0 y no un número viejo: cuando se agregó el
+// defecto ya no había con qué comparar hacia atrás.
+console.log(`  la claqueta quedó dentro         ${fmt(cuenta.claqueta, baseline.claqueta)}`);
 console.log(`  termina con habla del director   ${fmt(cuenta.chatter, baseline.chatter)}`);
 console.log(`  abre con el conteo de la toma    ${fmt(cuenta.conteo, baseline.conteo || 0)}`);
 console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.colgando)}`);

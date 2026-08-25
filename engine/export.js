@@ -25,7 +25,14 @@ const notas = require('./notas');
 // propios para que se distingan de un vistazo de las que puso el CD, que llevan
 // el color que él eligió.
 const NOMBRE_DE_NOTA = 'Nota';
-const COLOR_DE_NOTA = 'yellow';
+
+// Blanco, como entero ARGB de Premiere: 0xFFFFFFFF. Va el número y no el nombre
+// `white` a propósito — solo los enteros escriben `pproColor`, que es lo único
+// que evita que Premiere ajuste el color al más parecido de su paleta. Y este
+// entero no es inventado: es exactamente el que el Rodecaster le pone a sus
+// marcadores blancos (los de claqueta, 28 en el material del curso), así que se
+// sabe que Premiere lo lee como blanco porque es Premiere quien lo escribió.
+const COLOR_DE_NOTA = 0xFFFFFFFF;
 
 /**
  * El color del marcador es el que eligió el director de contenido y viaja tal
@@ -86,6 +93,26 @@ function fullTracks(cls) {
     return { videoTracks, audioTracks };
 }
 
+/**
+ * Cuánto dura el marcador de entrada de un bloque en los dos XML espejo.
+ *
+ * El del CD trae su propia duración —en este curso, 300 frames: diez segundos— y
+ * se devuelve tal cual, porque `poblada.xml` y `alineada.xml` son eso: los
+ * marcadores del CD como los dejó, en su sitio y movidos. Un marcador de un
+ * frame es una raya invisible en la línea de tiempo de Premiere.
+ *
+ * En el XML del corte no se usa: allá el marcador de una nota dura el bloque
+ * entero (ver `cutTracks`). El respaldo es para los XML viejos que no traigan
+ * span.
+ */
+function duracionDelIn(block) {
+    const suyo = block && block.inSpanSec;
+    return suyo && suyo > 0 ? suyo : DURACION_DE_IN_SEC;
+}
+
+/** Lo que se usa cuando el XML de origen no dice cuánto duraba el marcador. */
+const DURACION_DE_IN_SEC = 10;
+
 /** Los marcadores como los dejó el CD, leídos del XML original. */
 function markersFromParsed(parsed) {
     const markers = [];
@@ -104,7 +131,7 @@ function markersFromParsed(parsed) {
             name: block.view,
             comment: block.inComment,
             startSec: block.startFrame / timebase,
-            endSec: (block.startFrame / timebase) + 10,
+            endSec: (block.startFrame / timebase) + duracionDelIn(block),
             color: markerColor(block)
         });
         if (block.complete) {
@@ -138,7 +165,7 @@ function markersFromAlign(alignResult, parsed, guardadas) {
             name: block.view,
             comment: notas.notaDeBloque(guardadas, block.index, original ? original.inComment : ''),
             startSec: block.startSec,
-            endSec: block.startSec + 10,
+            endSec: block.startSec + duracionDelIn(original),
             color: markerColor(original)
         });
         markers.push({
@@ -164,7 +191,23 @@ function markersFromAlign(alignResult, parsed, guardadas) {
     return markers;
 }
 
-/** La clase ya cortada: cada bloque uno detrás de otro, con su vista. */
+/** La vista del profesor de frente: la que va en el recuadro. */
+const VISTA_DEL_PROFESOR = 'PV';
+
+/**
+ * La clase ya cortada: cada bloque uno detrás de otro, con su vista.
+ *
+ * Las pistas quedan por papel y no por casualidad del orden del material:
+ *
+ *   V1  la cámara del profesor
+ *   V2  el grabador de pantalla
+ *   V3  la cámara del profesor OTRA VEZ, solo en los bloques que van con la
+ *       pantalla: es el recuadro (y ahí V1 queda puesta pero apagada, para que
+ *       el bloque tenga una sola imagen a pantalla completa).
+ *
+ * En V1 y V2 se enciende la que el bloque eligió y la otra queda apagada en su
+ * sitio: cambiar de plano sigue siendo un clic, pero ninguna tapa a la buena.
+ */
 function cutTracks(cls, plan, guardadas) {
     const kept = plan.segments.filter(segment => segment.keep);
     const videos = cls.videos || [];
@@ -175,11 +218,23 @@ function cutTracks(cls, plan, guardadas) {
         startSec: segment.timelineStartSec,
         endSec: segment.timelineEndSec,
         sourceInSec: segment.sourceStartSec,
-        // La pista de abajo es la base y siempre se ve; las de arriba solo cuando
-        // el bloque las eligió. Así el clip que no toca queda en la secuencia
-        // —cambiar de plano es un clic— pero no tapa al bueno.
-        enabled: trackIndex === 0 ? true : segment.cameraIndex === trackIndex
+        enabled: segment.cameraIndex === trackIndex
     })));
+
+    // La pista del recuadro. Solo lleva clips en los bloques donde la imagen
+    // principal NO es el profesor: en los demás no hay nada que meter en la
+    // esquina, y una pista con clips apagados de punta a punta es ruido.
+    const delProfesor = (plan.viewMap && plan.viewMap[VISTA_DEL_PROFESOR]) || 0;
+    const conRecuadro = kept.filter(segment => segment.cameraIndex !== delProfesor);
+    if (videos[delProfesor] && conRecuadro.length) {
+        videoTracks.push(conRecuadro.map(segment => ({
+            source: videoSource(videos[delProfesor], delProfesor),
+            startSec: segment.timelineStartSec,
+            endSec: segment.timelineEndSec,
+            sourceInSec: segment.sourceStartSec,
+            enabled: true
+        })));
+    }
 
     const audioTracks = audios.map(audio => kept.map(segment => ({
         source: audioSource(audio),
@@ -189,23 +244,53 @@ function cutTracks(cls, plan, guardadas) {
         enabled: Boolean(audio.isLiveMix)
     })));
 
-    const markers = kept.map(segment => ({
-        name: segment.view,
-        comment: notas.notaDeBloque(guardadas, segment.blockIndex, segment.note || segment.cueIn || ''),
-        startSec: segment.timelineStartSec,
-        color: markerColor(segment)
-    }));
+    // Un marcador por bloque, TODOS, porque en Premiere los marcadores no son
+    // solo para leer: son cómo se recorre la secuencia. Los límites de cada
+    // bloque ya los dicen los cortes entre clips, pero saltar de bloque en bloque
+    // se hace de marcador en marcador, y para eso no puede faltar ninguno.
+    //
+    // De ahí las dos formas, que dependen de si alguien escribió algo:
+    //
+    // - Con texto —la nota del CD o la que corrigió el editor— el marcador abarca
+    //   el bloque de borde a borde: así se lee de un vistazo a qué tramo se
+    //   refiere sin buscarlo con zoom.
+    // - Sin texto va corto y sin comentario, solo con el nombre de la vista: está
+    //   para saltar, y no tiene nada que decir. Sin `endSec` el formato lo escribe
+    //   con `out` en -1, que es su manera de decir "sin duración" y en la línea de
+    //   tiempo es la raya de un frame.
+    //
+    // Y el cue NO cuenta como texto: es el arranque del transcript, no algo que
+    // alguien haya escrito. Un bloque sin nota queda corto aunque tenga cue.
+    //
+    // El color es el que eligió el CD, en las dos formas, y viaja tal cual.
+    const markers = [];
+    for (const segment of kept) {
+        const texto = notas.notaDeBloque(guardadas, segment.blockIndex, segment.note || '');
+        markers.push({
+            name: segment.view,
+            comment: texto,
+            startSec: segment.timelineStartSec,
+            endSec: texto ? segment.timelineEndSec : null,
+            color: markerColor(segment)
+        });
+    }
 
-    // Los comentarios que dejó el editor sobre el transcript. Van anclados al
-    // tiempo de la grabación, así que hay que traerlos a la línea de tiempo del
-    // corte; los que caen en material que quedó afuera no tienen dónde ir.
+    // Los comentarios que dejó el editor sobre el transcript. Estos son otro
+    // objeto: no son de un bloque sino de un pedazo de letra, así que van blancos
+    // —para no confundirlos con los del CD— y duran lo que duraba la selección.
+    //
+    // Van anclados al tiempo de la grabación, así que hay que traerlos a la línea
+    // de tiempo del corte; los que caen en material que quedó afuera no tienen
+    // dónde ir.
     for (const comentario of (guardadas && guardadas.comentarios) || []) {
-        const segundo = notas.enLaLineaDeTiempo(comentario.sourceStartSec, kept);
-        if (segundo == null) continue;
+        const tramo = notas.tramoEnLaLineaDeTiempo(
+            comentario.sourceStartSec, comentario.sourceEndSec, kept);
+        if (!tramo) continue;
         markers.push({
             name: NOMBRE_DE_NOTA,
             comment: comentario.comentario,
-            startSec: segundo,
+            startSec: tramo.startSec,
+            endSec: tramo.endSec,
             color: COLOR_DE_NOTA
         });
     }

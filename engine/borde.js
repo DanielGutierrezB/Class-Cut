@@ -70,6 +70,22 @@ function aplicar(params) {
                 code: medido.code || null,
                 message: medido.message || null
             };
+        } else {
+            // La onda no pudo decir nada de este punto —pasa cuando alrededor no
+            // hay ningún borde de sonido, es decir cuando el corte cae en medio
+            // de habla continua— y el corte se hace igual, con el tiempo del
+            // transcript. Lo que NO se puede hacer es callarlo: la medición que
+            // el borde traía es de donde estaba ANTES, y dejarla ahí convierte el
+            // artefacto en una mentira. En el bloque 7 de la clase 6 el borde se
+            // movió a 1459.37 s y se quedó con el aire medido en 1468.32 s, así
+            // que `tools/medir-cortes.js` informaba un corte "3.8 frames dentro
+            // del sonido" nueve segundos lejos de donde había medido eso.
+            audio = {
+                appliedSec: Math.round(timeSec * 1000) / 1000,
+                airFrames: null,
+                code: 'sin-medida',
+                message: 'La onda no encontró un borde de sonido acá: el corte va con el tiempo del transcript.'
+            };
         }
     }
 

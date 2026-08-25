@@ -18,6 +18,7 @@
  */
 
 const align = require('./align');
+const speech = require('./speech-edges');
 const cutRefine = require('./cut-refine');
 const repeticiones = require('./repeticiones');
 const coherence = require('./coherence');
@@ -39,6 +40,22 @@ async function decidirCortes(params) {
     const options = { fps: cls.fps || 30, ...(params.options || {}) };
     const warnings = [];
 
+    // Antes de cortar nada: ¿este transcript sirve para decidir dónde? Todo lo
+    // que sigue —afinar, despegar, leer— supone que se sabe dónde termina cada
+    // frase. Cuando no se sabe, nada de eso falla: sale una clase con los
+    // bloques cortados donde cayó, y el editor lo descubre al mirar el
+    // resultado. Esto lo dice acá, que es donde todavía se puede volver a
+    // transcribir sin haber gastado el criterio del modelo en una clase perdida.
+    const puntuacion = speech.densidadDeCierres(words);
+    if (!puntuacion.sirve) {
+        warnings.push({
+            code: 'transcript_sin_puntuacion',
+            message: `Solo el ${(puntuacion.ratio * 100).toFixed(1)}% de las palabras cierran frase ` +
+                `(lo normal es 9-15%), con un tramo de ${Math.round(puntuacion.pozoSec)}s sin un punto. ` +
+                'Los bordes de bloque se van a decidir casi a ciegas: conviene volver a transcribir esta clase.'
+        });
+    }
+
     notify('alinear', {});
     const alignResult = align.alignClass({
         blocks: cls.blocks || [],
@@ -54,6 +71,11 @@ async function decidirCortes(params) {
     // Sin transcript no hay nada que afinar ni que leer: los marcadores se quedan
     // donde el CD los dejó, que ya se avisó al alinear.
     if (!words.length) return { alignResult, review: null, warnings };
+
+    // El suelo de la claqueta lo descubre el alineado (es quien la busca en el
+    // audio) y de acá en adelante lo respeta todo el mundo: ningún IN puede
+    // abrirse antes, ni por regla, ni por modelo, ni por repaso.
+    if (alignResult.pisoSec != null) options.pisoSec = alignResult.pisoSec;
 
     // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
     // los que tienen más de una opción razonable, que es donde el criterio cambia

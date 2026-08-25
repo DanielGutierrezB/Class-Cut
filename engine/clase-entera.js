@@ -63,7 +63,11 @@ function texto(blocks, words) {
             if (tirado) partes.push(`  (entre medio se descarta: «${tirado}»)`);
         }
 
-        const nota = (block.note || block.cueIn || '').trim();
+        // La nota es lo que escribió el CD y nada más. El respaldo al cue —el
+        // arranque del transcript que el Rodecaster guarda detrás del guion—
+        // llegaba anunciado como "nota del CD": el modelo leía como directiva las
+        // mismas palabras que venían dos líneas abajo como contenido del bloque.
+        const nota = (block.note || '').trim();
         partes.push(`⟦BLOQUE ${i + 1}${nota ? ` · nota del CD: «${nota}»` : ''}⟧`);
         partes.push(speech.textInside(words, block.startSec, block.endSec) || '(no se dice nada)');
         anterior = block;

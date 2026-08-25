@@ -8,6 +8,7 @@
 
 const cutplan = require('../engine/cutplan');
 const fcp = require('../engine/fcp-xml');
+const exporter = require('../engine/export');
 
 function alignedBlock(index, startSec, endSec, view, confidence) {
     return {
@@ -47,6 +48,239 @@ module.exports = function (t) {
         t.eq(plan.segments[1].timelineEndSec, 50);
         t.eq(plan.totals.keepSec, 50);
     });
+
+    t.group('export · todos los bloques llevan marcador, en dos formas');
+
+    t.test('cada bloque del corte tiene el suyo', () => {
+        // En Premiere se salta de marcador en marcador: si falta el de un bloque,
+        // ese bloque no se puede alcanzar con esa navegación.
+        const plan = cutplan.buildCutplan({
+            blocks: [
+                alignedBlock(0, 100, 130),
+                { ...alignedBlock(1, 200, 220), note: '' },
+                { ...alignedBlock(2, 300, 340), note: '' }
+            ],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers.length, 3, 'tres bloques, tres marcadores');
+        t.eq(cut.markers.filter(m => m.endSec != null).length, 1, 'uno largo, el que tiene nota');
+    });
+
+    t.test('la cuenta cierra: un marcador por bloque más los de selección', () => {
+        // Con la forma de la clase 1 del curso: 15 bloques, 3 con nota del CD.
+        // Esta es la afirmación que faltaba — sin ella, "solo los que dicen algo"
+        // pasaba todas las pruebas y dejaba 12 bloques sin manera de alcanzarlos.
+        const conNota = new Set([2, 9, 12]);
+        const blocks = [];
+        for (let i = 0; i < 15; i++) {
+            blocks.push({
+                ...alignedBlock(i, 100 + i * 50, 130 + i * 50),
+                note: conNota.has(i) ? `nota ${i}` : ''
+            });
+        }
+        const plan = cutplan.buildCutplan({
+            blocks, videos: CAMERAS, audios: AUDIOS, durationSec: 1000
+        });
+        const guardadas = {
+            bloques: {},
+            comentarios: [{ sourceStartSec: 110, sourceEndSec: 115, comentario: 'un comentario mío' }]
+        };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+
+        const deBloque = cut.markers.filter(m => m.name !== 'Nota');
+        t.eq(deBloque.length, 15, 'quince bloques, quince marcadores');
+        t.eq(deBloque.filter(m => m.endSec != null).length, 3, 'tres largos, los que tienen nota');
+        t.eq(deBloque.filter(m => m.endSec == null).length, 12, 'y doce cortos para saltar');
+        t.eq(cut.markers.length, 16, 'más el comentario de selección');
+    });
+
+    t.test('sin nota va corto y solo con el nombre de la vista', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [{ ...alignedBlock(0, 100, 130), note: '', view: 'R' }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers.length, 1);
+        t.eq(cut.markers[0].name, 'R');
+        t.eq(cut.markers[0].comment, '', 'no dice nada: nadie escribió nada');
+        t.eq(cut.markers[0].endSec, null, 'sin duración, que el formato escribe out=-1');
+    });
+
+    t.test('el cue no cuenta como nota: es transcript, no algo que alguien escribió', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [{ ...alignedBlock(0, 100, 130), note: '', cueIn: 'Antes de la inteligencia artificial generat' }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers[0].comment, '', 'el cue no se cuela como comentario');
+        t.eq(cut.markers[0].endSec, null, 'y tener cue no lo hace largo');
+    });
+
+    t.test('el marcador de un bloque con nota dura el bloque entero', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 100, 130), { ...alignedBlock(1, 200, 220), note: '' }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers[0].startSec, 0);
+        t.eq(cut.markers[0].endSec, 30, 'de borde a borde del bloque');
+        t.eq(cut.markers[0].comment, 'nota 0');
+        t.eq(cut.markers[1].startSec, 30, 'y el corto del siguiente arranca ahí');
+        t.eq(cut.markers[1].endSec, null);
+    });
+
+    t.test('la nota que corrigió el editor manda sobre la del marcador', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 100, 130)],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const guardadas = { bloques: { 0: { note: 'la corregida' } }, comentarios: [] };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+        t.eq(cut.markers[0].comment, 'la corregida');
+        t.eq(cut.markers[0].endSec, 30, 'y sigue durando el bloque');
+    });
+
+    t.test('escribirle una nota a un bloque que no la tenía lo pasa a largo', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [{ ...alignedBlock(0, 100, 130), note: '' }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const guardadas = { bloques: { 0: { note: 'esto lo escribí yo' } }, comentarios: [] };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+        t.eq(cut.markers[0].comment, 'esto lo escribí yo');
+        t.eq(cut.markers[0].endSec, 30, 'ahora dice algo, así que abarca el bloque');
+    });
+
+    t.test('el color del marcador de la nota sigue siendo el que eligió el CD', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [{ ...alignedBlock(0, 100, 130), color: 4281740498 }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers[0].color, 4281740498);
+    });
+
+    t.group('export · el comentario de una selección es otro objeto');
+
+    t.test('sale blanco y dura lo que duraba la selección', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [{ ...alignedBlock(0, 100, 130), note: '' }],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const guardadas = {
+            bloques: {},
+            comentarios: [{ sourceStartSec: 110, sourceEndSec: 114.5, comentario: 'esto se repite después' }]
+        };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+        t.eq(cut.markers.length, 2, 'el corto del bloque y este');
+        const nota = cut.markers.find(m => m.name === 'Nota');
+        t.eq(nota.startSec, 10);
+        t.eq(nota.endSec, 14.5, 'los 4,5 s de la selección');
+        // Blanco de Premiere: el mismo entero que el Rodecaster escribe en sus
+        // marcadores de claqueta.
+        t.eq(nota.color, 4294967295);
+    });
+
+    t.test('una selección que se pasa del corte se recorta en el borde', () => {
+        // Lo de más allá del borde no está en la secuencia: un marcador que cruza
+        // el corte señalaría material que no es el que se comentó.
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 100, 130), alignedBlock(1, 300, 320)],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const guardadas = {
+            bloques: {},
+            comentarios: [{ sourceStartSec: 128, sourceEndSec: 305, comentario: 'cruza el corte' }]
+        };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+        const nota = cut.markers.find(m => m.name === 'Nota');
+        t.eq(nota.startSec, 28);
+        t.eq(nota.endSec, 30, 'hasta donde termina el bloque donde empezó');
+    });
+
+    t.test('un comentario en material que quedó afuera no va a ningún lado', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 100, 130), alignedBlock(1, 300, 320)],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const guardadas = {
+            bloques: {},
+            comentarios: [{ sourceStartSec: 200, sourceEndSec: 210, comentario: 'esto se sacó' }]
+        };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
+        t.eq(cut.markers.filter(m => m.name === 'Nota').length, 0);
+    });
+
+    t.group('export · los dos XML espejo siguen llevando los marcadores del CD');
+
+    t.test('el marcador del CD conserva sus diez segundos en poblada.xml', () => {
+        // Estos dos XML son el espejo del original —sirven para ver si el problema
+        // ya estaba antes—, así que ahí los marcadores van todos y con el largo
+        // que les puso el CD.
+        const parsed = {
+            timebase: 30,
+            clap: null,
+            blocks: [{
+                index: 0, view: 'PV', inComment: 'nota - entra', outComment: '',
+                startFrame: 3000, endFrame: 3900, inSpanSec: 10, complete: true, color: 4281740498
+            }]
+        };
+        const markers = exporter.markersFromParsed(parsed);
+        t.eq(markers.length, 2, 'el de entrada y el de salida');
+        t.eq(markers[0].startSec, 100);
+        t.eq(markers[0].endSec, 110, 'diez segundos, como en el XML del Rodecaster');
+    });
+
+    t.group('export · las pistas quedan por papel');
+
+    /** Una clase con un bloque de cámara y uno de pantalla. */
+    function planMixto() {
+        return cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 10, 20, 'PV'), alignedBlock(1, 30, 40, 'R')],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+    }
+
+    t.test('V1 la cámara, V2 la pantalla, y cada una encendida en su bloque', () => {
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, planMixto(), null);
+        t.eq(cut.videoTracks[0][0].enabled, true, 'V1 encendida en el bloque de cámara');
+        t.eq(cut.videoTracks[0][1].enabled, false, 'y apagada en el de pantalla');
+        t.eq(cut.videoTracks[1][0].enabled, false, 'V2 apagada en el de cámara');
+        t.eq(cut.videoTracks[1][1].enabled, true, 'y encendida en el de pantalla');
+    });
+
+    t.test('V3 lleva la cámara del profesor, solo en los bloques de pantalla', () => {
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, planMixto(), null);
+        t.eq(cut.videoTracks.length, 3, 'hay una pista más para el recuadro');
+        const recuadro = cut.videoTracks[2];
+        t.eq(recuadro.length, 1, 'un solo clip: el bloque de pantalla');
+        t.eq(recuadro[0].source.name, CAMERAS[0].name, 'y es la cámara del profesor');
+        t.eq(recuadro[0].enabled, true);
+        // El mismo tramo del original que la pantalla: es el mismo momento.
+        t.eq(recuadro[0].sourceInSec, 30);
+        t.eq(recuadro[0].startSec, 10, 'y va donde va ese bloque en el corte');
+    });
+
+    t.test('una clase toda de cámara no estrena pista de recuadro', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 10, 20, 'PV'), alignedBlock(1, 30, 40, 'PV')],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.videoTracks.length, 2, 'sin bloques de pantalla no hay recuadro');
+    });
+
+    t.test('con una sola cámara no hay recuadro que armar', () => {
+        const plan = cutplan.buildCutplan({
+            blocks: [alignedBlock(0, 10, 20, 'PV')],
+            videos: [CAMERAS[0]], audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: [CAMERAS[0]], audios: AUDIOS }, plan, null);
+        t.eq(cut.videoTracks.length, 1);
+    });
+
+    t.group('cutplan · qué se queda y con qué cámara (sigue)');
 
     t.test('cada vista va a su cámara', () => {
         const plan = cutplan.buildCutplan({

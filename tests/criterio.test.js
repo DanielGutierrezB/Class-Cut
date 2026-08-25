@@ -186,6 +186,75 @@ module.exports = function (t) {
         t.ok(snap.timeSec <= 14.1, `tenía que abrir en "Y", quedó en ${snap.timeSec}`);
     });
 
+    t.group('cut-refine · desde dónde se puntuó');
+
+    t.test('el borde guarda el sitio que ocupaba antes de afinarlo', async () => {
+        // Sin esto, `tools/mirar-colgados.js` no puede repetir la elección: la
+        // repetía desde donde el borde terminó, o sea desde el sitio al que lo
+        // movió la elección que estaba juzgando, y desde ahí siempre gana otro.
+        const words = say('esta es la primera idea y ya cierra.', 10)
+            .concat(say('Y acá arranca la segunda, que sigue un rato largo.', 14));
+        const block = {
+            index: 0, startSec: 10, endSec: 15.4,
+            in: { kind: 'IN' }, out: { kind: 'OUT' }
+        };
+        const alignResult = { blocks: [block] };
+        await refine.refineClass({ alignResult, words, wav: null, options: { fps: 30 }, ai: null });
+
+        for (const kind of ['in', 'out']) {
+            if (!block[kind].refine) continue;
+            t.eq(typeof block[kind].refine.anchorSec, 'number', `el ${kind} no guardó desde dónde puntuó`);
+        }
+        // Y es el sitio de ANTES, no el de después: si el afinado movió el
+        // borde, guardar el final haría que el número no sirviera para nada.
+        if (block.out.refine) t.eq(block.out.refine.anchorSec, 15.4);
+    });
+
+    t.group('speech-edges · ¿este transcript sirve para cortar?');
+
+    t.test('cuenta las palabras que cierran frase y el pozo entre una y otra', () => {
+        const words = say('esto cierra.', 10).concat(say('y esto tarda mucho en cerrar.', 40));
+        const d = speech.densidadDeCierres(words);
+        t.eq(d.palabras, 8);
+        t.eq(d.cierres, 2);
+        t.eq(d.ratio, 0.25);
+        t.ok(d.pozoSec > 30 && d.pozoSec < 32, `el pozo tenía que ser de ~31s, dio ${d.pozoSec}`);
+    });
+
+    t.test('el pozo cuenta también el tramo anterior al primer punto', () => {
+        // Un transcript con un solo punto al final es el peor caso posible.
+        // Midiendo solo "entre cierres" daba cero, o sea el mejor.
+        const words = say('todo esto va sin puntuación durante un rato largo', 0, 5)
+            .concat(say('cierra.', 60));
+        t.ok(speech.densidadDeCierres(words).pozoSec > 55,
+            `el pozo tenía que abarcar la clase entera, dio ${speech.densidadDeCierres(words).pozoSec}`);
+    });
+
+    t.test('una clase sana pasa y una trabada no', () => {
+        // Los dos extremos medidos en el curso: las trece clases sanas van de
+        // 9,3 % a 15,4 %, y la 6 con whisper trabado estaba en 2,5 %.
+        const sana = [];
+        for (let i = 0; i < 10; i++) sana.push(...say('una frase de nueve palabras que al final cierra.', i * 5));
+        t.eq(speech.densidadDeCierres(sana).sirve, true);
+
+        const trabada = say('a '.repeat(60).trim(), 0).concat(say('cierra.', 30));
+        const medida = speech.densidadDeCierres(trabada);
+        t.ok(medida.ratio < 0.05, `tenía que dar por debajo del 5%, dio ${medida.ratio}`);
+        t.eq(medida.sirve, false);
+    });
+
+    t.test('sin palabras no se acusa al transcript: es una clase sin audio', () => {
+        // De eso ya avisa el alineado, y contarlo dos veces manda al editor a
+        // volver a transcribir algo que no tiene qué transcribir.
+        t.eq(speech.densidadDeCierres([]).sirve, true);
+        t.eq(speech.densidadDeCierres([]).ratio, 0);
+    });
+
+    t.test('las palabras sin tiempo no cuentan para el porcentaje', () => {
+        const words = say('esto cierra.', 10).concat([{ text: 'fantasma.' }]);
+        t.eq(speech.densidadDeCierres(words).palabras, 2);
+    });
+
     t.group('cut-refine · candidatos');
 
     t.test('los finales de frase entran como candidatos aunque no haya pausa', () => {

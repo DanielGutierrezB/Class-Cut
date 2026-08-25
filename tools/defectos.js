@@ -14,13 +14,17 @@
 
 const edges = require('../engine/speech-edges');
 const repeticiones = require('../engine/repeticiones');
+// Reconocer la claqueta lo hace el motor, que la busca en el audio para
+// sincronizar: con una copia acá, la medición podía dejar de ver justo la que el
+// piso está impidiendo que entre.
+const clap = require('../engine/clap-detect');
 
 // La lista de conectores vive en el motor, porque además de medirlos hay que
 // quitarlos: `engine/repasar.js` los usa para arreglar el arranque. Con una copia
 // acá, la medición podía dejar de ver justo lo que el arreglo estaba quitando.
 const CONECTOR_HUERFANO = edges.CONECTOR_HUERFANO;
 
-const TIPOS = ['chatter', 'conteo', 'colgando', 'conector', 'mitadPalabra', 'repetido'];
+const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'conector', 'mitadPalabra', 'repetido'];
 
 /**
  * ¿El corte se metió dentro del sonido?
@@ -59,6 +63,16 @@ function revisarBloque(words, block, anterior) {
     if (dentro.length) {
         const ultima = dentro[dentro.length - 1];
         const primera = dentro[0];
+
+        // La claqueta dentro del corte. Es el peor defecto posible y hasta ahora
+        // no se medía: la clase 6 del curso empezaba con "Claqueta 6, clase 6.
+        // 3, 2, 1. Ya…" y ninguna cuenta lo veía, porque "Claqueta" no es una
+        // palabra de charla ni un conteo — es su propia categoría.
+        const claqueta = dentro.findIndex(w => clap.looksLikeClaqueta(edges.textOf(w)));
+        if (claqueta >= 0) {
+            fallas.push(['claqueta',
+                `dentro: «${dentro.slice(claqueta, claqueta + 4).map(edges.textOf).join(' ')}…»`]);
+        }
 
         if (edges.isChatter(ultima, 0, null, dentro[dentro.length - 2])) {
             fallas.push(['chatter', `cierra en «${edges.textOf(ultima)}»`]);

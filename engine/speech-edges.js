@@ -97,7 +97,18 @@ function isChatter(word, pauseBefore, options, vecina) {
     if (STRONG_CHATTER.test(text)) return true;
     if (esConteo(word, vecina)) return true;
     if (WEAK_CHATTER.test(text)) {
-        return (pauseBefore == null ? 0 : pauseBefore) >= opt(options, 'weakPauseSec');
+        const trasSilencio = (pauseBefore == null ? 0 : pauseBefore) >= opt(options, 'weakPauseSec');
+        // Y SUELTA, que es la otra mitad de la regla y faltaba. Estas palabras
+        // existen dentro del habla normal, así que el silencio de delante no
+        // alcanza para distinguirlas: en la clase 6, "Ya" abría la frase "Ya
+        // Clauco nos entregó los planos de nuestra casa" a 0,35 s del conteo —
+        // justo en el umbral—, se contaba como orden del director, y eso
+        // bloqueaba el retraer del ajuste a frase: el bloque saltaba a la frase
+        // siguiente y esa se perdía entera.
+        //
+        // Suelta significa que cierra su propia frase ("Ok.", "Listo.", "Ya.")
+        // o que no hay nada detrás. Con más palabras pegadas es habla.
+        return trasSilencio && (endsSentence(word) || !vecina);
     }
     return false;
 }
@@ -308,7 +319,10 @@ function snapToSentence(words, timeSec, kind, options) {
             const word = list[i];
             if (word.end - timeSec > limit) break;
             const pause = word.start - list[i - 1].end;
-            if (isChatter(word, pause, options)) break;
+            // Con la palabra de al lado: sin ella, `isChatter` no puede ver si la
+            // palabra viene suelta —que es lo que la hace una orden— y trata
+            // como aparte del director cualquier "ya" o "bueno" del habla normal.
+            if (isChatter(word, pause, options, list[i + 1])) break;
             if (endsSentence(word)) { result.candidates.extend = word.end; break; }
         }
 
@@ -338,10 +352,19 @@ function snapToSentence(words, timeSec, kind, options) {
     }
 
     // Hacia atrás: el principio de la frase que este bloque parte por la mitad.
+    // `minTime` es el suelo de quien llama —la claqueta, el bloque anterior— y
+    // acá importa porque esto es lo único del alineado que mueve un IN hacia
+    // atrás: sin él, abrir la frase podía meterse en la claqueta.
+    const suelo = options && options.minTime != null ? options.minTime : null;
     for (let i = idx - 1; i >= 0; i--) {
         if (timeSec - list[i].start > limit) break;
+        if (suelo != null && list[i].start < suelo) break;
         const pause = i > 0 ? list[i].start - list[i - 1].end : 999;
-        if (isChatter(list[i], pause, options)) break;
+        // Igual que arriba, con la vecina. Acá se notaba peor: "Ya" abría la
+        // frase "Ya Clauco nos entregó los planos" y sin la vecina contaba como
+        // orden del director, así que este bucle cortaba y el bloque se iba a la
+        // frase siguiente — perdiendo la primera entera.
+        if (isChatter(list[i], pause, options, list[i + 1])) break;
         if (i === 0 || endsSentence(list[i - 1])) { result.candidates.retract = list[i].start; break; }
     }
     // Hacia adelante: el arranque de la frase siguiente.
@@ -387,12 +410,76 @@ function quedaColgando(words, startSec, endSec) {
     return Boolean(dentro.length) && !endsSentence(dentro[dentro.length - 1]);
 }
 
+/**
+ * Por debajo de esto, el transcript no sirve para decidir cortes.
+ *
+ * El número sale de medir las trece clases del curso: las sanas van de 9,3 % a
+ * 15,4 % de palabras cerrando frase, y la clase 6 enferma —whisper.cpp trabado
+ * arrastrando su propio texto entre ventanas— estaba en 2,5 %. 5 % parte esa
+ * distancia por el medio: es la mitad de la peor clase sana y el doble de la
+ * enferma, así que no hay forma de que una clase normal lo dispare ni de que
+ * una trabada se escape.
+ */
+const CIERRES_MINIMOS = 0.05;
+
+/**
+ * Cuánta puntuación de cierre trae un transcript.
+ *
+ * Existe porque es la comprobación que habría delatado la clase 6 ocho pasos
+ * antes de que el defecto se viera. Todo lo de acá abajo —el ajuste a frase, el
+ * recorte del habla del director, el "queda colgando"— se apoya en saber dónde
+ * termina una frase. Un transcript sin puntuación no hace fallar nada: hace que
+ * cada bloque se corte donde caiga y que el problema aparezca al final,
+ * disfrazado de "ocho finales colgados", en un sitio donde ya no se puede
+ * atribuir a la transcripción.
+ *
+ * El pozo se mide además del porcentaje porque el porcentaje es global y el
+ * daño es local: la clase 12 tiene un 13,9 % sano y aun así se pasa 599
+ * segundos seguidos sin un punto, y todos los bloques que caen ahí adentro se
+ * cortan a ciegas. El porcentaje decide el aviso; el pozo es lo que después
+ * explica por qué una clase con buen número igual salió mal.
+ *
+ * @returns {{palabras:number, cierres:number, ratio:number, pozoSec:number, sirve:boolean}}
+ */
+function densidadDeCierres(words) {
+    const dichas = spoken(words);
+    let cierres = 0;
+    let pozoSec = 0;
+    // El pozo se mide desde el principio del habla y hasta el final, no solo
+    // entre dos puntos. Con un transcript que trae un único punto al final, la
+    // cuenta "entre cierres" da cero y el peor caso posible se informa como el
+    // mejor; el tramo sin puntuación es toda la clase menos la última palabra.
+    let ultimo = dichas.length ? dichas[0].start : null;
+    for (const word of dichas) {
+        if (!endsSentence(word)) continue;
+        cierres++;
+        pozoSec = Math.max(pozoSec, word.end - ultimo);
+        ultimo = word.end;
+    }
+    if (ultimo != null) {
+        pozoSec = Math.max(pozoSec, dichas[dichas.length - 1].end - ultimo);
+    }
+    const ratio = dichas.length ? cierres / dichas.length : 0;
+    return {
+        palabras: dichas.length,
+        cierres,
+        ratio: Math.round(ratio * 10000) / 10000,
+        pozoSec: Math.round(pozoSec * 10) / 10,
+        // Un transcript vacío no es un transcript malo: es una clase sin audio,
+        // y de eso ya avisa el alineado. Decir además que "no sirve para
+        // cortar" sería el mismo problema contado dos veces.
+        sirve: !dichas.length || ratio >= CIERRES_MINIMOS
+    };
+}
+
 module.exports = {
     isChatter,
     isHardChatter,
     esConector,
     CONECTOR_HUERFANO,
     endsSentence,
+    densidadDeCierres,
+    CIERRES_MINIMOS,
     wordLimits,
     tightest,
     trimChatter,

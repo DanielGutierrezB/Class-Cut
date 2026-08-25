@@ -158,14 +158,21 @@ function chooseOffset(blocks, words, clap, options) {
     };
 }
 
-/** El territorio donde puede caer un borde: entre el bloque de antes y el de después. */
-function limitsFor(blocks, index, kind, offsetSec) {
+/**
+ * El territorio donde puede caer un borde: entre el bloque de antes y el de
+ * después, y nunca antes de la claqueta.
+ *
+ * El piso de la claqueta se aplica a los IN y no a los OUT: un OUT no puede
+ * estar antes que su propio IN, así que ya queda cubierto.
+ */
+function limitsFor(blocks, index, kind, offsetSec, pisoSec) {
     const prev = blocks[index - 1];
     const next = blocks[index + 1];
     const block = blocks[index];
     if (kind === 'IN') {
+        const vecino = prev ? prev.endSec + offsetSec : null;
         return {
-            minTime: prev ? prev.endSec + offsetSec : null,
+            minTime: mayor(vecino, pisoSec),
             maxTime: block.endSec + offsetSec
         };
     }
@@ -173,6 +180,13 @@ function limitsFor(blocks, index, kind, offsetSec) {
         minTime: block.startSec + offsetSec,
         maxTime: next ? next.startSec + offsetSec : null
     };
+}
+
+/** El más tardío de dos límites, tratando null como "sin límite". */
+function mayor(a, b) {
+    if (a == null) return b == null ? null : b;
+    if (b == null) return a;
+    return Math.max(a, b);
 }
 
 /**
@@ -360,12 +374,16 @@ function alignClass(params) {
 
     const offsetReason = `${clap.reason} Se usa ${decision.chosen.label} (${offsetSec.toFixed(2)} s): ${decision.decidedBy}.`;
 
+    // Antes de la claqueta no hay clase: es el piso de todos los IN, acá y en lo
+    // que venga después (el afinado y el repaso lo reciben en las opciones).
+    const pisoSec = clapDetect.pisoDeLaClase(clap, clapMarkerSec, offsetSec);
+
     // ── 2. Cada bloque ──
     const aligned = [];
     for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        const inLimits = limitsFor(blocks, i, 'IN', offsetSec);
-        const outLimits = limitsFor(blocks, i, 'OUT', offsetSec);
+        const inLimits = limitsFor(blocks, i, 'IN', offsetSec, pisoSec);
+        const outLimits = limitsFor(blocks, i, 'OUT', offsetSec, pisoSec);
 
         // 1. La nota del CD dice de qué frase estamos hablando.
         const inEdge = anchorEdge({
@@ -395,12 +413,20 @@ function alignClass(params) {
         };
         trimChatter();
 
-        // 3. Que el bloque abra y cierre una idea, no la mitad de una.
-        applySnap(inEdge, words, options);
+        // 3. Que el bloque abra y cierre una idea, no la mitad de una. El IN lleva
+        //    su suelo: abrir la frase es lo único de acá que va hacia atrás.
+        applySnap(inEdge, words, { ...options, minTime: inLimits.minTime });
         applySnap(outEdge, words, options);
         // Cerrar la frase puede haber vuelto a meter un "Pausa." que también
         // termina en punto, así que se limpia otra vez.
         trimChatter();
+
+        // Y por si algo de arriba se pasó: el piso no se negocia.
+        if (pisoSec != null && inEdge.timeSec < pisoSec) {
+            inEdge.timeSec = pisoSec;
+            inEdge.decidedBy = 'claqueta';
+            inEdge.reason = `${inEdge.reason} No puede abrir antes de la claqueta.`.trim();
+        }
 
         // 4. El frame exacto, ya con la palabra vecina como límite.
         refineWithAudio(inEdge, { words, wav, blockLimits: inLimits, options });
@@ -446,6 +472,9 @@ function alignClass(params) {
         createdAt: new Date().toISOString(),
         fps,
         durationSec,
+        // Antes de acá no hay clase. Viaja al artefacto porque las etapas que
+        // siguen —el afinado, el repaso— tienen que respetar el mismo suelo.
+        pisoSec,
         offset: {
             appliedSec: offsetSec,
             applied: offsetSec !== 0,

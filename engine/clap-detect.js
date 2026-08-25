@@ -205,4 +205,43 @@ function fmt(seconds) {
     return `${m}:${rest}`;
 }
 
-module.exports = { detectClap, findSpokenClap, findClapPeak, looksLikeClaqueta, asNumber, DEFAULTS };
+/** Lo que se deja pasar después del golpe, para que no se oiga su cola. */
+const MARGEN_DEL_PISO_SEC = 0.35;
+
+/**
+ * Antes de este segundo no empieza la clase.
+ *
+ * La claqueta no es un bloque: es la referencia para sincronizar, y todo lo que
+ * pasa hasta que suena —acomodar la cámara, "¿grabando?", el dicho y el golpe—
+ * es preparación. El parser ya no la convierte en bloque, pero eso no alcanzaba:
+ * el bloque 1 puede ABRIRSE hacia atrás y tragársela. Pasó en la clase 6, donde
+ * el modelo eligió un corte 7,4 s antes del marcador y el corte final empezaba
+ * con "Claqueta 6, clase 6. 3, 2, 1. Ya…".
+ *
+ * Así que la claqueta es un piso, no una sugerencia: ningún IN puede caer antes.
+ * Se toma lo más tardío que se sepa de ella —el golpe si se oyó, el final del
+ * dicho, o donde el CD puso el marcador— porque cualquiera de los tres que quede
+ * afuera se oye en la clase.
+ *
+ * @param {object} clap lo que devolvió `detectClap`
+ * @param {number|null} markerSec el marcador del CD, en tiempo del XML
+ * @param {number} offsetSec el desfase que se le aplicó a la clase
+ * @returns {number|null} null si no se sabe nada de la claqueta
+ */
+function pisoDeLaClase(clap, markerSec, offsetSec) {
+    const candidatos = [];
+    if (clap && clap.found) {
+        if (clap.clap && clap.clap.time != null) candidatos.push(clap.clap.time);
+        if (clap.spoken && clap.spoken.end != null) candidatos.push(clap.spoken.end);
+    }
+    // El marcador vive en tiempo del XML; los bloques ya están en tiempo del
+    // audio, así que hay que correrlo lo mismo que se corrió la clase.
+    if (markerSec != null) candidatos.push(markerSec + (offsetSec || 0));
+    if (!candidatos.length) return null;
+    return Math.round((Math.max(...candidatos) + MARGEN_DEL_PISO_SEC) * 1000) / 1000;
+}
+
+module.exports = {
+    detectClap, findSpokenClap, findClapPeak, looksLikeClaqueta, asNumber,
+    pisoDeLaClase, MARGEN_DEL_PISO_SEC, DEFAULTS
+};
