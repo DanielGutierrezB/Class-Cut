@@ -24,6 +24,27 @@ module.exports = function (t) {
         } finally { fixture.rimraf(root); }
     });
 
+    t.test('cada clase sabe su raíz y se identifica por su carpeta', () => {
+        // Con varias carpetas cargadas a la vez, dos cursos pueden traer una
+        // "Clase 01" cada uno: con el nombre de secuencia como id, la segunda
+        // pisaba a la primera en todos los mapas de la ventana. Y la raíz decide
+        // dónde va su "The Cutter", así que viaja en la clase.
+        const root = fixture.tempRoot('ids');
+        try {
+            const uno = fixture.makeClassFolder(root, { number: 1 });
+            fixture.makeClassFolder(root, { number: 2 });
+            const result = scanner.scan(root);
+
+            t.eq(result.classes.every(c => c.root === result.root), true, 'todas traen su raíz');
+            t.eq(result.classes.find(c => c.classNumber === 1).id, uno.dir, 'el id es la carpeta');
+            t.eq(new Set(result.classes.map(c => c.id)).size, result.classes.length,
+                'y por eso no se repiten');
+            // El mismo escaneo otra vez tiene que dar los mismos ids: `main.js`
+            // vuelve a escanear antes de procesar y busca por id.
+            t.deep(scanner.scan(root).classes.map(c => c.id), result.classes.map(c => c.id));
+        } finally { fixture.rimraf(root); }
+    });
+
     t.test('una carpeta con varias clases es un día', () => {
         const root = fixture.tempRoot('dia');
         try {

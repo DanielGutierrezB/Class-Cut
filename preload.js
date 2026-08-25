@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('cc', {
     pickFolder: () => ipcRenderer.invoke('pick-folder'),
     confirmar: payload => ipcRenderer.invoke('confirmar', payload),
     scan: folder => ipcRenderer.invoke('scan', folder),
+    quitarCarpeta: root => ipcRenderer.invoke('quitar-carpeta', root),
     process: payload => ipcRenderer.invoke('process', payload),
     cancelProcess: () => ipcRenderer.invoke('cancel-process'),
     loadReview: payload => ipcRenderer.invoke('load-review', payload),

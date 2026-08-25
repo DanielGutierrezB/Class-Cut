@@ -227,7 +227,16 @@ function readClass(dir, signature, rootPath) {
     }
 
     cls.processable = cls.problems.length === 0;
-    cls.id = cls.sequenceName || `${folderName}`;
+    // La raíz por la que se llegó a esta clase: es lo que decide dónde va su
+    // "The Cutter". Viaja en la clase y no aparte porque ahora pueden estar
+    // cargadas varias carpetas a la vez, y cada clase tiene que saber de cuál es.
+    cls.root = rootPath;
+    // El id es la carpeta de la clase, no su nombre de secuencia. Con dos
+    // carpetas cargadas, dos cursos distintos pueden traer una "Clase 01" cada
+    // uno, y con el nombre como id la segunda pisaba a la primera en todos los
+    // mapas de la ventana. La ruta es única en el disco por construcción, y es
+    // la misma cada vez que se vuelve a escanear.
+    cls.id = dir;
     return cls;
 }
 

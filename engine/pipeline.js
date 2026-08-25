@@ -195,6 +195,11 @@ async function processClasses(params) {
             const result = await processClass({
                 ...params,
                 cls,
+                // Cada clase sabe por qué carpeta se entró a ella, y ahí va su
+                // "The Cutter". Una corrida puede mezclar carpetas: con una raíz
+                // sola para toda la tanda, los XML de la segunda terminaban en el
+                // Backup de la primera.
+                root: cls.root || params.root,
                 ai: modelo.cliente,
                 modelName: modelo.model || null,
                 // Quien escucha necesita saber de qué clase es cada etapa:

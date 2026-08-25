@@ -14,6 +14,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 
 const scanner = require('./engine/course-scan');
+const carpetasLib = require('./engine/carpetas');
 const probe = require('./engine/media-probe');
 const paths = require('./engine/paths');
 const pipeline = require('./engine/pipeline');
@@ -34,9 +35,11 @@ const devShot = require('./dev-shot');
 
 let mainWindow = null;
 let currentRun = null;
-// El último escaneo, con el material ya medido. El visor y el guardado lo
-// necesitan entero (bloques, cámaras, audios) y la ventana solo maneja ids.
-let lastScan = null;
+// Las carpetas cargadas, por raíz, con el material ya medido. El visor y el
+// guardado las necesitan enteras (bloques, cámaras, audios) y la ventana solo
+// maneja ids. Son varias porque el editor puede tener cargado el curso de un
+// cliente y el día de otro a la vez.
+const carpetas = new Map();
 
 function appVersion() {
     try {
@@ -317,15 +320,8 @@ ipcMain.handle('pick-folder', async () => {
     return result.filePaths[0];
 });
 
-/**
- * Escanea y mide. El escaneo es inmediato; medir con ffprobe tarda (unos 150 ms
- * por clase), así que la tabla se manda primero y las duraciones van llegando.
- */
-ipcMain.handle('scan', async (event, folder) => {
-    if (!folder || typeof folder !== 'string') {
-        return { ok: false, error: 'No llegó ninguna carpeta.' };
-    }
-
+/** Escanea una carpeta y mide su material, dejándola cargada. */
+async function escanearYMedir(folder) {
     const result = scanner.scan(folder);
     if (!result.ok) return result;
 
@@ -351,19 +347,57 @@ ipcMain.handle('scan', async (event, folder) => {
         if (!cls.processable) cls.selected = false;
     }
     result.totalDurationSec = result.classes.reduce((sum, c) => sum + (c.durationSec || 0), 0);
-    lastScan = result;
     return result;
+}
+
+/**
+ * Agrega una carpeta a las que ya están. El escaneo es inmediato; medir con
+ * ffprobe tarda (unos 150 ms por clase), así que la tabla se manda primero y las
+ * duraciones van llegando.
+ *
+ * Dos carpetas que se solapan no pueden convivir (ver `engine/carpetas.js`): la
+ * respuesta dice qué se reemplazó para que la ventana muestre lo mismo que hay
+ * cargado acá.
+ */
+ipcMain.handle('scan', async (event, folder) => {
+    if (!folder || typeof folder !== 'string') {
+        return { ok: false, error: 'No llegó ninguna carpeta.' };
+    }
+
+    const plan = carpetasLib.fusionar([...carpetas.keys()], folder);
+    if (plan.accion === 'cubierta') {
+        return {
+            ok: false,
+            yaCubierta: plan.cubiertaPor,
+            error: `Esa carpeta ya está cargada dentro de «${path.basename(plan.cubiertaPor)}».`
+        };
+    }
+
+    const result = await escanearYMedir(folder);
+    if (!result.ok) return result;
+
+    for (const vieja of plan.reemplaza) carpetas.delete(vieja);
+    carpetas.set(result.root, result);
+    return { ...result, accion: plan.accion, reemplaza: plan.reemplaza };
+});
+
+ipcMain.handle('quitar-carpeta', (event, root) => {
+    carpetas.delete(carpetasLib.normal(root || ''));
+    return { ok: true, cargadas: [...carpetas.keys()] };
 });
 
 function classById(id) {
-    if (!lastScan) return null;
-    return lastScan.classes.find(c => c.id === id) || null;
+    for (const scan of carpetas.values()) {
+        const cls = scan.classes.find(c => c.id === id);
+        if (cls) return cls;
+    }
+    return null;
 }
 
 ipcMain.handle('load-review', (event, { id, buckets }) => {
     const cls = classById(id);
-    if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo. Volvé a agregar la carpeta.' };
-    const data = review.loadReview({ root: lastScan.root, cls, buckets });
+    if (!cls) return { ok: false, error: 'Esa clase ya no está cargada. Volvé a agregar la carpeta.' };
+    const data = review.loadReview({ root: cls.root, cls, buckets });
     if (data.ok) {
         // El reproductor pide los videos por `clase://`, así que las rutas de
         // esta clase quedan habilitadas al abrirla y no antes. Y SOLO las de
@@ -383,12 +417,12 @@ ipcMain.handle('waveform-window', (event, { path: wavPath, fromSec, toSec, bucke
 
 ipcMain.handle('save-review', (event, { id, segments, viewMap }) => {
     const cls = classById(id);
-    if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo.' };
-    const res = review.saveReview({ root: lastScan.root, cls, segments, viewMap });
+    if (!cls) return { ok: false, error: 'Esa clase ya no está cargada.' };
+    const res = review.saveReview({ root: cls.root, cls, segments, viewMap });
     // Los bordes que el editor movió a mano son tan poco recalculables como las
     // notas: si se rehace el XML, el archivo de la clase tiene que quedar con
     // ese XML y no con el de antes.
-    if (res && res.ok) estadoClase.actualizar({ root: lastScan.root, cls, claves: ['align', 'cutplan'] });
+    if (res && res.ok) estadoClase.actualizar({ root: cls.root, cls, claves: ['align', 'cutplan'] });
     return res;
 });
 
@@ -401,11 +435,11 @@ ipcMain.handle('save-review', (event, { id, segments, viewMap }) => {
  */
 ipcMain.handle('save-notas', (event, { id, bloques, comentarios }) => {
     const cls = classById(id);
-    if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo.' };
+    if (!cls) return { ok: false, error: 'Esa clase ya no está cargada.' };
     try {
-        const guardadas = notas.guardar(lastScan.root, cls.sequenceName, { bloques, comentarios });
+        const guardadas = notas.guardar(cls.root, cls.sequenceName, { bloques, comentarios });
         // Y al archivo de la clase, que es el que viaja con la carpeta.
-        estadoClase.actualizar({ root: lastScan.root, cls, claves: ['notas'] });
+        estadoClase.actualizar({ root: cls.root, cls, claves: ['notas'] });
         return { ok: true, notas: guardadas };
     } catch (err) {
         return { ok: false, error: `No se pudieron guardar las notas: ${err.message}` };
@@ -446,19 +480,26 @@ ipcMain.handle('audition', async (event, { path: wavPath, startSec, durationSec 
 });
 
 /**
- * Procesa las clases marcadas. Se vuelve a escanear y a medir antes de empezar:
- * lo que llega de la ventana son ids, no el material — el disco pudo cambiar
- * mientras el editor miraba la tabla.
+ * Procesa las clases marcadas, de las carpetas que sean. Se vuelve a escanear y
+ * a medir antes de empezar: lo que llega de la ventana son ids, no el material —
+ * el disco pudo cambiar mientras el editor miraba la tabla.
  */
 ipcMain.handle('process', async (event, payload) => {
-    const { root, ids = [], viewMap, force, useAi, model } = payload || {};
+    const { ids = [], viewMap, force, useAi, model } = payload || {};
     if (currentRun) return { ok: false, error: 'Ya hay un procesamiento en curso.' };
 
-    const scan = scanner.scan(root);
-    if (!scan.ok) return scan;
-
     const wanted = new Set(ids);
-    const classes = scan.classes.filter(c => wanted.has(c.id));
+    // Las carpetas que tienen algo marcado. Puede ser más de una, y cada clase
+    // lleva su raíz, así que el pipeline escribe cada XML donde corresponde.
+    const raices = [...carpetas.keys()]
+        .filter(root => carpetas.get(root).classes.some(c => wanted.has(c.id)));
+
+    const classes = [];
+    for (const root of raices) {
+        const scan = scanner.scan(root);
+        if (!scan.ok) continue;
+        classes.push(...scan.classes.filter(c => wanted.has(c.id)));
+    }
     if (!classes.length) return { ok: false, error: 'No quedó ninguna clase marcada.' };
 
     await probe.probeClasses(classes);
@@ -471,7 +512,6 @@ ipcMain.handle('process', async (event, payload) => {
     currentRun = controller;
     try {
         const results = await pipeline.processClasses({
-            root: scan.root,
             classes: usable,
             viewMap,
             force,
@@ -492,10 +532,24 @@ ipcMain.handle('process', async (event, payload) => {
                     result: info.result || null
                 })
         });
+
+        // Y se vuelven a leer las carpetas tocadas: acaban de aparecer XML y
+        // archivos de estado que la tabla tiene que mostrar como "ya procesada".
+        // Sin esto había que salir a "Agregar carpeta" y volver a entrar para
+        // que el visor te dejara abrir lo que se acababa de procesar.
+        const refrescadas = [];
+        for (const root of raices) {
+            const fresca = await escanearYMedir(root);
+            if (!fresca.ok) continue;
+            carpetas.set(root, fresca);
+            refrescadas.push(fresca);
+        }
+
         return {
             ok: true,
             cancelled: controller.signal.aborted,
-            outputDir: workspace.outputRoot(scan.root),
+            salidas: raices.map(root => ({ root, dir: workspace.outputRoot(root), nombre: path.basename(root) })),
+            carpetas: refrescadas,
             results
         };
     } catch (err) {
