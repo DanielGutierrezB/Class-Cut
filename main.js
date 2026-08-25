@@ -26,6 +26,8 @@ const ollamaServer = require('./engine/ollama-server');
 const ia = require('./engine/ia');
 const ajustes = require('./engine/ajustes');
 const aiCursor = require('./engine/ai-cursor');
+const claves = require('./engine/claves');
+const claudeOauth = require('./engine/claude-oauth');
 const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
 const devShot = require('./dev-shot');
@@ -150,14 +152,58 @@ ipcMain.handle('doctor', async () => {
 
 // ─── Ajustes ──────────────────────────────────────────────────────────
 
-ipcMain.handle('ajustes-leer', () => ajustes.leer());
+// La ventana recibe los ajustes y un "hay clave guardada" (sí/no). El secreto
+// en sí no cruza nunca el puente: vive en el Llavero y lo lee este proceso
+// cuando arma el cliente.
+function ajustesParaLaVentana() {
+    return { ...ajustes.leer(), secretos: { anthropic: Boolean(claves.leer('anthropic')) } };
+}
+
+ipcMain.handle('ajustes-leer', () => ajustesParaLaVentana());
 
 ipcMain.handle('ajustes-guardar', (event, datos) => {
     try {
-        return { ok: true, ajustes: ajustes.guardar(datos) };
+        // Una clave pegada a mano viaja UNA vez por acá y termina en el Llavero;
+        // `ajustes.guardar` (sanear) la descarta del JSON.
+        const pegada = datos && datos.ia && datos.ia.anthropic && datos.ia.anthropic.apiKey;
+        if (pegada) claves.guardar('anthropic', String(pegada).trim());
+        ajustes.guardar(datos);
+        return { ok: true, ajustes: ajustesParaLaVentana() };
     } catch (err) {
         return { ok: false, error: `No se pudieron guardar los ajustes: ${err.message}` };
     }
+});
+
+// ─── Iniciar sesión con Claude ────────────────────────────────────────
+
+// El verificador PKCE de la sesión en curso. En memoria y de a uno: pedir otro
+// inicio invalida el anterior, que es lo que uno espera al tocar el botón de
+// nuevo.
+let claudeVerifier = null;
+
+ipcMain.handle('claude-login-empezar', () => {
+    const { url, verifier } = claudeOauth.empezar();
+    claudeVerifier = verifier;
+    shell.openExternal(url);
+    return { ok: true };
+});
+
+ipcMain.handle('claude-login-codigo', async (event, pegado) => {
+    if (!claudeVerifier) return { ok: false, error: 'Primero tocá «Iniciar sesión» para abrir el navegador.' };
+    const res = await claudeOauth.terminar(pegado, claudeVerifier);
+    if (res.error) return { ok: false, error: res.error };
+    try {
+        claves.guardar('anthropic', res.clave);
+    } catch (err) {
+        return { ok: false, error: `La clave llegó pero el Llavero no la aceptó: ${err.message}` };
+    }
+    claudeVerifier = null;
+    return { ok: true, ajustes: ajustesParaLaVentana() };
+});
+
+ipcMain.handle('claude-salir', () => {
+    claves.borrar('anthropic');
+    return { ok: true, ajustes: ajustesParaLaVentana() };
 });
 
 // Prueba una configuración SIN guardarla: el editor primero ve que contesta y

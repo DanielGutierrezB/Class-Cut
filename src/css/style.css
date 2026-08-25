@@ -824,6 +824,25 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .aj-resultado.is-ok { color: var(--ok); }
 .aj-resultado.is-mal { color: var(--err); }
 
+.aj-sesion { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.aj-sesion .cell-dim { font-size: 11.5px; line-height: 1.45; }
+.aj-sesion.is-conectada {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 8%, var(--surface-2));
+    border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+    border-radius: 8px;
+    padding: 8px 10px;
+    justify-content: space-between;
+}
+.aj-codigo { display: flex; align-items: center; gap: 8px; }
+.aj-codigo .aj-campo { flex: 1; }
+.aj-alternativa summary {
+    font-size: 11.5px;
+    color: var(--text-mute);
+    cursor: pointer;
+}
+.aj-alternativa[open] summary { margin-bottom: 8px; }
+
 /* ─── Actualización ─────────────────────────────────────────────── */
 
 .btn-inline {

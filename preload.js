@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('cc', {
     ajustesGuardar: datos => ipcRenderer.invoke('ajustes-guardar', datos),
     iaProbar: config => ipcRenderer.invoke('ia-probar', config),
     cursorModelos: () => ipcRenderer.invoke('cursor-modelos'),
+    claudeLoginEmpezar: () => ipcRenderer.invoke('claude-login-empezar'),
+    claudeLoginCodigo: pegado => ipcRenderer.invoke('claude-login-codigo', pegado),
+    claudeSalir: () => ipcRenderer.invoke('claude-salir'),
 
     updateCheck: () => ipcRenderer.invoke('update-check'),
     updateDownload: payload => ipcRenderer.invoke('update-download', payload),

@@ -36,6 +36,7 @@ const PROVEEDORES = [
 
 function cuerpo(local, cli) {
     const ia = borrador.ia;
+    const conectado = Boolean(borrador.secretos && borrador.secretos.anthropic);
 
     const tarjetas = PROVEEDORES.map(p => `
         <label class="aj-tarjeta ${ia.proveedor === p.id ? 'is-activa' : ''}" data-proveedor="${p.id}">
@@ -79,11 +80,31 @@ function cuerpo(local, cli) {
         </div>
 
         <div class="aj-config" data-config="anthropic" ${ia.proveedor === 'anthropic' ? '' : 'hidden'}>
-            <label class="aj-campo">
-                <span>Clave</span>
-                <input id="aj-anthropic-clave" type="password" value="${esc(ia.anthropic.apiKey)}"
-                       placeholder="sk-ant-…" spellcheck="false" autocomplete="off">
-            </label>
+            ${conectado ? `
+            <div class="aj-sesion is-conectada">
+                <span>Conectado: la clave está guardada en el Llavero de esta Mac.</span>
+                <button class="btn btn-ghost btn-inline" id="aj-claude-salir">Salir</button>
+            </div>` : `
+            <div class="aj-sesion">
+                <button class="btn btn-primary" id="aj-claude-login">Iniciar sesión con Claude</button>
+                <span class="cell-dim">Se abre el navegador, autorizás, y la clave queda creada y guardada sola.</span>
+            </div>
+            <div class="aj-codigo" id="aj-claude-paso2" hidden>
+                <label class="aj-campo">
+                    <span>Código</span>
+                    <input id="aj-claude-codigo" placeholder="pegá acá el código que te mostró el navegador"
+                           spellcheck="false" autocomplete="off">
+                </label>
+                <button class="btn btn-primary btn-inline" id="aj-claude-conectar">Conectar</button>
+            </div>
+            <details class="aj-alternativa">
+                <summary>O pegá una clave a mano</summary>
+                <label class="aj-campo">
+                    <span>Clave</span>
+                    <input id="aj-anthropic-clave" type="password" value=""
+                           placeholder="sk-ant-…" spellcheck="false" autocomplete="off">
+                </label>
+            </details>`}
             <label class="aj-campo">
                 <span>Modelo</span>
                 <input id="aj-anthropic-modelo" value="${esc(ia.anthropic.modelo)}"
@@ -106,8 +127,11 @@ function recogerFormulario() {
     if (elegido) borrador.ia.proveedor = elegido.value;
     borrador.ia.local.modelo = $('aj-local-modelo').value || null;
     borrador.ia.cursor.modelo = $('aj-cursor-modelo').value.trim();
-    borrador.ia.anthropic.apiKey = $('aj-anthropic-clave').value.trim();
     borrador.ia.anthropic.modelo = $('aj-anthropic-modelo').value.trim();
+    // El campo de clave manual solo existe si NO hay sesión iniciada. Lo que se
+    // pegue viaja una vez al guardar y termina en el Llavero, nunca en el JSON.
+    const claveManual = $('aj-anthropic-clave');
+    borrador.ia.anthropic.apiKey = claveManual ? claveManual.value.trim() : '';
 }
 
 function configActiva() {
@@ -165,22 +189,75 @@ function alCambiarProveedor() {
     pintarResultado('', null);
 }
 
-export async function showAjustes() {
+async function empezarSesionClaude() {
+    const res = await window.cc.claudeLoginEmpezar();
+    if (!res.ok) { toast(res.error || 'No se pudo abrir el navegador.'); return; }
+    // El navegador quedó abierto: acá aparece dónde pegar lo que devuelva.
+    $('aj-claude-paso2').hidden = false;
+    $('aj-claude-codigo').focus();
+    pintarResultado('Autorizá en el navegador y pegá el código acá.', null);
+}
+
+async function conectarClaude() {
+    const boton = $('aj-claude-conectar');
+    boton.disabled = true;
+    pintarResultado('Canjeando el código y creando tu clave…', null);
+    try {
+        const res = await window.cc.claudeLoginCodigo($('aj-claude-codigo').value);
+        if (!res.ok) { pintarResultado(res.error, false); return; }
+        borrador.secretos = res.ajustes.secretos;
+        toast('Sesión iniciada. La clave quedó en el Llavero.');
+        repintar();
+    } finally {
+        boton.disabled = false;
+    }
+}
+
+async function salirDeClaude() {
+    const res = await window.cc.claudeSalir();
+    if (res.ok) {
+        borrador.secretos = res.ajustes.secretos;
+        toast('La clave se borró del Llavero.');
+        repintar();
+    }
+}
+
+/** Vuelve a armar el formulario con el borrador que ya está en memoria. */
+function repintar() {
+    recogerFormulario();
+    showAjustes({ borradorVivo: borrador });
+}
+
+function atarFormulario() {
+    for (const radio of document.querySelectorAll('input[name="aj-proveedor"]')) {
+        radio.onchange = alCambiarProveedor;
+    }
+    $('aj-probar').onclick = probar;
+    $('aj-guardar').onclick = guardar;
+
+    const login = $('aj-claude-login');
+    if (login) login.onclick = empezarSesionClaude;
+    const conectar = $('aj-claude-conectar');
+    if (conectar) conectar.onclick = conectarClaude;
+    const codigo = $('aj-claude-codigo');
+    if (codigo) {
+        codigo.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); conectarClaude(); } };
+    }
+    const salir = $('aj-claude-salir');
+    if (salir) salir.onclick = salirDeClaude;
+}
+
+export async function showAjustes(opciones) {
     // Los tres pedidos en paralelo: los ajustes mandan, y las listas de modelos
     // solo pueblan los selectores. Si el CLI tarda o no está, la página abre
     // igual y lo dice en su sección.
     const [guardados, local, cli] = await Promise.all([
-        window.cc.ajustesLeer(),
+        opciones && opciones.borradorVivo ? opciones.borradorVivo : window.cc.ajustesLeer(),
         window.cc.modelos().catch(() => []),
         window.cc.cursorModelos().catch(() => ({ ok: false, modelos: [] }))
     ]);
     borrador = guardados;
 
     openModal('Ajustes', cuerpo(local, cli));
-
-    for (const radio of document.querySelectorAll('input[name="aj-proveedor"]')) {
-        radio.onchange = alCambiarProveedor;
-    }
-    $('aj-probar').onclick = probar;
-    $('aj-guardar').onclick = guardar;
+    atarFormulario();
 }

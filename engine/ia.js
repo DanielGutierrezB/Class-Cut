@@ -18,6 +18,7 @@
  */
 
 const ajustes = require('./ajustes');
+const claves = require('./claves');
 const ollamaServer = require('./ollama-server');
 const cursor = require('./ai-cursor');
 const anthropic = require('./ai-anthropic');
@@ -76,14 +77,20 @@ async function armar(opciones, config) {
         }
         case 'anthropic': {
             const model = pedido || ia.anthropic.modelo;
-            if (!ia.anthropic.apiKey) {
+            // La clave vive en el Llavero, nunca en los ajustes guardados
+            // (`sanear` la descarta al escribir). Una config EN MEMORIA sí puede
+            // traer el campo —los tests y los A/B de medición—, y si el campo
+            // ESTÁ, manda aunque venga vacío: es la única manera de que una
+            // prueba diga "sin clave" sin depender del Llavero de la máquina.
+            const apiKey = 'apiKey' in ia.anthropic ? ia.anthropic.apiKey : claves.leer('anthropic');
+            if (!apiKey) {
                 return {
                     cliente: null, proveedor: 'anthropic',
-                    reason: 'Ajustes pide la API de Claude y falta la clave.'
+                    reason: 'Ajustes pide la API de Claude y no hay clave: iniciá sesión o pegá una en Ajustes.'
                 };
             }
             return {
-                cliente: anthropic.cliente({ model, apiKey: ia.anthropic.apiKey }),
+                cliente: anthropic.cliente({ model, apiKey }),
                 model,
                 source: 'API de Anthropic',
                 reason: `${model} por la API de Anthropic.`,
@@ -125,16 +132,16 @@ function estado(preferido) {
             };
         }
         case 'anthropic': {
-            if (!ia.anthropic.apiKey) {
+            if (!claves.leer('anthropic')) {
                 return {
                     estado: 'falta', model: ia.anthropic.modelo, proveedor: 'anthropic',
-                    reason: 'Ajustes pide la API de Claude y falta la clave.'
+                    reason: 'Ajustes pide la API de Claude y no hay clave guardada.'
                 };
             }
             return {
                 estado: 'listo', model: ia.anthropic.modelo, proveedor: 'anthropic',
                 source: 'API de Anthropic',
-                reason: `${nombreDe('anthropic', ia.anthropic.modelo)}.`
+                reason: `${nombreDe('anthropic', ia.anthropic.modelo)}. La clave está en el Llavero.`
             };
         }
         default: {
@@ -165,7 +172,12 @@ async function probar(config) {
         case 'cursor':
             return cursor.probar({ model: config.modelo });
         case 'anthropic':
-            return anthropic.probar({ model: config.modelo, apiKey: config.apiKey });
+            // Probar con la clave recién pegada si vino; si no, con la del
+            // Llavero — que es lo que va a usar la corrida de verdad.
+            return anthropic.probar({
+                model: config.modelo,
+                apiKey: config.apiKey || claves.leer('anthropic')
+            });
         default: {
             const nunca = config.proveedor;
             return { ok: false, reason: `Proveedor desconocido: ${nunca}.` };
@@ -173,9 +185,40 @@ async function probar(config) {
     }
 }
 
+/**
+ * Corre tareas de a `limite` a la vez, conservando el orden de los resultados.
+ *
+ * Existe por los proveedores remotos: con el modelo local las consultas van en
+ * fila porque compiten por la MISMA máquina —paralelizarlas es hacer cola en el
+ * GPU con más pasos—, pero contra una API cada consulta es un viaje de red y
+ * esperarlas de a una es tirar el tiempo de todas menos una. El límite evita lo
+ * contrario: cuarenta consultas juntas es pedirle al proveedor que nos limite.
+ *
+ * @param {number} limite cuántas a la vez (1 = en fila, como siempre)
+ * @param {Array} items
+ * @param {(item, indice) => Promise} tarea
+ * @returns {Promise<Array>} resultados en el orden de `items`
+ */
+async function enTandas(limite, items, tarea) {
+    const lista = [...items];
+    const resultados = new Array(lista.length);
+    const ancho = Math.max(1, Math.min(limite || 1, lista.length));
+    let proximo = 0;
+
+    async function obrero() {
+        while (proximo < lista.length) {
+            const indice = proximo++;
+            resultados[indice] = await tarea(lista[indice], indice);
+        }
+    }
+
+    await Promise.all(Array.from({ length: ancho }, obrero));
+    return resultados;
+}
+
 /** Apaga lo que haya que apagar. Solo el local levanta procesos. */
 function parar() {
     ollamaServer.stop();
 }
 
-module.exports = { armar, estado, probar, parar, nombreDe };
+module.exports = { armar, estado, probar, parar, nombreDe, enTandas };
