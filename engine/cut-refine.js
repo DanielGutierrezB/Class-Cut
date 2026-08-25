@@ -22,15 +22,18 @@ const precision = require('./vendor/marker-precision');
 const anchor = require('./vendor/marker-anchor');
 const speech = require('./speech-edges');
 const borde = require('./borde');
+const claseEntera = require('./clase-entera');
 const ordenDelCd = require('./orden-del-cd');
 
 // Tres decisiones de acá salieron de medir sobre los 174 bloques del curso, no
 // de elegir a ojo, y las variantes perdedoras ya no están cableadas:
 //
-// - El modelo ve la VENTANA (~60 palabras alrededor del corte), no la clase
-//   entera de fondo. Con la clase cambiaban 2 defectos de 174 —ruido— a 2.8× el
-//   tiempo; de 33 consultas, 30 contestaban lo mismo. El cuello no es cuánto ve,
-//   es qué opciones tiene.
+// - Con el modelo LOCAL, ve la ventana (~60 palabras alrededor del corte), no
+//   la clase entera de fondo. Con la clase cambiaban 2 defectos de 174 —ruido—
+//   a 2.8× el tiempo; de 33 consultas, 30 contestaban lo mismo. Con un
+//   proveedor de ventana grande (`ai.contextoGrande`) la clase entera SÍ va de
+//   fondo: no es una opción sino una capacidad del cliente, y para esos
+//   modelos ver las retomas lejanas es justo lo que el local no aprovechaba.
 // - La regla se les pasa solo a los bloques DUDOSOS. Pasársela a todos dejaba
 //   los defectos igual (52 y 52) moviendo 126 bordes en vez de 98.
 // - Las órdenes escritas del CD ("OUT ANTES DE: …") se APLICAN. Ignorarlas era
@@ -68,7 +71,7 @@ function opt(options, key) {
  * la frase. Mirarlos no sale caro: lo que cuesta es preguntarle al modelo, y eso
  * lo sigue decidiendo `clearMargin`, que solo se activa cuando hay empate.
  */
-function needsCriterion(block) {
+function needsCriterion(block, words) {
     if (!block) return false;
     // Una orden escrita del CD se mira siempre, aunque el bloque haya enganchado
     // perfecto: engancharon los marcadores, que es otra cosa que lo que la nota
@@ -81,6 +84,11 @@ function needsCriterion(block) {
         if (!edge.anchored) return true;
         if (edge.snap && /no hay/.test(edge.snap.how)) return true;
     }
+    // Un bloque puede haber enganchado perfecto y aun así terminar a mitad de
+    // frase: la confianza mide el anclaje de la nota, no el corte que salió.
+    // Medido con `tools/mirar-colgados.js`: cuatro bloques del curso colgaban y
+    // no se miraban nunca, y en los cuatro el afinado solo los cerraba.
+    if (words && speech.quedaColgando(words, block.startSec, block.endSec)) return true;
     return false;
 }
 
@@ -374,7 +382,7 @@ async function refineEdge(params) {
 
     result.askedModel = true;
     const response = await params.ai.ask({
-        system: prompt.systemMsg,
+        system: claseEntera.conLaClase(prompt.systemMsg, params.claseTexto),
         prompt: prompt.prompt,
         signal: params.signal
     });
@@ -408,9 +416,15 @@ async function refineClass(params) {
         porOrden: 0, consultas: 0, fallosDelModelo: 0
     };
 
+    // Una sola vez y antes de mover nada: recalcularla tras cada borde daría un
+    // prefijo distinto por consulta y el servidor releería la clase cada vez.
+    const claseTexto = params.ai && params.ai.contextoGrande
+        ? claseEntera.texto(blocks, words)
+        : '';
+
     for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        if (!needsCriterion(block)) continue;
+        if (!needsCriterion(block, words)) continue;
         stats.revisados++;
 
         for (const kind of ['IN', 'OUT']) {
@@ -420,6 +434,7 @@ async function refineClass(params) {
 
             const refined = await refineEdge({
                 words, edge, block, blocks, index: i, kind, options,
+                claseTexto,
                 ai: params.ai,
                 signal: params.signal
             });

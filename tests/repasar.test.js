@@ -321,6 +321,31 @@ module.exports = t => {
         t.eq(res.review.blocks.find(b => b.n === 2).index, 2, 'y ese es el bloque de índice 2');
     });
 
+    t.test('si el modelo nombra al que sobrevive, el fragmento igual se apaga', async () => {
+        // «Eliminar el bloque 8 y conservar solo el 9» llegó como hallazgo DEL
+        // 9: el modelo nombra un bloque sin decir de qué lado está la copia, y
+        // mirando solo al nombrado este caso quedaba como pendiente.
+        const words = [
+            ...decir('contaminar y perder contexto.', 0),
+            ...decir('El historial de chat se puede contaminar y perder contexto.', 6)
+        ];
+        const blocks = [bloque(0, 0, 1.2), bloque(1, 6, 10)];
+        const review = {
+            blocks: [
+                { n: 1, index: 0, startSec: 0, endSec: 1.2, text: '' },
+                { n: 2, index: 1, startSec: 6, endSec: 10, text: '' }
+            ],
+            findings: [{ bloque: 2, tipo: 'repetido', gravedad: 'media', detalle: 'Quedaron dos tomas.', fuente: 'ia' }],
+            stats: {}
+        };
+        const res = await repasar.repasar({
+            alignResult: { blocks }, review, words, wav: null, options: opciones,
+            ai: modelo([{ hallazgos: [] }])
+        });
+        t.eq(blocks[0].enabled, false, 'apagó el fragmento aunque el hallazgo nombraba al otro');
+        t.eq(res.stats.arreglados, 1);
+    });
+
     t.test('una repetición arreglada también manda a releer', async () => {
         // El recorte por repetición cambia la clase igual que cualquier otro
         // arreglo: si eso no cuenta, el informe se queda hablando de la clase de

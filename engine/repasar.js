@@ -265,8 +265,12 @@ function intentos(tipo) {
     if (tipo === 'conector') return [['propio', quitarElConector], ['propio', abrirLaFrase]];
     if (tipo === 'idea_colgando') return [['propio', cerrarLaFrase]];
     // Una repetición que el detector no supo ubicar todavía puede ser un pedazo
-    // suelto que el bloque siguiente vuelve a decir entero.
-    if (tipo === 'repetido') return [['propio', tirarElFragmento]];
+    // suelto que el bloque siguiente vuelve a decir entero. Y el modelo nombra
+    // UN bloque sin decir de qué lado está la copia: a veces señala el
+    // fragmento, a veces el que sobrevive («eliminar el bloque 8 y conservar el
+    // 9» llegó como hallazgo del 9). Se prueba de los dos lados, con las mismas
+    // comprobaciones.
+    if (tipo === 'repetido') return [['propio', tirarElFragmento], ['anterior', tirarElFragmento]];
     // Un `empalme` es lo que se nota AL SALTAR de un bloque al siguiente, así
     // que puede estar de los dos lados: o el de antes se cortó a mitad de frase,
     // o el de después abre mal, o el bloque entero es un fragmento suelto que ya

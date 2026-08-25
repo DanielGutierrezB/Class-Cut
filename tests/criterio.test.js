@@ -333,6 +333,17 @@ module.exports = function (t) {
         t.eq(refine.needsCriterion(null), false);
     });
 
+    t.test('bien enganchado pero terminando a mitad de frase, se mira igual', () => {
+        // La confianza mide el anclaje de la nota, no el corte que salió: cuatro
+        // bloques del curso colgaban y no se miraban nunca (tools/mirar-colgados).
+        const colgando = say('esta idea se queda sin cerrar porque', 10);
+        t.eq(refine.needsCriterion({ ...bienAnclado, startSec: 10, endSec: 30 }, colgando), true);
+
+        const cerrado = say('esta idea cierra completa.', 10);
+        t.eq(refine.needsCriterion({ ...bienAnclado, startSec: 10, endSec: 30 }, cerrado), false,
+            'con la frase cerrada sigue sin mirarse');
+    });
+
     t.group('IA local · nada de lo que diga se aplica sin validar');
 
     t.test('una respuesta que no es JSON se descarta', () => {

@@ -26,6 +26,10 @@ const DEFAULTS = {
     // clase larga se pasa, se parte y se solapa un bloque para no perder el
     // empalme, que es justo lo que se está mirando.
     maxWordsPerCall: 2600,
+    // Con un proveedor de ventana grande no se parte nunca: partir pierde de
+    // vista los problemas de ORDEN entre mitades, y esos modelos leen una clase
+    // de dos horas sin despeinarse.
+    maxWordsContextoGrande: 40000,
     overlapBlocks: 1,
     numPredict: 1200
 };
@@ -225,7 +229,10 @@ async function reviewClass(params) {
     const stats = { llamadas: 0, fallos: 0, hallazgosIa: 0, hallazgosRegla: findings.length };
 
     if (params.ai && script.blocks.length) {
-        const chunks = chunk(script, options);
+        const porLlamada = params.ai.contextoGrande
+            ? { ...(options || {}), maxWordsPerCall: opt(options, 'maxWordsContextoGrande') }
+            : options;
+        const chunks = chunk(script, porLlamada);
         for (let i = 0; i < chunks.length; i++) {
             if (params.onProgress) params.onProgress({ chunk: i + 1, total: chunks.length });
             stats.llamadas++;
