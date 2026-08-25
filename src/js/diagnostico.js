@@ -1,13 +1,15 @@
 'use strict';
 /** Qué encontró la app y qué le falta, para cuando algo no anda. */
 
-import { openModal } from './chrome.js';
+import { $, openModal } from './chrome.js';
 import { esc } from './formato.js';
+import { buscar } from './actualizar.js';
 
 export async function showDoctor() {
     const [info, doc] = await Promise.all([window.cc.appInfo(), window.cc.doctor()]);
     const rows = [
-        ['Versión', `${info.version} · Electron ${info.electron}`],
+        ['Versión', `${info.version} · Electron ${info.electron}`
+            + ' <button class="btn btn-ghost btn-inline" id="doctor-update">Buscar actualización</button>'],
         ['Arquitectura', `${info.arch}${doc.appleSilicon ? ' (Apple Silicon)' : ' — Class Cut necesita Apple Silicon'}`]
     ];
 
@@ -21,6 +23,10 @@ export async function showDoctor() {
 
     openModal('Diagnóstico', `<div class="kv">${rows.map(([k, v]) =>
         `<div class="kv-row"><div class="kv-key">${esc(k)}</div><div class="kv-val">${v}</div></div>`).join('')}</div>`);
+
+    // A mano se contesta siempre, aunque la respuesta sea que no hay nada:
+    // apretar un botón y que no pase nada se lee como que está roto.
+    $('doctor-update').onclick = () => buscar(true);
 }
 
 /**

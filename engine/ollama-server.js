@@ -53,17 +53,34 @@ let lastError = '';
  * apagar el criterio por no reconocerlo—, y eso vale para los DOS almacenes: si
  * el empaquetado cambia de modelo, el que traemos no puede quedar muerto.
  *
+ * Si el editor eligió uno a mano en Ajustes, manda el suyo; si ese modelo ya no
+ * está —lo borró, o cambió de Mac—, se sigue con el mejor disponible en vez de
+ * dejarlo sin criterio por un ajuste viejo.
+ *
+ * @param {string} [preferido] modelo elegido a mano
  * @returns {{model:string, store:string, own:boolean}|null}
  */
-function elegirModelo(almacenes) {
+function elegirModelo(almacenes, preferido) {
     const opciones = (almacenes || store.stores()).flatMap(a =>
         store.modelsIn(a.store).map(model => ({
             model, store: a.store, own: a.own, rank: paths.rank(model, PREFERENCE)
         })));
 
+    if (preferido) {
+        const elegido = opciones.find(o => o.model === preferido);
+        if (elegido) return elegido;
+    }
+
     // `sort` es estable, así que a igual rango gana el primero de la lista, que
     // es el almacén del editor.
     return opciones.sort((a, b) => a.rank - b.rank)[0] || null;
+}
+
+/** Los modelos que se pueden elegir, para poder ofrecerlos en Ajustes. */
+function modelos() {
+    return (store.stores() || []).flatMap(a =>
+        store.modelsIn(a.store).map(model => ({ model, own: a.own })))
+        .sort((a, b) => paths.rank(a.model, PREFERENCE) - paths.rank(b.model, PREFERENCE));
 }
 
 /**
@@ -106,14 +123,22 @@ async function esperarQueLevante(url, signal) {
  * @returns {Promise<{cliente:object|null, model?:string, source?:string, reason:string}>}
  */
 async function ensure(options) {
-    if (server && server.resultado) return server.resultado;
+    const preferido = (options && options.model) || null;
+
+    // El servidor levantado sirve para la corrida siguiente salvo que el editor
+    // haya cambiado de modelo en Ajustes: Ollama arranca apuntando a un almacén,
+    // así que para otro modelo hay que bajarlo y volver a levantarlo.
+    if (server && server.resultado) {
+        if (!preferido || server.resultado.model === preferido) return server.resultado;
+        stop();
+    }
 
     const binary = store.binary();
     if (!binary.path) {
         return { cliente: null, reason: 'No está el motor del modelo local (ollama).' };
     }
 
-    const choice = elegirModelo();
+    const choice = elegirModelo(null, preferido);
     if (!choice) {
         return { cliente: null, reason: 'No hay ningún modelo local descargado.' };
     }
@@ -169,13 +194,17 @@ async function ensure(options) {
         };
     }
 
+    const origen = choice.own
+        ? `Modelo ${choice.model}, el que viene con la app.`
+        : `Modelo ${choice.model}, que ya estaba en esta Mac.`;
+
     server.resultado = {
         cliente: ai.cliente({ url, model: choice.model }),
         model: choice.model,
         source: choice.own ? 'incluido en la app' : 'ya estaba en esta Mac',
-        reason: choice.own
-            ? `Modelo ${choice.model}, el que viene con la app.`
-            : `Modelo ${choice.model}, que ya estaba en esta Mac.`
+        reason: preferido && choice.model !== preferido
+            ? `${origen} El elegido en Ajustes (${preferido}) ya no está.`
+            : origen
     };
     return server.resultado;
 }
@@ -199,15 +228,20 @@ function engancharSalida() {
 }
 
 /**
- * Lo que se muestra en Diagnóstico, sin levantar nada.
+ * Con qué modelo se está corriendo, sin levantar nada.
  *
  * Tres estados y no dos: "listo pero apagado" no es lo mismo que "no está", y el
  * editor necesita distinguirlos para saber si tiene algo que hacer.
  *
+ * El preferido se pide igual que en `ensure`, porque quien pregunta suele querer
+ * saber con qué va a correr y no con qué corrió: si el editor eligió otro en
+ * Ajustes, el que está levantado ya no es el que se va a usar.
+ *
+ * @param {string} [preferido] modelo elegido a mano
  * @returns {{estado:'corriendo'|'listo'|'falta', model:string|null, source:string|null, reason:string}}
  */
-function estado() {
-    if (server && server.resultado) {
+function estado(preferido) {
+    if (server && server.resultado && (!preferido || server.resultado.model === preferido)) {
         const { model, source, reason } = server.resultado;
         return { estado: 'corriendo', model, source, reason };
     }
@@ -216,7 +250,7 @@ function estado() {
     if (!binary.path) {
         return { estado: 'falta', model: null, source: null, reason: 'No está el motor del modelo local (ollama).' };
     }
-    const choice = elegirModelo();
+    const choice = elegirModelo(null, preferido);
     if (!choice) {
         return { estado: 'falta', model: null, source: null, reason: 'No hay ningún modelo local descargado.' };
     }
@@ -229,4 +263,4 @@ function estado() {
     };
 }
 
-module.exports = { ensure, stop, estado, elegirModelo, PREFERENCE, BUNDLED };
+module.exports = { ensure, stop, estado, elegirModelo, modelos, PREFERENCE, BUNDLED };

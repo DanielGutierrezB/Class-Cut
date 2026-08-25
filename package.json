@@ -11,7 +11,8 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node tests/run.js",
-    "build": "electron-builder --mac"
+    "build": "bash tools/build-pkg.sh",
+    "publish": "bash tools/publish-release.sh"
   },
   "build": {
     "appId": "com.codigo.classcut",
@@ -40,7 +41,9 @@
           "from": "bin/mac",
           "to": "bin",
           "filter": [
-            "**/*"
+            "**/*",
+            "!models/**",
+            "!ollama-models/**"
           ]
         }
       ]

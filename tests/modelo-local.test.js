@@ -82,6 +82,21 @@ module.exports = function (t) {
         t.eq(server.elegirModelo([propio([])]), null);
     });
 
+    t.test('el modelo elegido en Ajustes le gana al orden de preferencia', () => {
+        const almacenes = [delEditor(['qwen3.8:27b', 'qwen3:8b']), propio(['qwen3:4b'])];
+        t.eq(server.elegirModelo(almacenes, 'qwen3:8b').model, 'qwen3:8b');
+        // Y el de la app también se puede pedir a mano, aunque sea el peor rankeado.
+        const bundle = server.elegirModelo(almacenes, 'qwen3:4b');
+        t.eq(bundle.model, 'qwen3:4b');
+        t.eq(bundle.own, true);
+    });
+
+    t.test('si el modelo elegido ya no está, se sigue con el mejor', () => {
+        // Un ajuste viejo no puede dejar la app sin criterio.
+        const choice = server.elegirModelo([delEditor(['qwen3:8b'])], 'el-que-borré:70b');
+        t.eq(choice.model, 'qwen3:8b');
+    });
+
     t.test('el que trae la app es el último de la lista de preferencia', () => {
         t.ok(server.PREFERENCE.includes(server.BUNDLED), 'el modelo del bundle no está en la preferencia');
         t.eq(server.PREFERENCE[server.PREFERENCE.length - 1], server.BUNDLED);

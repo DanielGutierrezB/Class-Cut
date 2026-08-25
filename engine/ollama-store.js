@@ -44,12 +44,15 @@ function binary() {
         : { path: null, dir: null, source: 'no encontrado', searched: [...searched, ...system.searched] };
 }
 
-/** El almacén de modelos que viene con la app, si se empaquetó. */
+/**
+ * El almacén de modelos que instaló el instalador.
+ *
+ * Vive fuera del `.app` (ver `paths.dataDirs`): son 2.3 GB que no cambian entre
+ * versiones y meterlos adentro haría que cada actualización los volviera a bajar.
+ */
 function bundled() {
-    const dirs = [];
-    if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'bin', 'ollama-models'));
-    dirs.push(path.join(paths.appRoot(), 'bin', 'mac', 'ollama-models'));
-    return dirs.find(dir => fs.existsSync(path.join(dir, 'manifests'))) || null;
+    return paths.dataDirs('ollama-models')
+        .find(dir => fs.existsSync(path.join(dir, 'manifests'))) || null;
 }
 
 /** El almacén del editor, que puede tener modelos mejores que el que traemos. */

@@ -35,6 +35,31 @@ function bundledDirs() {
     return dirs;
 }
 
+/** Donde el instalador deja los modelos, fuera del `.app`. */
+const DATA_DIR = '/Library/Application Support/Class Cut';
+
+/**
+ * Lo que pesa y no cambia con la app.
+ *
+ * Los modelos son 3.8 de los 3.9 GB del paquete y son los mismos entre versiones,
+ * así que no pueden vivir dentro del `.app`: reemplazar la app en una
+ * actualización se los llevaría puestos y habría que volver a bajar cuatro
+ * gigas para cambiar unos kilobytes de código. El instalador los deja una vez en
+ * `DATA_DIR` y de ahí los lee cualquier versión que se instale después.
+ *
+ * Se sigue mirando dentro del bundle al final para no romper las instalaciones
+ * viejas, que los tenían adentro.
+ */
+function dataDirs(kind) {
+    const dirs = [
+        path.join(DATA_DIR, kind),
+        path.join(process.env.HOME || '', 'Library', 'Application Support', 'Class Cut', kind)
+    ];
+    if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'bin', kind));
+    dirs.push(path.join(appRoot(), 'bin', 'mac', kind));
+    return dirs.filter(Boolean);
+}
+
 function isExecutable(file) {
     try {
         fs.accessSync(file, fs.constants.X_OK);
@@ -106,11 +131,7 @@ const MODEL_PREFERENCE = [
 ];
 
 function modelDirs() {
-    const dirs = [];
-    if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'bin', 'models'));
-    dirs.push(path.join(appRoot(), 'bin', 'mac', 'models'));
-    dirs.push(path.join(process.env.HOME || '', 'Library', 'Application Support', 'Class Cut', 'models'));
-    return dirs.filter(Boolean);
+    return dataDirs('models');
 }
 
 function findModel(envVar, matcher, preference) {
@@ -159,6 +180,12 @@ function whisperModel() {
     );
 }
 
+/**
+ * Ya no se usa para transcribir: el detector de voz delante de Whisper arruinaba
+ * los tiempos de cada palabra (ver `transcribe.js`). Queda resuelto porque el
+ * modelo sigue viniendo en las instalaciones viejas y el diagnóstico lo lista si
+ * está, pero nada falla si no aparece.
+ */
 function vadModel() {
     return findModel('CLASSCUT_VAD_MODEL', n => /silero|vad/i.test(n) && n.endsWith('.bin'), null);
 }
@@ -173,8 +200,7 @@ function doctor() {
         { key: 'ffprobe', required: true, info: ffprobe() },
         { key: 'ffmpeg', required: true, info: ffmpeg() },
         { key: 'whisper-cli', required: true, info: whisper() },
-        { key: 'modelo de Whisper', required: true, info: whisperModel() },
-        { key: 'modelo de VAD', required: true, info: vadModel() }
+        { key: 'modelo de Whisper', required: true, info: whisperModel() }
     ];
     return {
         arch: process.arch,
@@ -198,6 +224,6 @@ module.exports = {
     resolveTool, ffprobe, ffmpeg, whisper,
     whisperModel, vadModel, modelDirs, MODEL_PREFERENCE,
     // Primitivas que usa quien resuelve otras cosas (ver `ollama-store.js`).
-    isExecutable, rank, appRoot,
+    isExecutable, rank, appRoot, dataDirs, DATA_DIR,
     doctor, clearCache
 };

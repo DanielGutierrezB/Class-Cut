@@ -129,6 +129,53 @@ add_bundle_rpath() {
     install_name_tool -add_rpath "$2" "$1" 2>/dev/null || true
 }
 
+# Última pasada: no puede quedar NINGUNA referencia a /opt/homebrew.
+#
+# `fix_deps` copia una librería la primera vez que la ve y no vuelve a entrar,
+# así que las referencias que una librería le hace a OTRA que ya estaba copiada
+# quedaban sin reescribir. El resultado es peor que un binario que no arranca:
+# arranca. En una Mac con Homebrew, libavfilter cargaba el libswscale de
+# /opt/homebrew mientras ffmpeg cargaba el del bundle, y con dos copias de la
+# misma librería en un proceso el filtro se registra en una y se busca en la
+# otra: `Assertion fffilter(ctx->filter)->activate == activate failed`, archivo
+# de salida en cero. En una Mac sin Homebrew directamente no carga.
+sanear_rutas() {
+    local pendientes=0
+    for file in "$DEST/ffmpeg" "$DEST/ffprobe" "$LIBDIR"/*.dylib; do
+        [ -f "$file" ] || continue
+        # Para un ejecutable, `@loader_path` es su propia carpeta y las librerías
+        # están un nivel más adentro.
+        local prefijo="@loader_path/"
+        case "$file" in
+            "$LIBDIR"/*) ;;
+            *) prefijo="@executable_path/lib/" ;;
+        esac
+        local tocado=0
+        while read -r dep; do
+            case "$dep" in
+                /opt/homebrew/*) ;;
+                *) continue ;;
+            esac
+            local base; base=$(basename "$dep")
+            if [ ! -f "$LIBDIR/$base" ]; then
+                log "queda suelta $base (no está en el bundle)"
+                pendientes=$((pendientes + 1))
+                continue
+            fi
+            chmod u+w "$file"
+            if install_name_tool -change "$dep" "${prefijo}${base}" "$file" 2>/dev/null; then
+                tocado=1
+            else
+                log "no pude reescribir $dep en $(basename "$file")"
+                pendientes=$((pendientes + 1))
+            fi
+        done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
+        # Reescribir invalida la firma, y macOS mata lo que no está firmado.
+        if [ "$tocado" = 1 ]; then resign "$file"; fi
+    done
+    return "$pendientes"
+}
+
 bundle_tool() {
     local name="$1" src
     src=$(command -v "$name" || true)
@@ -185,10 +232,16 @@ build_whisper() {
     resign "$DEST/whisper-cli"
 }
 
-echo "Empaquetando binarios en $DEST"
-bundle_tool ffmpeg
-bundle_tool ffprobe
-build_whisper
+# Reparar el enlazado de un bundle ya armado no necesita volver a compilar
+# whisper.cpp, que son varios minutos.
+if [ "${1:-}" = "--sanear" ]; then
+    echo "Solo saneando el enlazado de $DEST"
+else
+    echo "Empaquetando binarios en $DEST"
+    bundle_tool ffmpeg
+    bundle_tool ffprobe
+    build_whisper
+fi
 
 echo
 echo "Listo:"
@@ -197,9 +250,33 @@ echo
 # La única comprobación que vale es sin Homebrew a la vista: con él en el PATH un
 # binario mal enlazado funciona igual y el problema aparece en la máquina del
 # editor, que es donde no se puede arreglar.
+echo "Saneando rutas absolutas que hayan quedado:"
+if sanear_rutas; then
+    log "no queda ninguna referencia a /opt/homebrew"
+else
+    echo "  ✗ quedaron referencias a Homebrew sin resolver" >&2
+    exit 1
+fi
+
+echo
 echo "Comprobación (sin Homebrew en el PATH):"
 env -i PATH=/usr/bin:/bin "$DEST/ffprobe" -version 2>&1 | head -1 | sed 's/^/  /'
 env -i PATH=/usr/bin:/bin "$DEST/ffmpeg" -version 2>&1 | head -1 | sed 's/^/  /'
+
+# `-version` no arma un grafo de filtros y por eso no notaba nada: con las
+# librerías mal enlazadas igual imprimía la versión, y el fallo aparecía recién
+# al extraer un fragmento de audio, que es lo que hace "escuchar el borde".
+# Este remuestrea, que es exactamente el camino que se rompía.
+prueba="$(mktemp -d)/tono.wav"
+if env -i PATH=/usr/bin:/bin "$DEST/ffmpeg" -v error -y \
+        -f lavfi -i "sine=frequency=440:duration=1" \
+        -ar 22050 -ac 1 -c:a pcm_s16le "$prueba" 2>&1 | sed 's/^/  /' &&
+        [ -s "$prueba" ]; then
+    echo "  filtros y remuestreo: andan"
+else
+    echo "  ✗ ffmpeg no puede filtrar ni remuestrear: revisá el enlazado" >&2
+    exit 1
+fi
 
 if otool -L "$DEST/whisper-cli" | tail -n +2 | grep -qv -e '/usr/lib/' -e '/System/'; then
     echo "  ✗ whisper-cli depende de algo que no es del sistema:" >&2
