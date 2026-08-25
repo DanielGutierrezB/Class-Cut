@@ -24,6 +24,12 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* `hidden` tiene la misma especificidad que una clase, así que cualquier
+   `display: flex` puesto después lo pisa y el elemento se ve igual. Pasó cuatro
+   veces —modal, drawer, toast, guion—, cada una parchada por su lado. Una regla
+   sola y se acabó. */
+[hidden] { display: none !important; }
+
 html, body {
     height: 100%;
     background: var(--bg);
@@ -58,7 +64,74 @@ code, .mono {
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand-mark { color: var(--accent); font-size: 15px; }
 .brand-name { font-weight: 600; letter-spacing: -0.01em; }
-.brand-version { color: var(--text-mute); font-size: 11px; }
+/* El número de versión es el botón de actualizar. Apagado se lee como el dato
+   que era antes; encendido avisa. El borde transparente reserva el sitio para
+   que al encenderse no se muevan de lugar las cosas de al lado. */
+.brand-version {
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-mute);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 2px 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.brand-version:hover { color: var(--text-dim); background: var(--surface-3); }
+.brand-version.is-new {
+    color: var(--ok);
+    background: rgba(62, 207, 142, .14);
+    border-color: rgba(62, 207, 142, .45);
+}
+.brand-version.is-new:hover { background: rgba(62, 207, 142, .22); }
+.version-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ok);
+}
+
+/* Con qué modelo está corriendo. Va con la marca y no con los pasos: es una
+   propiedad de la app, no de lo que el editor está haciendo. `no-drag` porque la
+   barra entera arrastra la ventana y encima de una zona de arrastre el globito
+   con el detalle no aparece nunca. */
+.brand-model {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-mute);
+    font-size: 11px;
+    /* Ni se encoge ni se parte en dos líneas: en cuanto cede una letra, el que se
+       acomoda en dos líneas es el nombre de la app. Cuando de verdad no entra,
+       desaparece (ver la consulta de ancho más abajo). */
+    flex: none;
+    white-space: nowrap;
+    -webkit-app-region: no-drag;
+    cursor: default;
+}
+.brand-model::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+/* `is-listo` no pinta nada aparte: el gris apagado ya se lee como "todavía no". */
+.brand-model.is-corriendo { color: var(--text-dim); }
+.brand-model.is-corriendo::before { background: var(--ok); }
+.brand-model.is-falta { color: var(--warn); border-color: rgba(245, 181, 68, .35); }
+
+/* Con la ventana en su ancho mínimo el cabezal ya venía justo —los cinco pasos
+   no se encogen—, así que agregarle cien píxeles empuja a "Diagnóstico" afuera
+   de la pantalla. Ahí el modelo se cede: sigue estando en Diagnóstico. */
+@media (max-width: 1040px) {
+    .brand-model { display: none; }
+}
 
 .steps {
     display: flex;
@@ -305,6 +378,8 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .badge + .badge { margin-left: 4px; }
 .badge-ok { background: rgba(62, 207, 142, .15); color: var(--ok); }
 .badge-warn { background: rgba(245, 181, 68, .15); color: var(--warn); }
+/* Lo que escribió el editor, en claro: no es un aviso, es algo que agregó. */
+.badge-nota { background: rgba(231, 234, 240, .12); color: var(--text); }
 .badge-err { background: rgba(242, 100, 107, .15); color: var(--err); }
 .badge-info { background: var(--surface-3); color: var(--text-dim); }
 .badge-pv { background: rgba(167, 139, 250, .16); color: var(--pv); }
@@ -318,7 +393,10 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     border-top: 1px solid var(--border);
     background: var(--surface);
 }
-.footbar-info { color: var(--text-dim); font-size: 12.5px; }
+/* El resumen es lo único elástico del pie: se encoge él antes que empujar a los
+   botones, que son lo que hay que poder apretar aunque la ventana esté angosta. */
+.footbar-info { flex: 1; min-width: 0; color: var(--text-dim); font-size: 12.5px; }
+.footbar .toggle, .footbar .btn { white-space: nowrap; }
 .footbar .btn-primary { margin-left: auto; }
 
 /* ── Panel de detalle ────────────────────────────────────────── */
@@ -334,7 +412,6 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     box-shadow: -18px 0 40px rgba(0, 0, 0, .35);
     z-index: 20;
 }
-.drawer[hidden] { display: none; }
 .drawer-head {
     display: flex;
     align-items: flex-start;
@@ -394,7 +471,6 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     place-items: center;
     z-index: 60;
 }
-.modal[hidden] { display: none; }
 .modal-card {
     width: min(600px, 92vw);
     max-height: 78vh;
@@ -442,7 +518,6 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
     z-index: 80;
 }
-.toast[hidden] { display: none; }
 
 /* ── Barra de progreso fina ──────────────────────────────────── */
 
@@ -550,6 +625,17 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     flex-wrap: wrap;
 }
 .toggle { display: flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; }
+.select-model {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.select-model:disabled { opacity: 0.45; cursor: default; }
 .views { display: flex; gap: 5px; align-items: center; }
 .view-btn {
     font: inherit;
@@ -594,7 +680,10 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 }
 .decided-text { color: var(--text-dim); }
 .badge-by-nota { background: var(--surface-3); color: var(--text-dim); }
+.badge-by-orden { background: rgba(52, 199, 129, .18); color: var(--ok); }
 .badge-by-regla { background: rgba(79, 156, 249, .16); color: var(--accent); }
+.badge-by-repetido { background: rgba(52, 199, 129, .18); color: var(--ok); }
+.badge-by-repaso { background: rgba(52, 199, 129, .18); color: var(--ok); }
 .badge-by-ia { background: rgba(167, 139, 250, .18); color: var(--pv); }
 
 /* ── Pestañas ────────────────────────────────────────────────── */
@@ -627,7 +716,6 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     overflow: auto;
     padding: 18px 24px 30px;
 }
-.script[hidden] { display: none; }
 .script-head { max-width: 78ch; margin: 0 auto 18px; }
 .script-title { font-size: 15px; font-weight: 600; }
 .script-sub { font-size: 12px; color: var(--text-mute); margin-top: 4px; }
@@ -669,6 +757,478 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 }
 .finding.alta { border-left-color: var(--err); }
 .finding.baja { border-left-color: var(--text-mute); }
+/* Lo ya arreglado no compite por la atención con lo que falta: se lee en verde y
+   apagado, para decir "esto ya está" de un vistazo y sin frenar la lectura. */
+.finding.arreglado {
+    border-left-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 8%, var(--surface-2));
+}
+.finding.arreglado .finding-tipo { color: var(--ok); }
 .finding-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; }
 .finding-tipo { font-weight: 600; font-size: 11.5px; }
 .finding-fix { color: var(--text-mute); margin-top: 3px; }
+
+/* ─── Actualización ─────────────────────────────────────────────── */
+
+.btn-inline {
+    padding: 2px 8px;
+    font-size: 11.5px;
+    margin-left: 8px;
+    vertical-align: baseline;
+}
+
+.update-lead { font-size: 13.5px; margin-bottom: 10px; }
+.update-notes {
+    margin: 0 0 12px 18px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.7;
+}
+.update-note {
+    font-size: 12px;
+    color: var(--text-mute);
+    margin-bottom: 14px;
+    line-height: 1.6;
+}
+.update-actions { display: flex; gap: 8px; }
+
+.update-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+}
+.update-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+.update-bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width .2s ease;
+}
+.update-pct {
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 34px;
+    text-align: right;
+}
+
+/* ─── Reproductor de la clase cortada ───────────────────────────── */
+
+.player {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px 20px;
+    height: 100%;
+    min-height: 0;
+}
+
+/* El video y el texto comparten el alto: el transporte queda abajo de los dos. */
+.player-top {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* El reparto entre imagen y texto: la zona de agarre es ancha para no tener que
+   apuntar, la línea que se ve es fina. */
+.player-split {
+    position: relative;
+    flex: none;
+    width: 14px;
+    cursor: col-resize;
+    border: 0;
+    background: none;
+}
+.player-split::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 3px;
+    height: 42px;
+    transform: translate(-50%, -50%);
+    border-radius: 2px;
+    background: var(--border);
+    transition: background .12s ease, height .12s ease;
+}
+.player-split:hover::before,
+.player-split:focus-visible::before,
+.player-split.is-arrastrando::before {
+    background: var(--accent);
+    height: 76px;
+}
+.player-split:focus-visible { outline: none; }
+/* Mientras se arrastra, el cursor manda en toda la ventana: si no, al pasar por
+   encima del video el puntero cambia y parece que se soltó. */
+body.esta-repartiendo { cursor: col-resize; user-select: none; }
+body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none; }
+
+.player-stage {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+/* El cuadro real de la clase, en 16:9 y centrado. El recuadro del profesor se
+   ancla acá y no al contenedor: si se anclara afuera, con la ventana ancha
+   quedaría flotando sobre la banda negra en vez de sobre la esquina de la imagen. */
+.player-frame {
+    position: relative;
+    /* Los videos van posicionados y no le dan tamaño de contenido, así que sin
+       un ancho de partida `aspect-ratio` no tiene de dónde calcular y el marco
+       queda en cero. El alto máximo lo vuelve a angostar cuando la ventana es
+       más ancha que 16:9. */
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 100%;
+    background: #000;
+}
+/* Todas las cámaras ocupan el mismo lugar: cambiar de plano es cambiar cuál se
+   ve, no mover nada. */
+.player-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+}
+
+/* El profesor sobre el screen recorder: cuadrado recortado desde el centro
+   —eso lo hace `cover`, sin deformar—, esquinas redondeadas y abajo a la
+   derecha. Va medido en alto y no en ancho para que no cambie de tamaño
+   relativo cuando la ventana se estira. */
+.player-video.is-inset {
+    /* Los dos videos son hermanos posicionados: sin esto el recuadro queda
+       debajo del principal, que se dibuja después por estar más abajo en el DOM. */
+    z-index: 2;
+    inset: auto 2.5% 4.4% auto;
+    height: 30%;
+    aspect-ratio: 1;
+    width: auto;
+    object-fit: cover;
+    /* En porcentaje y no en píxeles: el recuadro cambia de tamaño con la
+       ventana, y un radio fijo se ve enorme en chico y recto en grande. */
+    border-radius: 10%;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+}
+.player-empty { color: var(--text-mute); font-size: 13px; }
+
+.player-bar { display: flex; align-items: center; gap: 10px; }
+.player-play { min-width: 108px; }
+.player-time {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    min-width: 96px;
+    text-align: center;
+}
+
+.player-track {
+    position: relative;
+    flex: 1;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    overflow: hidden;
+    cursor: pointer;
+}
+.player-blocks { position: absolute; inset: 0; }
+
+/* El fondo de cada bloque dice CON QUÉ se ve, y son los mismos colores que se
+   escriben como etiqueta de clip en el XML: la cámara 1 en celeste y la 2 en
+   rosa acá y en Premiere. Lo que hay que revisar y lo que tiene comentario van
+   como líneas adentro del cuadro, porque son cosas distintas del "con qué" y
+   antes competían todas por el mismo color de fondo. */
+.player-block {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 3px;
+    border: 0;
+    border-right: 1px solid var(--surface);
+    padding: 0;
+    cursor: pointer;
+    background: var(--cam, rgba(231, 234, 240, .22));
+    transition: filter .12s ease;
+}
+.player-block:hover { filter: brightness(1.45); }
+.player-block.is-on { background: var(--accent); }
+
+/* Los colores de cámara, en el orden de `CLIP_LABELS` de engine/fcp-xml.js. */
+.cam-0 { --cam: #3f7fb5; }   /* Cerulean */
+.cam-1 { --cam: #b1567c; }   /* Rose */
+.cam-2 { --cam: #b8823a; }   /* Mango */
+.cam-3 { --cam: #3f7d5c; }   /* Forest */
+.cam-4 { --cam: #7a5aa8; }   /* Purple */
+.cam-5 { --cam: #5a6bb5; }   /* Iris */
+.cam-6 { --cam: #3f9a9a; }   /* Caribbean */
+.cam-7 { --cam: #8f7fc4; }   /* Lavender */
+
+/* Línea abajo: este bloque conviene mirarlo. Va por dentro y no como borde para
+   que no le coma ancho a los bloques cortos. */
+.player-block.is-revisar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 2px;
+    height: 2px;
+    background: var(--warn);
+}
+.player-block.conf-baja::after { background: var(--err); }
+
+/* Línea arriba: alguien dejó un comentario acá. Va en claro y no en el amarillo
+   con el que sale como marcador en el XML, porque ese amarillo es casi el mismo
+   naranja del aviso de revisar y a este tamaño las dos líneas se confundían. */
+.player-block.con-nota::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 2px;
+    height: 2px;
+    background: var(--text);
+}
+
+.player-leyenda {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 11px;
+    color: var(--dim);
+}
+.leyenda-item { display: inline-flex; align-items: center; gap: 5px; }
+.leyenda-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--cam, transparent);
+}
+/* Las dos muestras de línea se dibujan como la tira: la línea sola, sobre el
+   fondo del cuadro, para que se reconozca sin traducir nada. */
+.leyenda-color.leyenda-revisar,
+.leyenda-color.leyenda-nota {
+    background: rgba(231, 234, 240, .12);
+    position: relative;
+}
+.leyenda-color.leyenda-revisar::after,
+.leyenda-color.leyenda-nota::after {
+    content: '';
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    height: 2px;
+}
+.leyenda-color.leyenda-revisar::after { bottom: 2px; background: var(--warn); }
+.leyenda-color.leyenda-nota::after { top: 2px; background: var(--text); }
+
+.player-head {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--text);
+    pointer-events: none;
+}
+
+.player-now {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 12px;
+    min-height: 18px;
+}
+.player-badge { font-weight: 600; }
+.player-badge.conf-alta { color: var(--ok); }
+.player-badge.conf-media { color: var(--warn); }
+.player-badge.conf-baja { color: var(--err); }
+
+/* ─── El transcript al lado del video ───────────────────────────────────── */
+
+.letra {
+    display: flex;
+    flex-direction: column;
+    /* El de arranque: a partir de ahí manda el divisor (src/js/visor/division.js). */
+    width: 380px;
+    flex: none;
+    min-height: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.letra-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+}
+.letra-hint { font-weight: 400; color: var(--dim); font-size: 11px; }
+.letra-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px 14px 20px;
+}
+.letra-vacio { color: var(--dim); font-size: 12px; padding: 12px 0; }
+
+/* El color de la cámara entra por el borde y por un fondo muy bajo: es para
+   reconocer la toma de un vistazo mientras se lee, no para leer encima de él.
+   `--cam` lo pone la clase `.cam-N`, la misma que usa la tira del reproductor. */
+.letra-bloque {
+    padding: 12px 10px 12px 12px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid var(--cam, transparent);
+    border-radius: 0 6px 6px 0;
+    background: color-mix(in srgb, var(--cam, transparent) 7%, transparent);
+}
+/* Lo que suena ahora se despega del resto sin taparlo ni perder su color. */
+.letra-bloque.is-on {
+    background: color-mix(in srgb, var(--cam, #608fff) 18%, transparent);
+}
+.letra-bloque-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.letra-bloque-num { font-size: 11px; font-weight: 600; color: var(--text); }
+/* La vista va del color de su cámara, igual que en la leyenda de la tira. */
+.letra-bloque-vista {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--cam, var(--accent));
+}
+
+/* La nota del marcador, editable donde se lee. */
+.letra-nota {
+    font-size: 12px;
+    color: var(--fg);
+    padding: 5px 8px;
+    margin-bottom: 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: rgba(231, 234, 240, .04);
+    cursor: text;
+}
+.letra-nota:hover { border-color: var(--border); }
+.letra-nota:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+/* Vacía no se ve, y sin señal nadie descubre que se puede escribir ahí. */
+.letra-nota:empty::before {
+    content: attr(data-vacio);
+    color: var(--dim);
+}
+.letra-nota.is-editada { border-left: 2px solid var(--warn); }
+
+.letra-texto {
+    font-size: 13px;
+    line-height: 1.75;
+    margin: 0;
+    color: var(--dim);
+}
+.letra-texto.is-vacio { font-style: italic; font-size: 12px; }
+
+.letra-palabra {
+    border-radius: 3px;
+    padding: 1px 1px;
+    cursor: pointer;
+    transition: color .1s ease, background .1s ease;
+}
+.letra-palabra:hover { background: rgba(231, 234, 240, .10); }
+
+/* El aire muerto. Va en el renglón, partiendo la frase donde el video se queda
+   quieto: leído corrido el silencio no se ve y el texto parece adelantado. */
+.letra-pausa {
+    display: inline-block;
+    margin: 2px 3px;
+    padding: 1px 7px;
+    font-size: 11px;
+    color: var(--warn);
+    border: 1px dashed rgba(245, 181, 68, .45);
+    border-radius: 10px;
+    background: rgba(245, 181, 68, .07);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.letra-pausa:hover { background: rgba(245, 181, 68, .16); }
+/* La que suena: el resto queda apagado, así el ojo la encuentra sola. */
+.letra-palabra.is-on {
+    color: var(--bg);
+    background: var(--accent);
+}
+
+.letra-comentario {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-left: 2px solid var(--warn);
+    background: rgba(245, 181, 68, .07);
+    border-radius: 0 6px 6px 0;
+}
+.letra-comentario-cita {
+    font-size: 11px;
+    color: var(--dim);
+    font-style: italic;
+    margin-bottom: 4px;
+}
+.letra-comentario-texto { font-size: 12px; line-height: 1.5; }
+.letra-comentario-acciones {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.letra-nuevo {
+    margin: 8px 0 0;
+    padding: 10px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--bg);
+}
+.letra-nuevo-campo {
+    width: 100%;
+    margin: 6px 0;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+}
+.letra-nuevo-campo:focus { outline: none; border-color: var(--accent); }
+.player-view { color: var(--text-dim); }
+.player-note {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+/* Los estilos que antes iban en atributos `style`, que la política de seguridad
+   de la ventana descarta sin avisar. */
+.btn-corner { float: right; margin-top: -4px; }
+.crash { padding: 24px; color: var(--err); white-space: pre-wrap; }

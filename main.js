@@ -8,7 +8,7 @@
  * abrir la app (`node tests/run.js`).
  */
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -19,8 +19,12 @@ const paths = require('./engine/paths');
 const pipeline = require('./engine/pipeline');
 const workspace = require('./engine/workspace');
 const review = require('./engine/review');
+const notas = require('./engine/notas');
+const estadoClase = require('./engine/estado-clase');
 const waveform = require('./engine/waveform');
 const ollamaServer = require('./engine/ollama-server');
+const updates = require('./engine/updates');
+const mediaServer = require('./engine/media-server');
 
 let mainWindow = null;
 let currentRun = null;
@@ -34,6 +38,47 @@ function appVersion() {
     } catch (e) {
         return app.getVersion();
     }
+}
+
+/** Avisarle algo a la ventana, si todavía está. */
+function send(channel, payload) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+// ─── El video, hasta la ventana ───────────────────────────────────────
+
+/**
+ * `clase://` — le sirve a la ventana los archivos de cámara para el reproductor.
+ *
+ * No se usa `file://` directo: la ventana corre con `sandbox` y aislamiento, y
+ * apagar `webSecurity` para que pueda leer el disco le abriría la puerta a todo
+ * lo demás. Con un protocolo propio la ventana solo alcanza lo que esta lista
+ * deja pasar, que son las cámaras de la clase que el editor abrió.
+ *
+ * `stream: true` es lo que permite contestar de a pedazos; quién arma esos
+ * pedazos está en `engine/media-server.js`.
+ */
+protocol.registerSchemesAsPrivileged([{
+    scheme: 'clase',
+    // Sin `bypassCSP`: el video está declarado en la política de la ventana
+    // (`media-src … clase:`), así que la política sigue siendo la frontera real
+    // y no algo que este protocolo se saltea.
+    privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true }
+}]);
+
+const mediaPermitida = new Set();
+
+/** Habilita los videos de una clase y devuelve las urls con las que pedirlos. */
+function permitirMedia(files) {
+    return (files || []).map(file => {
+        const real = path.resolve(file);
+        mediaPermitida.add(real);
+        return `clase://media/${encodeURIComponent(real)}`;
+    });
+}
+
+function servirMedia() {
+    protocol.handle('clase', request => mediaServer.responder(request, mediaPermitida));
 }
 
 function createWindow() {
@@ -68,6 +113,9 @@ function argValue(flag) {
  *   electron . --folder=/ruta/al/curso --shot=/tmp/class-cut.png --js='dev.abrirClase(id)'
  * Carga la carpeta, espera a que la tabla termine de medir, corre el JS que se le
  * pase, guarda el PNG y sale.
+ *
+ * Para atajos de teclado hay `--key=Space` (una tecla de verdad, con su acción
+ * por defecto) y `--js-despues=` para mirar cómo quedó todo.
  */
 async function devShot() {
     const shot = argValue('shot');
@@ -80,9 +128,40 @@ async function devShot() {
         await new Promise(r => setTimeout(r, 4000));
     }
     if (extraJs) {
-        await mainWindow.webContents.executeJavaScript(extraJs);
+        // Sin esto, lo que el JS de prueba imprime se queda en la consola de la
+        // ventana y desde afuera solo queda mirar el PNG y opinar.
+        mainWindow.webContents.on('console-message', (_e, _nivel, texto) => console.log(texto));
+        const salida = await mainWindow.webContents.executeJavaScript(extraJs);
+        if (salida !== undefined) console.log(salida);
         await new Promise(r => setTimeout(r, Number(argValue('wait')) || 400));
     }
+
+    // Y `elemento.click()` tampoco mueve el foco como lo mueve el mouse, que es
+    // de dónde salen la mitad de los problemas con los atajos.
+    const click = argValue('click');
+    if (click) {
+        const [x, y] = click.split(',').map(Number);
+        mainWindow.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+        mainWindow.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    // Un atajo de teclado no se puede probar con `new KeyboardEvent`: un evento
+    // fabricado no arrastra la acción del navegador, así que el scroll de la
+    // barra espaciadora —que es justo lo que se quiere ver— nunca aparece.
+    const key = argValue('key');
+    if (key) {
+        mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+        mainWindow.webContents.sendInputEvent({ type: 'char', keyCode: key });
+        mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+        await new Promise(r => setTimeout(r, 500));
+        const despues = argValue('js-despues');
+        if (despues) {
+            const salida = await mainWindow.webContents.executeJavaScript(despues);
+            if (salida !== undefined) console.log(salida);
+        }
+    }
+
     if (!shot) return;
 
     await new Promise(r => setTimeout(r, 500));
@@ -101,6 +180,7 @@ process.on('uncaughtException', err => console.error('Excepción no atrapada:', 
 process.on('unhandledRejection', reason => console.error('Promesa rechazada:', reason));
 
 app.whenReady().then(() => {
+    servirMedia();
     createWindow();
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -134,6 +214,100 @@ ipcMain.handle('doctor', async () => {
     return report;
 });
 
+// ─── Actualizaciones ──────────────────────────────────────────────────
+
+let descargaEnCurso = null;
+
+ipcMain.handle('update-check', async () => updates.check({ currentVersion: appVersion() }));
+
+/**
+ * Baja el instalador y lo abre.
+ *
+ * Se abre en vez de instalarlo solo: sin Developer ID de Apple la app va firmada
+ * ad-hoc, y el instalador silencioso de macOS valida firmas que no tenemos (ver
+ * `engine/updates.js`). Abrir el PKG deja al editor a un clic de Continuar.
+ */
+ipcMain.handle('update-download', async (event, payload) => {
+    if (descargaEnCurso) return { ok: false, error: 'Ya se está descargando.' };
+    const { url, nombre } = payload || {};
+    if (!url) return { ok: false, error: 'No llegó de dónde bajarla.' };
+
+    const controller = new AbortController();
+    descargaEnCurso = controller;
+    try {
+        const result = await updates.download({
+            url,
+            nombre,
+            // A Descargas y no a una carpeta temporal: si algo sale mal a mitad
+            // de la instalación, el editor todavía tiene el instalador a mano.
+            destDir: app.getPath('downloads'),
+            signal: controller.signal,
+            onProgress: info => send('update-progress', info)
+        });
+        if (result.ok) {
+            // El instalador reemplaza la app que está corriendo, así que macOS
+            // pide cerrarla. Se le avisa a la ventana para que lo diga antes.
+            send('update-ready', { path: result.path });
+        }
+        return result;
+    } finally {
+        descargaEnCurso = null;
+    }
+});
+
+ipcMain.handle('update-cancel', () => {
+    if (descargaEnCurso) descargaEnCurso.abort();
+    return { ok: true };
+});
+
+ipcMain.handle('update-install', async (event, target) => {
+    if (!target || !fs.existsSync(target)) {
+        return { ok: false, error: 'El instalador ya no está donde se bajó.' };
+    }
+    // A mitad de un curso no: cerrar acá deja las clases a medio procesar y el
+    // instalador puede esperar.
+    if (currentRun) {
+        return { ok: false, error: 'Hay un curso procesando. Esperá a que termine.' };
+    }
+
+    const error = await shell.openPath(target);
+    if (error) return { ok: false, error };
+
+    // El instalador reemplaza este mismo `.app`. Si seguimos abiertos, lo que
+    // queda corriendo es una app cuyos archivos en disco ya no son los suyos:
+    // todo lo que cargue tarde —una ventana, un binario— sale de la versión
+    // nueva o directamente falla. Nos apartamos y que el editor la vuelva a abrir.
+    setTimeout(() => app.quit(), 1500);
+    return { ok: true, cerrando: true };
+});
+
+// Los modelos que hay para elegir. Se leen del disco cada vez: el editor puede
+// bajarse uno con Ollama sin cerrar la app.
+ipcMain.handle('modelos', async () => ollamaServer.modelos());
+
+// Con cuál está corriendo, para el cabezal. Lleva el elegido a mano porque esa
+// preferencia vive en la ventana: sin ella acá se contestaría el del orden de
+// preferencia y el cabezal mostraría un modelo que no es el que se va a usar.
+ipcMain.handle('modelo', async (event, preferido) => ollamaServer.estado(preferido || null));
+
+/**
+ * Un sí o no para lo que no se puede deshacer. Va por el diálogo del sistema y
+ * no por uno dibujado en la ventana: este es el que bloquea de verdad y el que
+ * se ve igual con la app de fondo.
+ */
+ipcMain.handle('confirmar', async (event, { titulo, mensaje, ok } = {}) => {
+    const result = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: [ok || 'Continuar', 'Cancelar'],
+        defaultId: 1,
+        cancelId: 1,
+        title: titulo || 'Confirmar',
+        message: titulo || 'Confirmar',
+        detail: mensaje || ''
+    });
+    return result.response === 0;
+});
+
 ipcMain.handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         title: 'Elegí la carpeta del curso, del día o de la clase',
@@ -155,10 +329,6 @@ ipcMain.handle('scan', async (event, folder) => {
 
     const result = scanner.scan(folder);
     if (!result.ok) return result;
-
-    const send = (channel, payload) => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
-    };
 
     send('scan-found', result);
 
@@ -194,7 +364,14 @@ function classById(id) {
 ipcMain.handle('load-review', (event, { id, buckets }) => {
     const cls = classById(id);
     if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo. Volvé a agregar la carpeta.' };
-    return review.loadReview({ root: lastScan.root, cls, buckets });
+    const data = review.loadReview({ root: lastScan.root, cls, buckets });
+    if (data.ok) {
+        // El reproductor pide los videos por `clase://`, así que las rutas de
+        // esta clase quedan habilitadas al abrirla y no antes.
+        const urls = permitirMedia(data.cameras.map(c => c.path));
+        data.cameras = data.cameras.map((c, i) => ({ index: c.index, name: c.name, url: urls[i] }));
+    }
+    return data;
 });
 
 ipcMain.handle('waveform-window', (event, { path: wavPath, fromSec, toSec, buckets }) => {
@@ -205,7 +382,32 @@ ipcMain.handle('waveform-window', (event, { path: wavPath, fromSec, toSec, bucke
 ipcMain.handle('save-review', (event, { id, segments, viewMap }) => {
     const cls = classById(id);
     if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo.' };
-    return review.saveReview({ root: lastScan.root, cls, segments, viewMap });
+    const res = review.saveReview({ root: lastScan.root, cls, segments, viewMap });
+    // Los bordes que el editor movió a mano son tan poco recalculables como las
+    // notas: si se rehace el XML, el archivo de la clase tiene que quedar con
+    // ese XML y no con el de antes.
+    if (res && res.ok) estadoClase.actualizar({ root: lastScan.root, cls, claves: ['align', 'cutplan'] });
+    return res;
+});
+
+/**
+ * Las notas se guardan solas, sin esperar a "Guardar y regenerar".
+ *
+ * Es lo único de la revisión que no se puede recalcular: si alguien escribe un
+ * comentario, cambia de clase y se va, tiene que seguir ahí. Los bordes no
+ * corren esa suerte porque volver a moverlos cuesta un clic.
+ */
+ipcMain.handle('save-notas', (event, { id, bloques, comentarios }) => {
+    const cls = classById(id);
+    if (!cls) return { ok: false, error: 'Esa clase ya no está en el escaneo.' };
+    try {
+        const guardadas = notas.guardar(lastScan.root, cls.sequenceName, { bloques, comentarios });
+        // Y al archivo de la clase, que es el que viaja con la carpeta.
+        estadoClase.actualizar({ root: lastScan.root, cls, claves: ['notas'] });
+        return { ok: true, notas: guardadas };
+    } catch (err) {
+        return { ok: false, error: `No se pudieron guardar las notas: ${err.message}` };
+    }
 });
 
 /**
@@ -247,7 +449,7 @@ ipcMain.handle('audition', async (event, { path: wavPath, startSec, durationSec 
  * mientras el editor miraba la tabla.
  */
 ipcMain.handle('process', async (event, payload) => {
-    const { root, ids = [], viewMap, force, useAi } = payload || {};
+    const { root, ids = [], viewMap, force, useAi, model } = payload || {};
     if (currentRun) return { ok: false, error: 'Ya hay un procesamiento en curso.' };
 
     const scan = scanner.scan(root);
@@ -263,10 +465,6 @@ ipcMain.handle('process', async (event, payload) => {
         return { ok: false, error: 'Ninguna de las clases marcadas se puede procesar. Mirá el detalle de cada fila.' };
     }
 
-    const send = (channel, data) => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, data);
-    };
-
     const controller = new AbortController();
     currentRun = controller;
     try {
@@ -275,7 +473,9 @@ ipcMain.handle('process', async (event, payload) => {
             classes: usable,
             viewMap,
             force,
+            appVersion: appVersion(),
             useAi: useAi !== false,
+            model: model || null,
             signal: controller.signal,
             onStage: (stage, info) => send('process-stage', { stage, ...info }),
             // La fase 'modelo' llega una vez y sin clase: es de la corrida

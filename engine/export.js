@@ -19,6 +19,13 @@
 const rodecaster = require('./rodecaster-xml');
 const fcp = require('./fcp-xml');
 const workspace = require('./workspace');
+const notas = require('./notas');
+
+// Los comentarios del editor no son marcas de corte: van con nombre y color
+// propios para que se distingan de un vistazo de las que puso el CD, que llevan
+// el color que él eligió.
+const NOMBRE_DE_NOTA = 'Nota';
+const COLOR_DE_NOTA = 'yellow';
 
 /**
  * El color del marcador es el que eligió el director de contenido y viaja tal
@@ -113,7 +120,7 @@ function markersFromParsed(parsed) {
 }
 
 /** Los mismos marcadores, en el lugar que dijo el alineado. */
-function markersFromAlign(alignResult, parsed) {
+function markersFromAlign(alignResult, parsed, guardadas) {
     const markers = [];
     const offset = alignResult.offset ? alignResult.offset.appliedSec || 0 : 0;
 
@@ -129,7 +136,7 @@ function markersFromAlign(alignResult, parsed) {
         const original = parsed.blocks.find(b => b.index === block.index);
         markers.push({
             name: block.view,
-            comment: original ? original.inComment : '',
+            comment: notas.notaDeBloque(guardadas, block.index, original ? original.inComment : ''),
             startSec: block.startSec,
             endSec: block.startSec + 10,
             color: markerColor(original)
@@ -141,11 +148,24 @@ function markersFromAlign(alignResult, parsed) {
             color: markerColor(original)
         });
     }
+
+    // Acá los clips son el material entero, así que el tiempo de la grabación y
+    // el de la secuencia son el mismo: los comentarios van donde fueron escritos.
+    for (const comentario of (guardadas && guardadas.comentarios) || []) {
+        markers.push({
+            name: NOMBRE_DE_NOTA,
+            comment: comentario.comentario,
+            startSec: comentario.sourceStartSec,
+            color: COLOR_DE_NOTA
+        });
+    }
+    markers.sort((a, b) => a.startSec - b.startSec);
+
     return markers;
 }
 
 /** La clase ya cortada: cada bloque uno detrás de otro, con su vista. */
-function cutTracks(cls, plan) {
+function cutTracks(cls, plan, guardadas) {
     const kept = plan.segments.filter(segment => segment.keep);
     const videos = cls.videos || [];
     const audios = cls.audios || [];
@@ -171,10 +191,25 @@ function cutTracks(cls, plan) {
 
     const markers = kept.map(segment => ({
         name: segment.view,
-        comment: segment.note || segment.cueIn || '',
+        comment: notas.notaDeBloque(guardadas, segment.blockIndex, segment.note || segment.cueIn || ''),
         startSec: segment.timelineStartSec,
         color: markerColor(segment)
     }));
+
+    // Los comentarios que dejó el editor sobre el transcript. Van anclados al
+    // tiempo de la grabación, así que hay que traerlos a la línea de tiempo del
+    // corte; los que caen en material que quedó afuera no tienen dónde ir.
+    for (const comentario of (guardadas && guardadas.comentarios) || []) {
+        const segundo = notas.enLaLineaDeTiempo(comentario.sourceStartSec, kept);
+        if (segundo == null) continue;
+        markers.push({
+            name: NOMBRE_DE_NOTA,
+            comment: comentario.comentario,
+            startSec: segundo,
+            color: COLOR_DE_NOTA
+        });
+    }
+    markers.sort((a, b) => a.startSec - b.startSec);
 
     return { videoTracks, audioTracks, markers, durationSec: plan.totals.keepSec };
 }
@@ -200,6 +235,11 @@ function exportClass(params) {
     const height = cls.height || parsed.height || 1080;
     const base = { fps, width, height };
 
+    // Lo que el editor escribió revisando. Se lee acá y no se recibe por
+    // parámetro para que exportar desde el pipeline y desde el visor lleven
+    // siempre lo mismo: las notas no se pierden por el camino que se use.
+    const guardadas = notas.leer(root, sequenceName);
+
     const full = fullTracks(cls);
 
     const populated = fcp.sequenceXml({
@@ -216,11 +256,11 @@ function exportClass(params) {
         name: sequenceName,
         videoTracks: full.videoTracks,
         audioTracks: full.audioTracks,
-        markers: markersFromAlign(alignResult, parsed),
+        markers: markersFromAlign(alignResult, parsed, guardadas),
         durationSec: cls.durationSec || 0
     });
 
-    const cut = cutTracks(cls, cutplan);
+    const cut = cutTracks(cls, cutplan, guardadas);
     const final = fcp.sequenceXml({
         ...base,
         name: sequenceName,

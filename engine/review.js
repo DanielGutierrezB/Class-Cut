@@ -14,8 +14,33 @@ const workspace = require('./workspace');
 const waveform = require('./waveform');
 const exporter = require('./export');
 const cutplanEngine = require('./cutplan');
+const notas = require('./notas');
+const silencios = require('./silencios');
+const estadoClase = require('./estado-clase');
 
 const CONTEXT_SEC = 12;
+
+/**
+ * Las pausas de la clase, calculadas la primera vez y guardadas.
+ *
+ * Leer el audio son 800 ms y el resultado no depende del corte, así que abrir
+ * el visor veinte veces mientras se revisa no puede pagarlo veinte veces. Si el
+ * artefacto quedó de una versión con otro mínimo, se rehace.
+ */
+function pausasDe(root, sequenceName, wavPath, palabras) {
+    if (!wavPath) return null;
+
+    const guardadas = workspace.readJson(workspace.artifact(root, sequenceName, 'silencios'));
+    if (guardadas && guardadas.minimoSec === silencios.MINIMO_SEC) return guardadas;
+
+    const halladas = silencios.deLaClase(wavPath, { palabras });
+    try {
+        workspace.writeJson(workspace.artifact(root, sequenceName, 'silencios'), halladas);
+    } catch (err) {
+        // Que no se pueda escribir el cache no es motivo para no mostrarlas.
+    }
+    return halladas;
+}
 
 /**
  * Todo lo que el visor dibuja de una clase.
@@ -25,7 +50,16 @@ function loadReview(params) {
     const { root, cls } = params;
     const sequenceName = cls.sequenceName;
 
-    const cutplan = workspace.readJson(workspace.artifact(root, sequenceName, 'cutplan'));
+    // La clase puede estar hecha aunque el Backup de ESTA raíz esté vacío: se
+    // procesó entrando por la carpeta del día y ahora se entró por la del curso.
+    // Lo que guardó en su propia carpeta vuelve acá y el visor abre igual, que
+    // es de lo que se trata: mirar una clase no debería depender de por dónde se
+    // haya entrado.
+    let cutplan = workspace.readJson(workspace.artifact(root, sequenceName, 'cutplan'));
+    if (!cutplan) {
+        estadoClase.hidratar({ root, cls });
+        cutplan = workspace.readJson(workspace.artifact(root, sequenceName, 'cutplan'));
+    }
     if (!cutplan) {
         return { ok: false, error: 'Esta clase todavía no se procesó.' };
     }
@@ -42,10 +76,14 @@ function loadReview(params) {
         durationSec: cls.durationSec,
         fps: cls.fps || 30,
         liveMixPath: cls.liveMixPath,
-        cameras: (cls.videos || []).map((v, i) => ({ index: i, name: v.name })),
+        cameras: (cls.videos || []).map((v, i) => ({ index: i, name: v.name, path: v.path })),
         cutplan,
         offset: align ? align.offset : null,
         refine: align ? align.refine : null,
+        // Lo que se dijo dos veces y ya se quitó. Va al visor para que el guion
+        // pueda contar lo que se hizo en vez de dejarlo como pendiente.
+        repeticiones: align ? align.repeticiones || null : null,
+        repaso: align ? align.repaso || null : null,
         // Los bordes traen quién los decidió (la nota, una regla o el modelo) y
         // por qué; el visor lo muestra al lado de cada bloque.
         edges: align ? align.blocks.map(b => ({
@@ -56,10 +94,20 @@ function loadReview(params) {
         coherence: coherence
             ? { blocks: coherence.blocks, findings: coherence.findings, wordCount: coherence.wordCount, stats: coherence.stats }
             : null,
-        // Las palabras enteras de una clase de una hora son varios MB y el visor
-        // solo muestra el texto alrededor del bloque que se está mirando: van las
-        // frases, que son cien veces menos.
         segments: transcript ? transcript.segments : [],
+        // El panel alumbra palabra por palabra, así que necesita los tiempos de
+        // cada una. Van todas y no solo las de los bloques guardados: mover un
+        // borde hacia afuera deja al descubierto material que no estaba adentro,
+        // y el panel tiene que poder leerlo sin volver a pedir nada. La clase más
+        // habladora del curso pesa 272 KB acá.
+        words: transcript ? transcript.words || [] : [],
+        // Lo que el editor escribió revisando: la nota de cada bloque cuando la
+        // cambió, y los comentarios que dejó sobre pedazos del transcript.
+        notas: notas.leer(root, sequenceName),
+        // Dónde no se dice nada. El panel las intercala en el texto: leyendo el
+        // transcript corrido, diez segundos de silencio son invisibles y el
+        // video parece ir atrasado.
+        silencios: pausasDe(root, sequenceName, cls.liveMixPath, transcript ? transcript.words : null),
         waveform: wave
     };
 }
@@ -104,6 +152,10 @@ function saveReview(params) {
             endSec: change.sourceEndSec != null ? change.sourceEndSec : block.endSec,
             view: change.view || block.view,
             enabled: change.keep !== false,
+            // Si el editor lo vuelve a encender, el motivo por el que la
+            // herramienta lo había apagado deja de aplicar y no puede quedarse
+            // pegado al bloque.
+            disabledReason: change.keep === false ? (change.disabledReason || block.disabledReason || '') : '',
             confidence: change.reviewed ? 'alta' : block.confidence
         };
     });

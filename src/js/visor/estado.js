@@ -15,7 +15,13 @@ export const rev = {
     dirty: false,
     audio: null,
     tab: 'cortes',
-    zoomWave: null
+    zoomWave: null,
+    // Lo que el editor escribió revisando. Va aparte de `segments` porque no se
+    // recalcula al guardar: sobrevive a mover bordes y a reprocesar la clase.
+    notas: null,
+    // La clase montada como una sola línea de tiempo, que arma el reproductor y
+    // lee el panel de transcript para saber qué palabra va en qué momento.
+    pista: null
 };
 
 /** El bloque que se está mirando ahora. */

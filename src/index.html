@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src data:;">
+          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src data: clase:;">
     <title>Class Cut</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -14,7 +14,8 @@
         <div class="brand">
             <span class="brand-mark">✂</span>
             <span class="brand-name">Class Cut</span>
-            <span class="brand-version" id="version"></span>
+            <button class="brand-version" id="version" type="button"></button>
+            <span class="brand-model" id="brand-model" hidden></span>
         </div>
 
         <ol class="steps" id="steps">
@@ -96,6 +97,10 @@
                 <label class="toggle" id="ai-toggle" title="Decide los cortes dudosos y revisa si la clase se entiende de corrido.">
                     <input type="checkbox" id="use-ai" checked> Afinar con IA local
                 </label>
+                <select id="ai-model" class="select-model" aria-label="Modelo local" title="Con cuál modelo pensar los cortes dudosos.">
+                    <option value="">El mejor que haya</option>
+                </select>
+                <button class="btn btn-ghost" id="btn-reprocess" hidden>Reprocesar</button>
                 <button class="btn btn-primary" id="btn-process" disabled>Procesar</button>
             </div>
         </section>
@@ -148,6 +153,7 @@
                 <div class="subbar-actions">
                     <div class="tabs" id="rev-tabs">
                         <button class="tab is-on" data-tab="cortes">Cortes</button>
+                        <button class="tab" data-tab="clase">Ver la clase</button>
                         <button class="tab" data-tab="guion">Guion final</button>
                     </div>
                     <select class="picker" id="rev-class"></select>
@@ -157,6 +163,41 @@
             </div>
 
             <div class="script" id="rev-script" hidden></div>
+
+            <div class="player" id="rev-player" hidden>
+                <div class="player-top">
+                    <div class="player-stage" id="player-stage">
+                        <div class="player-frame" id="player-frame"></div>
+                        <div class="player-empty" id="player-empty">No hay bloques para ver.</div>
+                    </div>
+
+                    <div class="player-split" id="player-split" role="separator"
+                         aria-orientation="vertical" aria-label="Ancho del panel de texto"
+                         tabindex="0" title="Arrastrá para repartir el espacio (doble clic para volver)"></div>
+
+                    <aside class="letra" id="rev-letra">
+                        <div class="letra-head">
+                            <span>Lo que se dice</span>
+                            <span class="letra-hint" id="letra-hint">Seleccioná texto para comentarlo</span>
+                        </div>
+                        <div class="letra-body" id="letra-body"></div>
+                    </aside>
+                </div>
+
+                <div class="player-bar">
+                <button class="btn btn-primary player-play" id="player-play" title="Barra espaciadora">Reproducir</button>
+                <button class="btn btn-ghost" id="player-prev" title="Bloque anterior (flecha arriba)">◀◀</button>
+                <button class="btn btn-ghost" id="player-next" title="Bloque siguiente (flecha abajo)">▶▶</button>
+                    <span class="player-time" id="player-time">0:00 / 0:00</span>
+                    <div class="player-track" id="player-track">
+                        <div class="player-blocks" id="player-blocks"></div>
+                        <div class="player-head" id="player-head"></div>
+                    </div>
+                </div>
+
+                <div class="player-now" id="player-now"></div>
+                <div class="player-leyenda" id="player-leyenda"></div>
+            </div>
 
             <div class="review" id="rev-cuts">
                 <aside class="review-list" id="rev-list"></aside>

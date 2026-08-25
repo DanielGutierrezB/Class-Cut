@@ -7,8 +7,17 @@ import { rev, actual, cambio } from './estado.js';
 
 const DECIDED_LABEL = {
     nota: 'la nota del CD',
+    // "nota" es dónde quedó el marcador; "orden" es el CD escribiendo qué hacer
+    // con él ("OUT ANTES DE: …"), que manda sobre todo lo demás.
+    orden: 'la orden del CD',
     regla: 'una regla',
-    ia: 'la IA local'
+    ia: 'la IA local',
+    // El bloque seguía hasta donde el profesor rehizo la frase; el corte se
+    // adelantó hasta donde arranca la retoma.
+    repetido: 'lo que se decía dos veces',
+    // La lectura de la clase entera vio que el bloque abría o cerraba a mitad de
+    // idea, y el borde se movió hasta donde la frase empieza o termina.
+    repaso: 'el repaso del guion'
 };
 
 /** Mueve un borde a un momento, sin dejar que se cruce con el otro. */

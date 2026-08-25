@@ -12,10 +12,17 @@ import { rev, actual, alRedibujar, cambio } from './estado.js';
 import { renderOverview, renderZoom } from './onda.js';
 import { setEdge, renderEdges, renderDecided, renderTranscript, playEdge } from './bordes.js';
 import { renderScript, wireGuion } from './guion.js';
+import { abrirReproductor, cerrarReproductor, refrescarBloques, wireReproductor } from './reproductor.js';
+import { ajustarDivision, wireDivision } from './division.js';
+import { wireLetra } from './panel-letra.js';
 
 export async function openReview(id) {
     const target = id || (state.scan.classes.find(c => c.selected && c.alreadyProcessed) || {}).id;
     if (!target) return;
+
+    // Cambiar de clase con el reproductor abierto: lo de la clase anterior se
+    // suelta antes de cargar nada, o queda un video de 15 GB sonando sin dueño.
+    cerrarReproductor();
 
     showView('review');
     setStep(4);
@@ -23,6 +30,14 @@ export async function openReview(id) {
 
     const data = await window.cc.loadReview({ id: target, buckets: 2400 });
     if (!data.ok) {
+        // Sin esto quedan los datos de la clase anterior y el resto del visor
+        // sigue mostrándolos bajo un título que dice que no se pudo abrir: el
+        // reproductor llegaría a poner el video de otra clase.
+        rev.data = null;
+        rev.segments = [];
+        rev.id = null;
+        rev.notas = null;
+        rev.pista = null;
         $('rev-title').textContent = 'No se pudo abrir';
         $('rev-sub').textContent = data.error;
         return;
@@ -32,6 +47,8 @@ export async function openReview(id) {
     rev.id = target;
     rev.dirty = false;
     rev.zoomWave = null;
+    rev.notas = data.notas || { bloques: {}, comentarios: [] };
+    rev.pista = null;
     // Se trabaja sobre una copia: hasta que no se guarda, el plan del disco es el
     // que vale y "Volver a lo calculado" tiene de dónde volver.
     rev.segments = data.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
@@ -64,10 +81,35 @@ function renderReview() {
     renderDecided();
     renderTranscript();
     if (rev.tab === 'guion') renderScript();
+    // La tira del reproductor marca qué bloques tienen comentario, así que un
+    // comentario nuevo tiene que verse ahí sin salir y volver a entrar.
+    if (rev.tab === 'clase') refrescarBloques();
+}
+
+/** Cuánto aire muerto tiene un bloque, para avisarlo en la lista. */
+function aireDe(segment) {
+    if (!segment.keep || !rev.data || !rev.data.silencios) return 0;
+    const dentro = rev.data.silencios.tramos.reduce((suma, t) => {
+        const desde = Math.max(t.desdeSec, segment.sourceStartSec);
+        const hasta = Math.min(t.hastaSec, segment.sourceEndSec);
+        return suma + Math.max(0, hasta - desde);
+    }, 0);
+    // Menos de dos segundos sumados es respirar entre frases.
+    return dentro >= 2 ? dentro : 0;
+}
+
+/** Cuántos comentarios escribió el editor dentro de un bloque. */
+function comentariosDe(segment) {
+    const comentarios = (rev.notas && rev.notas.comentarios) || [];
+    return comentarios.filter(c =>
+        c.sourceStartSec >= segment.sourceStartSec && c.sourceStartSec <= segment.sourceEndSec).length;
 }
 
 function renderReviewList() {
-    $('rev-list').innerHTML = rev.segments.map((segment, index) => `
+    $('rev-list').innerHTML = rev.segments.map((segment, index) => {
+        const aire = aireDe(segment);
+        const notas = comentariosDe(segment);
+        return `
         <button class="rev-item conf-${esc(segment.confidence)} ${index === rev.selected ? 'is-active' : ''} ${segment.keep ? '' : 'is-out'}"
                 data-idx="${index}">
             <span class="rev-item-head">
@@ -75,21 +117,34 @@ function renderReviewList() {
                 <span class="rev-item-time">${fmtClock(segment.sourceStartSec)}</span>
                 <span class="cell-dim">${(segment.sourceEndSec - segment.sourceStartSec).toFixed(1)}s</span>
                 <span class="badge ${segment.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(segment.view)}</span>
-                ${segment.keep ? '' : '<span class="badge badge-err">fuera</span>'}
+                ${segment.keep ? '' : `<span class="badge badge-err" title="${esc(segment.disabledReason || 'Lo sacaste de la clase')}">fuera</span>`}
+                ${aire ? `<span class="badge badge-warn" title="No se dice nada durante esos segundos">⏸ ${Math.round(aire)}s</span>` : ''}
+                ${notas ? `<span class="badge badge-nota" title="Va a salir como marcador en el XML">✎ ${notas}</span>` : ''}
             </span>
             <span class="rev-item-note">${esc(segment.note || segment.cueIn || '')}</span>
-        </button>
-    `).join('');
+        </button>`;
+    }).join('');
 }
 
 function setReviewTab(tab) {
+    // Salir de la pestaña no puede dejar una clase sonando por detrás.
+    if (rev.tab === 'clase' && tab !== 'clase') cerrarReproductor();
+
     rev.tab = tab;
     for (const button of document.querySelectorAll('#rev-tabs .tab')) {
         button.classList.toggle('is-on', button.dataset.tab === tab);
     }
     $('rev-cuts').style.display = tab === 'cortes' ? '' : 'none';
     $('rev-script').hidden = tab !== 'guion';
+    $('rev-player').hidden = tab !== 'clase';
+
     if (tab === 'guion') renderScript();
+    if (tab === 'clase') {
+        // El reparto se recalcula acá y no al arrancar: mientras el reproductor
+        // está oculto, el contenedor mide cero y todo ancho se recorta al mínimo.
+        ajustarDivision();
+        abrirReproductor();
+    }
 }
 
 async function saveReviewChanges() {
@@ -105,6 +160,7 @@ async function saveReviewChanges() {
             sourceEndSec: s.sourceEndSec,
             view: s.view,
             keep: s.keep,
+            disabledReason: s.disabledReason || '',
             reviewed: s.reviewed
         })),
         viewMap: rev.data.cutplan.viewMap
@@ -119,6 +175,9 @@ async function saveReviewChanges() {
     rev.segments = result.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
     toast(`XML regenerado · ${result.exported.segments} bloques · ${fmtDur(result.exported.keepSec)}`);
     renderReview();
+    // Guardar reescribe los bloques: el reproductor tiene que pasar a mostrar
+    // el corte que acaba de quedar y no el de antes de guardar.
+    if (rev.tab === 'clase') abrirReproductor();
 }
 
 /**
@@ -133,7 +192,7 @@ export function wireReview() {
     for (const button of document.querySelectorAll('#rev-tabs .tab')) {
         button.onclick = () => setReviewTab(button.dataset.tab);
     }
-    $('rev-back').onclick = () => { showView('run'); setStep(5); };
+    $('rev-back').onclick = () => { cerrarReproductor(); showView('run'); setStep(5); };
     $('rev-save').onclick = saveReviewChanges;
     $('rev-class').onchange = event => openReview(event.target.value);
 
@@ -187,6 +246,9 @@ export function wireReview() {
     }
 
     wireGuion(setReviewTab);
+    wireReproductor();
+    wireLetra();
+    wireDivision();
 
     // Las ondas se dibujan sobre canvas, que no se reacomodan solos.
     window.addEventListener('resize', () => {
