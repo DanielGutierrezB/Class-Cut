@@ -30,17 +30,27 @@ contextBridge.exposeInMainWorld('cc', {
     updateInstall: target => ipcRenderer.invoke('update-install', target),
     pickFolder: () => ipcRenderer.invoke('pick-folder'),
     confirmar: payload => ipcRenderer.invoke('confirmar', payload),
+    preguntar: payload => ipcRenderer.invoke('preguntar', payload),
     scan: folder => ipcRenderer.invoke('scan', folder),
     quitarCarpeta: root => ipcRenderer.invoke('quitar-carpeta', root),
     process: payload => ipcRenderer.invoke('process', payload),
     cancelProcess: () => ipcRenderer.invoke('cancel-process'),
     loadReview: payload => ipcRenderer.invoke('load-review', payload),
     saveReview: payload => ipcRenderer.invoke('save-review', payload),
+    // Qué clases tienen el XML atrasado, para que el botón diga qué va a hacer
+    // antes de apretarlo.
+    pendientes: id => ipcRenderer.invoke('pendientes', id),
     saveNotas: payload => ipcRenderer.invoke('save-notas', payload),
     waveformWindow: payload => ipcRenderer.invoke('waveform-window', payload),
     audition: payload => ipcRenderer.invoke('audition', payload),
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
+
+    // El diario de la sesión. La ventana solo anota y pide el archivo: el
+    // registro entero vive del lado de Node, para que las dos mitades queden en
+    // un mismo orden y con un mismo reloj.
+    anotar: (evento, datos) => ipcRenderer.invoke('registro-anotar', { evento, datos }),
+    registroDescargar: () => ipcRenderer.invoke('registro-descargar'),
 
     pathForFile: file => {
         try {

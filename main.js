@@ -20,6 +20,7 @@ const paths = require('./engine/paths');
 const pipeline = require('./engine/pipeline');
 const workspace = require('./engine/workspace');
 const review = require('./engine/review');
+const regenerar = require('./engine/regenerar');
 const notas = require('./engine/notas');
 const estadoClase = require('./engine/estado-clase');
 const waveform = require('./engine/waveform');
@@ -31,6 +32,7 @@ const claves = require('./engine/claves');
 const claudeOauth = require('./engine/claude-oauth');
 const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
+const registro = require('./engine/registro');
 const devShot = require('./dev-shot');
 
 let mainWindow = null;
@@ -52,6 +54,11 @@ function appVersion() {
 /** Avisarle algo a la ventana, si todavía está. */
 function send(channel, payload) {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+/** Una línea en el diario de la sesión (`engine/registro.js`). */
+function anotar(evento, datos) {
+    registro.anotar('main', evento, datos);
 }
 
 // ─── El video, hasta la ventana ───────────────────────────────────────
@@ -115,10 +122,19 @@ function createWindow() {
 }
 
 // Un fallo suelto no puede dejar la app viva pero muda: se registra y sigue.
-process.on('uncaughtException', err => console.error('Excepción no atrapada:', err));
-process.on('unhandledRejection', reason => console.error('Promesa rechazada:', reason));
+// Y ahora también queda en el diario: es justo la clase de cosa que el editor
+// no ve y que explica por qué algo dejó de andar a mitad de una corrida.
+process.on('uncaughtException', err => {
+    anotar('error.no-atrapado', { mensaje: err && err.message });
+    console.error('Excepción no atrapada:', err);
+});
+process.on('unhandledRejection', reason => {
+    anotar('error.promesa', { mensaje: reason && reason.message ? reason.message : String(reason) });
+    console.error('Promesa rechazada:', reason);
+});
 
 app.whenReady().then(() => {
+    anotar('app.arranca', { version: appVersion(), electron: process.versions.electron, arch: process.arch });
     servirMedia();
     createWindow();
     app.on('activate', () => {
@@ -142,6 +158,42 @@ ipcMain.handle('app-info', () => ({
     electron: process.versions.electron,
     platform: process.platform
 }));
+
+// ─── El diario de la sesión ───────────────────────────────────────────
+
+/**
+ * La ventana también anota.
+ *
+ * Podría llevar su propio registro y mandarlo entero al descargar, pero
+ * entonces habría dos diarios con dos relojes y el archivo mezclaría dos
+ * ordenamientos: qué pasó primero, si el clic o el escaneo que disparó, dejaría
+ * de leerse. Con un solo registro, el orden del archivo es el orden real.
+ */
+ipcMain.handle('registro-anotar', (event, { evento, datos } = {}) => {
+    registro.anotar('ventana', evento, datos);
+    return true;
+});
+
+/**
+ * Escribe el diario en Descargas.
+ *
+ * A Descargas y no a un sitio temporal por lo mismo que el instalador: es la
+ * carpeta que el editor sabe encontrar para adjuntar un archivo.
+ */
+ipcMain.handle('registro-descargar', () => {
+    anotar('registro.descarga', registro.estado());
+    const res = registro.escribir(app.getPath('downloads'), {
+        version: appVersion(),
+        electron: process.versions.electron,
+        plataforma: process.platform,
+        arquitectura: process.arch
+    });
+    // Se revela y no se abre: abrir un .txt lanza el editor de texto del
+    // sistema encima de la app, y lo que hace falta es tenerlo a mano para
+    // arrastrarlo a un mail.
+    if (res.ok) shell.showItemInFolder(res.archivo);
+    return res;
+});
 
 ipcMain.handle('doctor', async () => {
     const report = paths.doctor();
@@ -170,9 +222,18 @@ ipcMain.handle('ajustes-guardar', (event, datos) => {
         // `ajustes.guardar` (sanear) la descarta del JSON.
         const pegada = datos && datos.ia && datos.ia.anthropic && datos.ia.anthropic.apiKey;
         if (pegada) claves.guardar('anthropic', String(pegada).trim());
-        ajustes.guardar(datos);
+        const guardados = ajustes.guardar(datos);
+        // Del proveedor y el modelo, no del objeto entero: `datos` es
+        // exactamente el sitio por donde puede pasar una clave pegada a mano, y
+        // `registro.sanear` la taparía igual, pero no hace falta ni acercarla.
+        anotar('ajustes.guardados', {
+            proveedor: guardados.ia.proveedor,
+            modelo: guardados.ia[guardados.ia.proveedor].modelo,
+            clavePegada: Boolean(pegada)
+        });
         return { ok: true, ajustes: ajustesParaLaVentana() };
     } catch (err) {
+        anotar('ajustes.fallaron', { error: err.message });
         return { ok: false, error: `No se pudieron guardar los ajustes: ${err.message}` };
     }
 });
@@ -187,6 +248,9 @@ let claudeVerifier = null;
 ipcMain.handle('claude-login-empezar', () => {
     const { url, verifier } = claudeOauth.empezar();
     claudeVerifier = verifier;
+    // La URL lleva el verificador PKCE: se anota que se abrió el navegador, no
+    // a dónde.
+    anotar('claude.login-empieza', {});
     shell.openExternal(url);
     return { ok: true };
 });
@@ -194,18 +258,24 @@ ipcMain.handle('claude-login-empezar', () => {
 ipcMain.handle('claude-login-codigo', async (event, pegado) => {
     if (!claudeVerifier) return { ok: false, error: 'Primero tocá «Iniciar sesión» para abrir el navegador.' };
     const res = await claudeOauth.terminar(pegado, claudeVerifier);
-    if (res.error) return { ok: false, error: res.error };
+    if (res.error) {
+        anotar('claude.login-falla', { error: res.error });
+        return { ok: false, error: res.error };
+    }
     try {
         claves.guardar('anthropic', res.clave);
     } catch (err) {
+        anotar('claude.login-falla', { error: `el Llavero no la aceptó: ${err.message}` });
         return { ok: false, error: `La clave llegó pero el Llavero no la aceptó: ${err.message}` };
     }
     claudeVerifier = null;
+    anotar('claude.login-listo', {});
     return { ok: true, ajustes: ajustesParaLaVentana() };
 });
 
 ipcMain.handle('claude-salir', () => {
     claves.borrar('anthropic');
+    anotar('claude.sesion-cerrada', {});
     return { ok: true, ajustes: ajustesParaLaVentana() };
 });
 
@@ -220,7 +290,15 @@ ipcMain.handle('cursor-modelos', () => aiCursor.modelos());
 
 let descargaEnCurso = null;
 
-ipcMain.handle('update-check', async () => updates.check({ currentVersion: appVersion() }));
+ipcMain.handle('update-check', async () => {
+    const res = await updates.check({ currentVersion: appVersion() });
+    anotar('update.buscada', {
+        hay: Boolean(res && res.hay),
+        version: (res && res.version) || null,
+        motivo: (res && res.motivo) || null
+    });
+    return res;
+});
 
 /**
  * Baja el instalador y lo abre.
@@ -246,6 +324,7 @@ ipcMain.handle('update-download', async (event, payload) => {
             signal: controller.signal,
             onProgress: info => send('update-progress', info)
         });
+        anotar('update.descargada', { ok: Boolean(result.ok), error: result.error || null });
         if (result.ok) {
             // El instalador reemplaza la app que está corriendo, así que macOS
             // pide cerrarla. Se le avisa a la ventana para que lo diga antes.
@@ -272,6 +351,7 @@ ipcMain.handle('update-install', async (event, target) => {
         return { ok: false, error: 'Hay un curso procesando. Esperá a que termine.' };
     }
 
+    anotar('update.instalando', {});
     const error = await shell.openPath(target);
     if (error) return { ok: false, error };
 
@@ -308,6 +388,29 @@ ipcMain.handle('confirmar', async (event, { titulo, mensaje, ok } = {}) => {
         detail: mensaje || ''
     });
     return result.response === 0;
+});
+
+/**
+ * Lo mismo, cuando hay más de dos salidas.
+ *
+ * Existe por cambiar de clase con bordes movidos sin guardar: guardarlos, seguir
+ * de largo y quedarse son tres respuestas distintas, y con un sí/no siempre se
+ * pierde una — o se escribe un XML que nadie pidió, o se tira trabajo en
+ * silencio. Devuelve el índice de la opción elegida, o -1 si canceló.
+ */
+ipcMain.handle('preguntar', async (event, { titulo, mensaje, opciones } = {}) => {
+    const elegibles = (opciones || []).length ? opciones : ['Continuar'];
+    const buttons = elegibles.concat('Cancelar');
+    const result = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons,
+        defaultId: 0,
+        cancelId: buttons.length - 1,
+        title: titulo || 'Elegí',
+        message: titulo || 'Elegí',
+        detail: mensaje || ''
+    });
+    return result.response >= elegibles.length ? -1 : result.response;
 });
 
 ipcMain.handle('pick-folder', async () => {
@@ -373,16 +476,30 @@ ipcMain.handle('scan', async (event, folder) => {
         };
     }
 
+    const desde = Date.now();
     const result = await escanearYMedir(folder);
-    if (!result.ok) return result;
+    if (!result.ok) {
+        anotar('carpeta.no-se-pudo', { carpeta: folder, error: result.error });
+        return result;
+    }
 
     for (const vieja of plan.reemplaza) carpetas.delete(vieja);
     carpetas.set(result.root, result);
+    anotar('carpeta.agregada', {
+        carpeta: result.root,
+        tipo: result.kind,
+        clases: result.classCount,
+        procesables: result.processableCount,
+        materialSec: Math.round(result.totalDurationSec || 0),
+        reemplaza: plan.reemplaza.length,
+        ms: Date.now() - desde
+    });
     return { ...result, accion: plan.accion, reemplaza: plan.reemplaza };
 });
 
 ipcMain.handle('quitar-carpeta', (event, root) => {
     carpetas.delete(carpetasLib.normal(root || ''));
+    anotar('carpeta.quitada', { carpeta: root, quedan: carpetas.size });
     return { ok: true, cargadas: [...carpetas.keys()] };
 });
 
@@ -394,10 +511,53 @@ function classById(id) {
     return null;
 }
 
+/** La carpeta cargada de la que salió una clase. */
+function carpetaDeClase(id) {
+    for (const scan of carpetas.values()) {
+        if (scan.classes.some(c => c.id === id)) return scan;
+    }
+    return null;
+}
+
+/**
+ * Qué clases quedaron con el XML atrasado, mirando desde una clase abierta.
+ *
+ * El alcance de «Guardar y regenerar» es la carpeta de esa clase y no todo lo
+ * cargado: el editor puede tener el curso de un cliente y el día de otro a la
+ * vez, y un botón apretado dentro de una clase no puede salir a escribir XML en
+ * la carpeta del otro cliente. Las de las demás carpetas se cuentan igual y se
+ * dicen, porque una clase atrasada en silencio es exactamente el problema que
+ * esto viene a resolver.
+ */
+function atrasadas(id) {
+    const scan = carpetaDeClase(id);
+    if (!scan) return { carpeta: null, otras: [], afuera: [] };
+    return {
+        carpeta: { root: scan.root, nombre: scan.rootName },
+        otras: regenerar.pendientes({ clases: scan.classes.filter(c => c.id !== id) }),
+        afuera: [...carpetas.values()]
+            .filter(s => s.root !== scan.root)
+            .flatMap(s => regenerar.pendientes({ clases: s.classes }))
+    };
+}
+
+ipcMain.handle('pendientes', (event, id) => atrasadas(id));
+
 ipcMain.handle('load-review', (event, { id, buckets }) => {
     const cls = classById(id);
-    if (!cls) return { ok: false, error: 'Esa clase ya no está cargada. Volvé a agregar la carpeta.' };
+    if (!cls) {
+        anotar('visor.no-se-pudo', { clase: id, error: 'la clase ya no está cargada' });
+        return { ok: false, error: 'Esa clase ya no está cargada. Volvé a agregar la carpeta.' };
+    }
+    const desde = Date.now();
     const data = review.loadReview({ root: cls.root, cls, buckets });
+    anotar('visor.abre', {
+        clase: cls.id,
+        ok: Boolean(data.ok),
+        error: data.ok ? null : data.error,
+        bloques: data.ok && data.cutplan ? data.cutplan.segments.length : null,
+        ms: Date.now() - desde
+    });
     if (data.ok) {
         // El reproductor pide los videos por `clase://`, así que las rutas de
         // esta clase quedan habilitadas al abrirla y no antes. Y SOLO las de
@@ -415,6 +575,15 @@ ipcMain.handle('waveform-window', (event, { path: wavPath, fromSec, toSec, bucke
     return waveform.peaks(wavPath, buckets || 1200, { fromSec, toSec });
 });
 
+/**
+ * Guarda la clase abierta y deja al día a las demás de su carpeta.
+ *
+ * Lo segundo es por los comentarios: se guardan solos, pero al XML llegan solo
+ * al exportar, y exportar pasaba únicamente por este botón estando en la clase.
+ * Quien comentaba en la 3, seguía a la 7 y guardaba ahí, se llevaba a Premiere
+ * el XML de la 3 sin sus comentarios. Cuáles están atrasadas lo mide
+ * `engine/regenerar.js`; de las demás no se toca ni el archivo.
+ */
 ipcMain.handle('save-review', (event, { id, segments, viewMap }) => {
     const cls = classById(id);
     if (!cls) return { ok: false, error: 'Esa clase ya no está cargada.' };
@@ -422,8 +591,32 @@ ipcMain.handle('save-review', (event, { id, segments, viewMap }) => {
     // Los bordes que el editor movió a mano son tan poco recalculables como las
     // notas: si se rehace el XML, el archivo de la clase tiene que quedar con
     // ese XML y no con el de antes.
-    if (res && res.ok) estadoClase.actualizar({ root: cls.root, cls, claves: ['align', 'cutplan'] });
-    return res;
+    if (!res || !res.ok) {
+        anotar('visor.cortes-no-se-guardaron', { clase: cls.id, error: res && res.error });
+        return res;
+    }
+    estadoClase.actualizar({ root: cls.root, cls, claves: ['align', 'cutplan'] });
+
+    const otras = atrasadas(id).otras;
+    const porId = new Map(otras.map(p => [p.id, p]));
+    const lote = regenerar.varias({ clases: otras.map(p => classById(p.id)).filter(Boolean) });
+
+    anotar('visor.cortes-guardados', {
+        clase: cls.id,
+        bloques: res.exported ? res.exported.segments : null,
+        finalSec: res.exported ? res.exported.keepSec : null,
+        tambien: lote.hechas.length,
+        fallas: lote.fallas.length
+    });
+
+    return {
+        ...res,
+        tambien: lote.hechas.map(h => ({
+            classNumber: h.classNumber,
+            porque: (porId.get(h.id) || {}).porque || null
+        })),
+        fallas: lote.fallas.map(f => ({ classNumber: f.classNumber, error: f.error }))
+    };
 });
 
 /**
@@ -440,8 +633,16 @@ ipcMain.handle('save-notas', (event, { id, bloques, comentarios }) => {
         const guardadas = notas.guardar(cls.root, cls.sequenceName, { bloques, comentarios });
         // Y al archivo de la clase, que es el que viaja con la carpeta.
         estadoClase.actualizar({ root: cls.root, cls, claves: ['notas'] });
+        // Cuántas, no qué dicen: las notas son del editor y no tienen por qué
+        // aparecer en un archivo que se manda para reportar un problema.
+        anotar('visor.notas-guardadas', {
+            clase: cls.id,
+            bloques: Object.keys(bloques || {}).length,
+            comentarios: (comentarios || []).length
+        });
         return { ok: true, notas: guardadas };
     } catch (err) {
+        anotar('visor.notas-fallaron', { clase: cls.id, error: err.message });
         return { ok: false, error: `No se pudieron guardar las notas: ${err.message}` };
     }
 });
@@ -510,7 +711,20 @@ ipcMain.handle('process', async (event, payload) => {
 
     const controller = new AbortController();
     currentRun = controller;
+    const empezoLaCorrida = Date.now();
+    anotar('corrida.empieza', {
+        clases: usable.length,
+        desdeCero: Boolean(force),
+        criterio: useAi !== false,
+        modeloPedido: model || null,
+        materialSec: Math.round(usable.reduce((s, c) => s + (c.durationSec || 0), 0))
+    });
     try {
+        // El progreso llega decenas de veces por etapa (transcribir avisa cada
+        // porcentaje): al diario va UNA línea por etapa nueva y no una por
+        // aviso, o el tope de líneas se lo come una sola clase.
+        const etapaEnCurso = new Map();
+
         const results = await pipeline.processClasses({
             classes: usable,
             viewMap,
@@ -519,18 +733,44 @@ ipcMain.handle('process', async (event, payload) => {
             useAi: useAi !== false,
             model: model || null,
             signal: controller.signal,
-            onStage: (stage, info) => send('process-stage', { stage, ...info }),
+            onStage: (stage, info) => {
+                if (etapaEnCurso.get(info.id) !== stage) {
+                    etapaEnCurso.set(info.id, stage);
+                    anotar('corrida.etapa', { clase: info.id, etapa: stage, msClase: info.msClase });
+                }
+                send('process-stage', { stage, ...info });
+            },
             // La fase 'modelo' llega una vez y sin clase: es de la corrida
             // entera, no de ninguna en particular.
-            onClass: (phase, info) => send('process-class', phase === 'modelo'
-                ? { phase, modelo: { reason: info.modelo.reason, model: info.modelo.model || null } }
-                : {
+            onClass: (phase, info) => {
+                if (phase === 'modelo') {
+                    anotar('corrida.modelo', { modelo: info.modelo.model || null, motivo: info.modelo.reason });
+                    send('process-class', {
+                        phase,
+                        modelo: { reason: info.modelo.reason, model: info.modelo.model || null }
+                    });
+                    return;
+                }
+                if (phase === 'termina') {
+                    const r = info.result || {};
+                    anotar('corrida.clase-lista', {
+                        clase: info.cls.id,
+                        ok: Boolean(r.ok),
+                        error: r.error || null,
+                        ms: r.msProceso || null,
+                        finalSec: r.ok && r.totals ? r.totals.keepSec : null,
+                        tokens: r.tokens && r.tokens.informa ? r.tokens.total : null,
+                        etapas: r.etapas || null
+                    });
+                }
+                send('process-class', {
                     phase,
                     id: info.cls.id,
                     index: info.index,
                     total: info.total,
                     result: info.result || null
-                })
+                });
+            }
         });
 
         // Y se vuelven a leer las carpetas tocadas: acaban de aparecer XML y
@@ -545,6 +785,14 @@ ipcMain.handle('process', async (event, payload) => {
             refrescadas.push(fresca);
         }
 
+        anotar('corrida.termina', {
+            ms: Date.now() - empezoLaCorrida,
+            cancelada: controller.signal.aborted,
+            exportadas: results.filter(r => r.ok).length,
+            fallidas: results.filter(r => !r.ok && !r.cancelled).length,
+            tokens: results.reduce((s, r) => s + (r.tokens && r.tokens.informa ? r.tokens.total : 0), 0)
+        });
+
         return {
             ok: true,
             cancelled: controller.signal.aborted,
@@ -553,6 +801,7 @@ ipcMain.handle('process', async (event, payload) => {
             results
         };
     } catch (err) {
+        anotar('corrida.se-cayo', { error: err.message, ms: Date.now() - empezoLaCorrida });
         return { ok: false, error: err.message };
     } finally {
         currentRun = null;
@@ -561,6 +810,7 @@ ipcMain.handle('process', async (event, payload) => {
 
 ipcMain.handle('cancel-process', () => {
     if (!currentRun) return false;
+    anotar('corrida.cancelada-a-pedido', {});
     currentRun.abort();
     return true;
 });
@@ -573,6 +823,7 @@ ipcMain.handle('reveal', (event, target) => {
 
 ipcMain.handle('open-path', async (event, target) => {
     if (typeof target !== 'string' || !target) return false;
+    anotar('abrir.ruta', { ruta: target });
     const err = await shell.openPath(target);
     return !err;
 });
