@@ -31,6 +31,9 @@ export function toast(message) {
 export function openModal(title, html) {
     $('modal-title').textContent = title;
     $('modal-body').innerHTML = html;
+    // El dueño anterior deja de valer: quien necesite reconocer "su" modal
+    // abierto (p. ej. actualizar, para repintarlo) se marca después de abrir.
+    delete $('modal').dataset.dueno;
     $('modal').hidden = false;
 }
 

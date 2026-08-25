@@ -62,11 +62,16 @@ function insetDe(principal, viewMap, camaras, vistaDelProfesor) {
 
 /**
  * @param {Array} segments bloques del plan, en orden
- * @param {object} [opciones] { viewMap, camaras, vistaDelProfesor }
+ * @param {object} [opciones] { viewMap, camaras, vistaDelProfesor, notas }
+ *   `notas` es el mapa de notas corregidas (`rev.notas.bloques`): la nota
+ *   efectiva se resuelve acá, UNA vez, y todo lo que dibuja —el overlay del
+ *   reproductor, la tira, el panel de texto— lee la misma. Cuando cada vista la
+ *   resolvía por su cuenta, el panel mostraba la corregida y el reproductor la
+ *   vieja del marcador.
  * @returns {{tramos:Array, duracionSec:number}}
  */
 export function construir(segments, opciones) {
-    const { viewMap, camaras, vistaDelProfesor } = opciones || {};
+    const { viewMap, camaras, vistaDelProfesor, notas } = opciones || {};
     const tramos = [];
     let acumulado = 0;
 
@@ -80,6 +85,8 @@ export function construir(segments, opciones) {
 
         const dura = hasta - desde;
         const camara = camaraDe(segment, viewMap, camaras);
+        const notaOriginal = segment.note || segment.cueIn || '';
+        const corregida = notas && notas[segment.blockIndex] && notas[segment.blockIndex].note;
         tramos.push({
             indice: tramos.length,
             blockIndex: segment.blockIndex,
@@ -91,7 +98,10 @@ export function construir(segments, opciones) {
             camara,
             inset: insetDe(camara, viewMap, camaras, vistaDelProfesor),
             view: segment.view || '',
-            nota: segment.note || segment.cueIn || '',
+            nota: corregida || notaOriginal,
+            // La del marcador se conserva aparte: el panel la necesita para
+            // saber si la efectiva está corregida y para poder volver a ella.
+            notaOriginal,
             confidence: segment.confidence || 'baja'
         });
         acumulado += dura;
@@ -101,19 +111,20 @@ export function construir(segments, opciones) {
 }
 
 /**
- * Los comentarios que caen dentro de un bloque.
+ * Los comentarios que caen dentro de un tramo de la grabación.
  *
  * Se miden contra el tramo completo y no contra sus palabras: un comentario
  * puesto donde nadie habla igual pertenece al bloque, y buscándolo solo entre
  * las palabras quedaría anclado a algo invisible e imposible de volver a tocar.
  *
- * @param {object} tramo de `construir`
+ * @param {number} desdeSec en tiempo de la grabación
+ * @param {number} hastaSec
  * @param {Array} comentarios los de `notas.json`, anclados al tiempo de grabación
  */
-export function comentariosEn(tramo, comentarios) {
-    if (!tramo || !comentarios) return [];
+export function comentariosEn(desdeSec, hastaSec, comentarios) {
+    if (!comentarios) return [];
     return comentarios
-        .filter(c => c.sourceStartSec >= tramo.origenDesdeSec && c.sourceStartSec <= tramo.origenHastaSec)
+        .filter(c => c.sourceStartSec >= desdeSec && c.sourceStartSec <= hastaSec)
         .sort((a, b) => a.sourceStartSec - b.sourceStartSec);
 }
 
@@ -122,7 +133,7 @@ export function comentariosEn(tramo, comentarios) {
  *
  * @returns {{tramo:object, origenSec:number}|null}
  */
-export function enPosicion(pista, segundo) {
+export function tramoEn(pista, segundo) {
     const tramos = (pista && pista.tramos) || [];
     if (!tramos.length) return null;
 

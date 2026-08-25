@@ -57,24 +57,36 @@ module.exports = async t => {
         t.eq(p.duracionSec, 15);
     });
 
+    t.test('la nota corregida pisa a la del marcador, sin perderla', () => {
+        const plan = planDeEjemplo();
+        plan[0].note = 'la del marcador';
+        const p = pista.construir(plan, { notas: { 0: { note: 'la corregida' } } });
+        // El overlay del reproductor y el panel leen el MISMO tramo: cuando cada
+        // vista resolvía la corrección por su cuenta, una mostraba la nota nueva
+        // y la otra la vieja.
+        t.eq(p.tramos[0].nota, 'la corregida');
+        t.eq(p.tramos[0].notaOriginal, 'la del marcador');
+        t.eq(p.tramos[1].nota, p.tramos[1].notaOriginal, 'sin corrección son la misma');
+    });
+
     t.test('sin bloques no hay nada que reproducir', () => {
         const p = pista.construir([]);
         t.eq(p.tramos.length, 0);
         t.eq(p.duracionSec, 0);
-        t.eq(pista.enPosicion(p, 0), null);
+        t.eq(pista.tramoEn(p, 0), null);
     });
 
     t.group('de la línea final al archivo');
 
     t.test('el principio es el principio del primer bloque', () => {
         const p = pista.construir(planDeEjemplo());
-        t.eq(pista.enPosicion(p, 0).origenSec, 10);
+        t.eq(pista.tramoEn(p, 0).origenSec, 10);
     });
 
     t.test('a mitad del segundo bloque se mira el momento correcto', () => {
         // 15 s del corte final = 5 s dentro del segundo bloque, que empieza a 100.
         const p = pista.construir(planDeEjemplo());
-        const donde = pista.enPosicion(p, 15);
+        const donde = pista.tramoEn(p, 15);
         t.eq(donde.origenSec, 105);
         t.eq(donde.tramo.blockIndex, 1);
     });
@@ -82,27 +94,27 @@ module.exports = async t => {
     t.test('el borde exacto entre dos bloques cae en el que empieza', () => {
         // Si cayera en el que termina, el reproductor saltaría dos veces.
         const p = pista.construir(planDeEjemplo());
-        const donde = pista.enPosicion(p, 10);
+        const donde = pista.tramoEn(p, 10);
         t.eq(donde.tramo.blockIndex, 1);
         t.eq(donde.origenSec, 100);
     });
 
     t.test('pasarse del final deja la aguja en el último bloque', () => {
         const p = pista.construir(planDeEjemplo());
-        const donde = pista.enPosicion(p, 9999);
+        const donde = pista.tramoEn(p, 9999);
         t.eq(donde.tramo.blockIndex, 2);
         t.eq(donde.origenSec, 305);
     });
 
     t.test('un tiempo negativo no busca antes del primer bloque', () => {
         const p = pista.construir(planDeEjemplo());
-        t.eq(pista.enPosicion(p, -30).origenSec, 10);
+        t.eq(pista.tramoEn(p, -30).origenSec, 10);
     });
 
     t.test('cada bloque sabe con qué cámara se ve', () => {
         const p = pista.construir(planDeEjemplo());
-        t.eq(pista.enPosicion(p, 15).tramo.camara, 1);
-        t.eq(pista.enPosicion(p, 41).tramo.camara, 0);
+        t.eq(pista.tramoEn(p, 15).tramo.camara, 1);
+        t.eq(pista.tramoEn(p, 41).tramo.camara, 0);
     });
 
     t.group('qué cámara le toca a cada bloque');
@@ -186,32 +198,32 @@ module.exports = async t => {
 
     t.test('encuentra los que caen dentro del tramo', () => {
         const p = pista.construir(planDeEjemplo());
-        t.eq(pista.comentariosEn(p.tramos[0], comentarios).length, 1);
-        t.eq(pista.comentariosEn(p.tramos[1], comentarios).length, 2);
-        t.eq(pista.comentariosEn(p.tramos[2], comentarios).length, 0, 'nada en el tercero');
+        t.eq(pista.comentariosEn(p.tramos[0].origenDesdeSec, p.tramos[0].origenHastaSec, comentarios).length, 1);
+        t.eq(pista.comentariosEn(p.tramos[1].origenDesdeSec, p.tramos[1].origenHastaSec, comentarios).length, 2);
+        t.eq(pista.comentariosEn(p.tramos[2].origenDesdeSec, p.tramos[2].origenHastaSec, comentarios).length, 0, 'nada en el tercero');
     });
 
     t.test('vienen en orden aunque se hayan escrito salteados', () => {
         const p = pista.construir(planDeEjemplo());
-        t.deep(pista.comentariosEn(p.tramos[1], comentarios).map(c => c.sourceStartSec), [110, 125]);
+        t.deep(pista.comentariosEn(p.tramos[1].origenDesdeSec, p.tramos[1].origenHastaSec, comentarios).map(c => c.sourceStartSec), [110, 125]);
     });
 
     t.test('uno sobre material descartado no aparece en ningún bloque', () => {
         const p = pista.construir(planDeEjemplo());
-        const total = p.tramos.reduce((n, t2) => n + pista.comentariosEn(t2, comentarios).length, 0);
+        const total = p.tramos.reduce((n, t2) => n + pista.comentariosEn(t2.origenDesdeSec, t2.origenHastaSec, comentarios).length, 0);
         t.eq(total, 3, 'el de 200s no cuelga de ninguno');
     });
 
     t.test('sin comentarios, o sin tramo, devuelve la lista vacía', () => {
         const p = pista.construir(planDeEjemplo());
-        t.deep(pista.comentariosEn(p.tramos[0], []), []);
-        t.deep(pista.comentariosEn(p.tramos[0], null), []);
-        t.deep(pista.comentariosEn(null, comentarios), []);
+        t.deep(pista.comentariosEn(p.tramos[0].origenDesdeSec, p.tramos[0].origenHastaSec, []), []);
+        t.deep(pista.comentariosEn(p.tramos[0].origenDesdeSec, p.tramos[0].origenHastaSec, null), []);
+        t.deep(pista.comentariosEn(0, 0, comentarios), [], "un tramo sin ancho no abarca nada");
     });
 
     t.test('los bordes del tramo cuentan como adentro', () => {
         const p = pista.construir(planDeEjemplo());
-        t.eq(pista.comentariosEn(p.tramos[0], [{ sourceStartSec: 10 }, { sourceStartSec: 20 }]).length, 2);
+        t.eq(pista.comentariosEn(p.tramos[0].origenDesdeSec, p.tramos[0].origenHastaSec, [{ sourceStartSec: 10 }, { sourceStartSec: 20 }]).length, 2);
     });
 
     t.group('avanzar de bloque en bloque');

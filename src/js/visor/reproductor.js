@@ -22,7 +22,7 @@
 import { $, toast } from '../chrome.js';
 import { esc, fmtClock } from '../formato.js';
 import { rev, cambio } from './estado.js';
-import { COLORES_DE_CAMARA, comentariosEn, construir, enPosicion, posicionDeBloque, seTermino, siguiente } from './pista.js';
+import { COLORES_DE_CAMARA, comentariosEn, construir, tramoEn, posicionDeBloque, seTermino, siguiente } from './pista.js';
 import { abrirLetra, cerrarLetra, seguir } from './panel-letra.js';
 
 /**
@@ -147,7 +147,7 @@ function prepararSiguiente(tramo) {
 
 /** Pone la aguja en un momento del corte final. */
 function ir(segundo, seguirReproduciendo) {
-    const donde = enPosicion(estado.pista, segundo);
+    const donde = tramoEn(estado.pista, segundo);
     if (!donde) return;
 
     estado.posicionSec = Math.max(0, Math.min(segundo, estado.pista.duracionSec));
@@ -296,7 +296,7 @@ function pintarBloques() {
     const comentarios = (rev.notas && rev.notas.comentarios) || [];
 
     for (const tramo of estado.pista.tramos) {
-        const conNota = comentariosEn(tramo, comentarios).length;
+        const conNota = comentariosEn(tramo.origenDesdeSec, tramo.origenHastaSec, comentarios).length;
         const revisar = tramo.confidence !== 'alta';
 
         const boton = document.createElement('button');
@@ -326,7 +326,11 @@ function pintarBloques() {
 
 /** Volver a dibujar la tira, para cuando cambia algo que ella marca. */
 export function refrescarBloques() {
-    if (estado.pista) pintarBloques();
+    if (!estado.pista) return;
+    pintarBloques();
+    // La nota del bloque también aparece en el overlay: si el editor la acaba
+    // de corregir en el panel, lo que se lee arriba del video tiene que ser eso.
+    pintarEstado();
 }
 
 /** Con qué se ve un bloque, dicho como lo diría alguien. */
@@ -390,7 +394,8 @@ export function abrirReproductor() {
     estado.pista = construir(rev.segments, {
         viewMap: rev.data && rev.data.cutplan ? rev.data.cutplan.viewMap : null,
         camaras: camaras.length,
-        vistaDelProfesor: VISTA_DEL_PROFESOR
+        vistaDelProfesor: VISTA_DEL_PROFESOR,
+        notas: rev.notas ? rev.notas.bloques : null
     });
 
     // El panel de al lado lee la misma pista: así el texto que se alumbra es
@@ -449,14 +454,9 @@ function teclas(evento) {
     const donde = evento.target;
     if (estaEscribiendo(donde)) return;
 
-    // La barra reproduce y pausa siempre, sin importar qué quedó con el foco. Es
-    // el atajo que más se usa y, si además hay que acordarse de dónde se hizo el
-    // último clic para saber si va a funcionar, deja de ser un atajo: lo que
-    // pasaba con el divisor era exactamente eso, la barra se perdía y la página
-    // hacía scroll. Las demás teclas sí le ceden el paso a lo que tenga el foco,
-    // porque las flechas ahí significan otra cosa.
-    if (evento.key !== ' ' && donde && donde.id === 'player-split') return;
-
+    // Quien quiera quedarse una tecla, que la pare: el divisor hace
+    // `stopPropagation` con las flechas que reparten el espacio y este oyente
+    // ni las ve. Así el reproductor no tiene que conocer a nadie por su id.
     const paso = evento.shiftKey ? 1 : 5;
     const acciones = {
         ' ': alternar,

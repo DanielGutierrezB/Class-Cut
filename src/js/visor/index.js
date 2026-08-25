@@ -15,6 +15,8 @@ import { renderScript, wireGuion } from './guion.js';
 import { abrirReproductor, cerrarReproductor, refrescarBloques, wireReproductor } from './reproductor.js';
 import { ajustarDivision, wireDivision } from './division.js';
 import { wireLetra } from './panel-letra.js';
+import { aireEn } from './letra.js';
+import { comentariosEn } from './pista.js';
 
 export async function openReview(id) {
     const target = id || (state.scan.classes.find(c => c.selected && c.alreadyProcessed) || {}).id;
@@ -89,20 +91,15 @@ function renderReview() {
 /** Cuánto aire muerto tiene un bloque, para avisarlo en la lista. */
 function aireDe(segment) {
     if (!segment.keep || !rev.data || !rev.data.silencios) return 0;
-    const dentro = rev.data.silencios.tramos.reduce((suma, t) => {
-        const desde = Math.max(t.desdeSec, segment.sourceStartSec);
-        const hasta = Math.min(t.hastaSec, segment.sourceEndSec);
-        return suma + Math.max(0, hasta - desde);
-    }, 0);
-    // Menos de dos segundos sumados es respirar entre frases.
-    return dentro >= 2 ? dentro : 0;
+    // El mínimo viene de la medición: por debajo de eso es respirar entre frases.
+    return aireEn(rev.data.silencios.tramos, segment.sourceStartSec, segment.sourceEndSec,
+        rev.data.silencios.minimoSec);
 }
 
 /** Cuántos comentarios escribió el editor dentro de un bloque. */
 function comentariosDe(segment) {
     const comentarios = (rev.notas && rev.notas.comentarios) || [];
-    return comentarios.filter(c =>
-        c.sourceStartSec >= segment.sourceStartSec && c.sourceStartSec <= segment.sourceEndSec).length;
+    return comentariosEn(segment.sourceStartSec, segment.sourceEndSec, comentarios).length;
 }
 
 function renderReviewList() {

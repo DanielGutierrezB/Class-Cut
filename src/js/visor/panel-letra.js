@@ -15,7 +15,7 @@
 
 import { $, toast } from '../chrome.js';
 import { rev, cambio } from './estado.js';
-import { repartir, enPosicion, anclaDe } from './letra.js';
+import { repartir, palabraEn, anclaDe } from './letra.js';
 import { COLORES_DE_CAMARA, comentariosEn } from './pista.js';
 
 const estado = {
@@ -39,18 +39,26 @@ function notas() {
     return rev.notas;
 }
 
-/** La nota que se va a exportar de un bloque: la corregida o la del marcador. */
+function tramoDe(bloque) {
+    return (rev.pista ? rev.pista.tramos : []).find(x => x.indice === bloque.indice) || null;
+}
+
+/**
+ * La nota que se va a exportar de un bloque. La efectiva ya viene resuelta en
+ * el tramo (`pista.construir` la calcula una vez para todas las vistas); acá
+ * solo se dice si está corregida, que es lo que el campo marca en verde.
+ */
 function notaDe(bloque) {
-    const propia = notas().bloques[bloque.blockIndex];
-    if (propia && propia.note) return { texto: propia.note, editada: true };
-    const tramo = (rev.pista ? rev.pista.tramos : []).find(x => x.indice === bloque.indice);
-    return { texto: (tramo && tramo.nota) || '', editada: false };
+    const tramo = tramoDe(bloque);
+    if (!tramo) return { texto: '', editada: false };
+    return { texto: tramo.nota || '', editada: tramo.nota !== tramo.notaOriginal };
 }
 
 /** Los comentarios que caen dentro de un bloque, por tiempo de grabación. */
 function comentariosDe(bloque) {
-    const tramo = (rev.pista ? rev.pista.tramos : []).find(x => x.indice === bloque.indice);
-    return comentariosEn(tramo, notas().comentarios);
+    const tramo = tramoDe(bloque);
+    if (!tramo) return [];
+    return comentariosEn(tramo.origenDesdeSec, tramo.origenHastaSec, notas().comentarios);
 }
 
 async function guardar() {
@@ -199,7 +207,7 @@ export function pintarLetra() {
  * pantalla se ve como un tirón cada vez que alguien habla rápido.
  */
 export function seguir(segundo) {
-    const donde = enPosicion(estado.bloques, segundo);
+    const donde = palabraEn(estado.bloques, segundo);
     const bloque = donde ? donde.bloque : -1;
     const palabra = donde ? donde.palabra : -1;
     if (bloque === estado.bloqueActivo && palabra === estado.palabraActiva) return;
@@ -329,8 +337,9 @@ async function confirmarComentario(texto) {
         const previo = notas().comentarios.find(c => c.id === estado.editando.id);
         if (previo) previo.comentario = limpio;
     } else {
+        // Sin id: lo acuña `engine/notas.js` al guardar, que es el único que
+        // los reparte. La respuesta vuelve con todo asignado y se repinta de ahí.
         notas().comentarios.push({
-            id: `c${Date.now()}`,
             sourceStartSec: ancla.sourceStartSec,
             sourceEndSec: ancla.sourceEndSec,
             texto: ancla.texto,
@@ -381,12 +390,16 @@ async function guardarNotaDeBloque(campo) {
     const indice = Number(campo.dataset.bloqueIndex);
     const texto = campo.textContent.trim();
     const tramo = (rev.pista ? rev.pista.tramos : []).find(t => t.blockIndex === indice);
-    const original = (tramo && tramo.nota) || '';
+    const original = (tramo && tramo.notaOriginal) || '';
 
     // Volver a dejarla como vino no es una corrección: se borra el override para
     // que la clase siga la nota del marcador si mañana se reprocesa.
     if (texto === original.trim()) delete notas().bloques[indice];
     else notas().bloques[indice] = { note: texto };
+
+    // La pista viva lleva la nota efectiva: sin esto, el overlay del reproductor
+    // y la tira seguirían mostrando la de antes hasta reabrir la pestaña.
+    if (tramo) tramo.nota = texto || original;
 
     if (await guardar()) {
         campo.classList.toggle('is-editada', Boolean(notas().bloques[indice]));

@@ -124,7 +124,7 @@ export function repartir(tramos, palabras, silencios) {
  *
  * @returns {{bloque:number, palabra:number}|null}
  */
-export function enPosicion(bloques, segundo) {
+export function palabraEn(bloques, segundo) {
     const lista = bloques || [];
     for (let b = 0; b < lista.length; b++) {
         const bloque = lista[b];
@@ -148,6 +148,27 @@ export function enPosicion(bloques, segundo) {
         return { bloque: bloque.indice, palabra: elegida };
     }
     return null;
+}
+
+/**
+ * Cuánto silencio cae dentro de un tramo de la grabación, sumado.
+ *
+ * Es la medida de "aire muerto" que la lista de bloques muestra como aviso. Por
+ * debajo del mínimo con el que se midieron las pausas no se reporta nada: eso
+ * es respirar entre frases, no aire.
+ *
+ * @param {Array} silencios tramos de `silencios.json`, en tiempo de grabación
+ * @param {number} desdeSec
+ * @param {number} hastaSec
+ * @param {number} minimoSec el `minimoSec` con el que se midieron
+ */
+export function aireEn(silencios, desdeSec, hastaSec, minimoSec) {
+    const suma = (silencios || []).reduce((total, s) => {
+        const desde = Math.max(s.desdeSec, desdeSec);
+        const hasta = Math.min(s.hastaSec, hastaSec);
+        return total + Math.max(0, hasta - desde);
+    }, 0);
+    return suma >= (minimoSec || 0) ? suma : 0;
 }
 
 /** El texto corrido de un bloque, para leerlo o copiarlo. */

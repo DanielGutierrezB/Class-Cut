@@ -150,12 +150,28 @@ module.exports = async t => {
         t.deep(bloques()[0].pausas, []);
     });
 
+    t.group('el aire muerto de un tramo');
+
+    t.test('suma solo lo que cae adentro, recortado al tramo', () => {
+        const silencios = [
+            { desdeSec: 5, hastaSec: 12 },   // entra a medias: 2s adentro
+            { desdeSec: 14, hastaSec: 17 },  // entero: 3s
+            { desdeSec: 40, hastaSec: 50 }   // afuera
+        ];
+        t.eq(letra.aireEn(silencios, 10, 20, 2), 5);
+    });
+
+    t.test('por debajo del mínimo es respirar, no aire', () => {
+        t.eq(letra.aireEn([{ desdeSec: 10, hastaSec: 11 }], 0, 100, 2), 0);
+        t.eq(letra.aireEn(null, 0, 100, 2), 0);
+    });
+
     t.group('qué palabra suena ahora');
 
     t.test('encuentra la palabra del momento', () => {
         const b = bloques();
-        t.eq(letra.enPosicion(b, 2.5).palabra, 1, '"qué", que arranca en el 2 del corte');
-        t.eq(letra.enPosicion(b, 2.5).bloque, 0);
+        t.eq(letra.palabraEn(b, 2.5).palabra, 1, '"qué", que arranca en el 2 del corte');
+        t.eq(letra.palabraEn(b, 2.5).bloque, 0);
     });
 
     t.test('justo en el corte manda el bloque que empieza', () => {
@@ -163,19 +179,19 @@ module.exports = async t => {
         // segundo. Al pararse en ese instante —abrir el reproductor en un
         // bloque cae exacto— alumbraba "tal", la última del bloque anterior.
         const b = bloques();
-        t.eq(letra.enPosicion(b, 10), null, 'el aire de entrada del segundo, no el final del primero');
-        t.eq(letra.enPosicion(b, 11).bloque, 1);
+        t.eq(letra.palabraEn(b, 10), null, 'el aire de entrada del segundo, no el final del primero');
+        t.eq(letra.palabraEn(b, 11).bloque, 1);
     });
 
     t.test('el final de la clase sigue cayendo en el último bloque', () => {
         // Al último no se le puede aplicar la misma regla: no hay siguiente que
         // se quede con el borde, y quedaría sin alumbrar nada al terminar.
-        t.eq(letra.enPosicion(bloques(), 40).bloque, 1);
+        t.eq(letra.palabraEn(bloques(), 40).bloque, 1);
     });
 
     t.test('en el aire antes de la primera palabra no alumbra nada', () => {
         // Alumbrar la primera sería decir que ya se está diciendo, y todavía no.
-        t.eq(letra.enPosicion(bloques(), 0.2), null);
+        t.eq(letra.palabraEn(bloques(), 0.2), null);
     });
 
     t.test('con palabras que se pisan, elige la última que arrancó', () => {
@@ -187,11 +203,11 @@ module.exports = async t => {
             { start: 12, end: 13, text: 'corta' }
         ];
         const b = letra.repartir(tramos, pisadas);
-        t.eq(b[0].palabras[letra.enPosicion(b, 2.5).palabra].texto, 'corta');
+        t.eq(b[0].palabras[letra.palabraEn(b, 2.5).palabra].texto, 'corta');
     });
 
     t.test('fuera de todo bloque no hay palabra', () => {
-        t.eq(letra.enPosicion(bloques(), 999), null);
+        t.eq(letra.palabraEn(bloques(), 999), null);
     });
 
     t.group('el ancla de un comentario');
