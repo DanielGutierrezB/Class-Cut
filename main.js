@@ -25,6 +25,7 @@ const waveform = require('./engine/waveform');
 const ollamaServer = require('./engine/ollama-server');
 const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
+const devShot = require('./dev-shot');
 
 let mainWindow = null;
 let currentRun = null;
@@ -100,79 +101,9 @@ function createWindow() {
 
     mainWindow.once('ready-to-show', () => mainWindow.show());
     mainWindow.loadFile('src/index.html');
-    mainWindow.webContents.once('did-finish-load', () => devShot());
-}
-
-function argValue(flag) {
-    const hit = process.argv.find(a => a.startsWith(`--${flag}=`));
-    return hit ? hit.slice(flag.length + 3) : null;
-}
-
-/**
- * Para iterar la interfaz sin abrir la app a mano:
- *   electron . --folder=/ruta/al/curso --shot=/tmp/class-cut.png --js='dev.abrirClase(id)'
- * Carga la carpeta, espera a que la tabla termine de medir, corre el JS que se le
- * pase, guarda el PNG y sale.
- *
- * Para atajos de teclado hay `--key=Space` (una tecla de verdad, con su acción
- * por defecto) y `--js-despues=` para mirar cómo quedó todo.
- */
-async function devShot() {
-    const shot = argValue('shot');
-    const folder = argValue('folder');
-    const extraJs = argValue('js');
-    if (!shot && !folder) return;
-
-    if (folder) {
-        await mainWindow.webContents.executeJavaScript(`dev.addFolder(${JSON.stringify(folder)})`);
-        await new Promise(r => setTimeout(r, 4000));
-    }
-    if (extraJs) {
-        // Sin esto, lo que el JS de prueba imprime se queda en la consola de la
-        // ventana y desde afuera solo queda mirar el PNG y opinar.
-        mainWindow.webContents.on('console-message', (_e, _nivel, texto) => console.log(texto));
-        const salida = await mainWindow.webContents.executeJavaScript(extraJs);
-        if (salida !== undefined) console.log(salida);
-        await new Promise(r => setTimeout(r, Number(argValue('wait')) || 400));
-    }
-
-    // Y `elemento.click()` tampoco mueve el foco como lo mueve el mouse, que es
-    // de dónde salen la mitad de los problemas con los atajos.
-    const click = argValue('click');
-    if (click) {
-        const [x, y] = click.split(',').map(Number);
-        mainWindow.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-        mainWindow.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
-        await new Promise(r => setTimeout(r, 300));
-    }
-
-    // Un atajo de teclado no se puede probar con `new KeyboardEvent`: un evento
-    // fabricado no arrastra la acción del navegador, así que el scroll de la
-    // barra espaciadora —que es justo lo que se quiere ver— nunca aparece.
-    const key = argValue('key');
-    if (key) {
-        mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
-        mainWindow.webContents.sendInputEvent({ type: 'char', keyCode: key });
-        mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
-        await new Promise(r => setTimeout(r, 500));
-        const despues = argValue('js-despues');
-        if (despues) {
-            const salida = await mainWindow.webContents.executeJavaScript(despues);
-            if (salida !== undefined) console.log(salida);
-        }
-    }
-
-    if (!shot) return;
-
-    await new Promise(r => setTimeout(r, 500));
-    try {
-        const image = await mainWindow.webContents.capturePage();
-        fs.writeFileSync(shot, image.toPNG());
-        console.log('captura:', shot);
-    } catch (e) {
-        console.error('no se pudo capturar:', e.message);
-    }
-    app.quit();
+    // El arnés de desarrollo (capturas, JS inyectado) vive en `dev-shot.js` y
+    // sin sus flags no hace nada.
+    mainWindow.webContents.once('did-finish-load', () => devShot.correr(mainWindow));
 }
 
 // Un fallo suelto no puede dejar la app viva pero muda: se registra y sigue.
@@ -367,7 +298,10 @@ ipcMain.handle('load-review', (event, { id, buckets }) => {
     const data = review.loadReview({ root: lastScan.root, cls, buckets });
     if (data.ok) {
         // El reproductor pide los videos por `clase://`, así que las rutas de
-        // esta clase quedan habilitadas al abrirla y no antes.
+        // esta clase quedan habilitadas al abrirla y no antes. Y SOLO las de
+        // esta: sin el borrón, cada clase visitada dejaba las suyas servibles
+        // para el resto de la sesión y la lista solo sabía crecer.
+        mediaPermitida.clear();
         const urls = permitirMedia(data.cameras.map(c => c.path));
         data.cameras = data.cameras.map((c, i) => ({ index: c.index, name: c.name, url: urls[i] }));
     }

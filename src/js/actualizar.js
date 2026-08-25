@@ -158,26 +158,32 @@ async function descargar() {
  * estados y ninguno comparte controles con otro, así que retocar sería más
  * código para que quede igual.
  */
+/** Abre el modal firmándolo, para poder reconocerlo después. */
+function abrir(titulo, html) {
+    openModal(titulo, html);
+    $('modal').dataset.dueno = 'actualizar';
+}
+
 function abrirVentana() {
     if (descargado && disponible) {
-        openModal('Actualizar Class Cut', cuerpoDescargado());
+        abrir('Actualizar Class Cut', cuerpoDescargado());
         $('update-open').onclick = abrirInstalador;
         return;
     }
     if (disponible) {
-        openModal('Actualizar Class Cut', cuerpoDisponible());
+        abrir('Actualizar Class Cut', cuerpoDisponible());
         $('update-go').onclick = descargar;
         $('update-stop').onclick = () => window.cc.updateCancel();
         return;
     }
-    openModal('Class Cut', cuerpoAlDia());
+    abrir('Class Cut', cuerpoAlDia());
     $('update-recheck').onclick = () => buscar(true);
     if (!ultimaConsulta && !buscando) buscar(true);
 }
 
 /** ¿La ventana abierta es esta? Para no repintar encima de otra cosa. */
 function ventanaAbierta() {
-    return !$('modal').hidden && $('modal-body').querySelector('.update-lead');
+    return !$('modal').hidden && $('modal').dataset.dueno === 'actualizar';
 }
 
 /**
