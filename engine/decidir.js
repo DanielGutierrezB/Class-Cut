@@ -19,7 +19,9 @@
 
 const align = require('./align');
 const cutRefine = require('./cut-refine');
+const repeticiones = require('./repeticiones');
 const coherence = require('./coherence');
+const repasar = require('./repasar');
 
 /**
  * @param {object} params
@@ -34,7 +36,7 @@ const coherence = require('./coherence');
 async function decidirCortes(params) {
     const { cls, words, wav, ai, signal } = params;
     const notify = (stage, info) => { if (params.onStage) params.onStage(stage, info || {}); };
-    const options = { fps: cls.fps || 30 };
+    const options = { fps: cls.fps || 30, ...(params.options || {}) };
     const warnings = [];
 
     notify('alinear', {});
@@ -68,6 +70,24 @@ async function decidirCortes(params) {
         warnings.push({ code: 'afinado_fallo', message: `No se pudieron afinar los bordes: ${err.message}` });
     }
 
+    // Va después de afinar y antes de leer, y las dos cosas importan. Después,
+    // porque afinar ya movió los bordes con las órdenes del CD y muchas
+    // repeticiones desaparecen ahí solas; buscarlas antes sería arreglar lo que
+    // ya se iba a arreglar. Y antes de leer, porque si no la lectura reporta como
+    // problema pendiente algo que se puede quitar sin preguntarle a nadie.
+    notify('despegar', {});
+    try {
+        const quitadas = repeticiones.quitarRepeticiones({ alignResult, words, wav, options });
+        for (const h of quitadas.hallazgos.filter(x => x.accion === 'no se pudo')) {
+            warnings.push({
+                code: 'repetido',
+                message: `Bloque ${h.bloque + 1}: dice lo mismo que el ${h.contra + 1} y no se pudo recortar solo.`
+            });
+        }
+    } catch (err) {
+        warnings.push({ code: 'repetido_fallo', message: `No se pudieron quitar las repeticiones: ${err.message}` });
+    }
+
     // Un bloque puede estar perfecto y la clase entera no cerrar, así que esto se
     // hace sobre el resultado y no sobre cada bloque por separado.
     notify('revisar', {});
@@ -79,11 +99,32 @@ async function decidirCortes(params) {
                 percent: Math.round((info.chunk / Math.max(1, info.total)) * 100)
             })
         });
-        for (const finding of review.findings.filter(f => f.gravedad === 'alta')) {
-            warnings.push({ code: 'coherencia', message: `Bloque ${finding.bloque}: ${finding.detalle}` });
-        }
     } catch (err) {
         warnings.push({ code: 'revision_fallo', message: `No se pudo revisar el guion: ${err.message}` });
+    }
+
+    // Antes de avisar, intentar. Un hallazgo que la máquina puede arreglar sola
+    // no es un hallazgo, es una tarea que no se hizo: se arregla lo que el
+    // transcript permite y se vuelve a leer la clase que quedó, para que lo que
+    // llegue al editor sea lo que de verdad sigue sin cerrar.
+    if (review && options.repaso !== 'no') {
+        notify('repasar', {});
+        try {
+            const repaso = await repasar.repasar({
+                alignResult, review, words, wav, options, ai, signal,
+                onProgress: () => notify('repasar', { fase: 'releer' })
+            });
+            review = repaso.review;
+            alignResult.repaso = repaso.stats;
+        } catch (err) {
+            warnings.push({ code: 'repaso_fallo', message: `No se pudo repasar el guion: ${err.message}` });
+        }
+    }
+
+    if (review) {
+        for (const finding of review.findings.filter(f => f.gravedad === 'alta' && !f.corregido)) {
+            warnings.push({ code: 'coherencia', message: `Bloque ${finding.bloque}: ${finding.detalle}` });
+        }
     }
 
     return { alignResult, review, warnings };

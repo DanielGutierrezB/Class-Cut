@@ -225,12 +225,25 @@ function anchorEdge(params) {
         return edge;
     }
 
+    // Una coincidencia que cae más lejos que `maxShiftSec` no es evidencia de
+    // nada. Cuando el CD repite la frase toma tras toma, el texto empareja igual
+    // de bien en todas y gana la que puntúe una milésima más, esté donde esté;
+    // dónde puso el marcador sí distingue de qué toma habla. En el bloque 13 de
+    // la clase 13 la frase se dice trece veces: la buena estaba a 2 s con 0.83 y
+    // el ancla se fue a una de 1.00 a 196 s, con lo que el bloque pasó de los 10 s
+    // que marcó el CD a 3.4 minutos de tomas falsas.
+    if (match.tooFar) {
+        edge.reason = `${match.reason}: se queda donde lo dejó el CD.`;
+        return edge;
+    }
+
     edge.timeSec = match.time;
     edge.anchored = true;
     edge.decidedBy = 'nota';
-    edge.confidence = match.score >= opt(options, 'autoScore') && !match.ambiguous
-        ? CONFIDENCE.alta
-        : CONFIDENCE.media;
+    // `confident` ya junta puntaje, ambigüedad y distancia: recalcularlo acá fue
+    // justo lo que dejó el bloque 13 en confianza alta pese a estar a 196 s, y
+    // por alta nadie volvió a mirarlo.
+    edge.confidence = match.confident ? CONFIDENCE.alta : CONFIDENCE.media;
     return edge;
 }
 

@@ -69,6 +69,50 @@ module.exports = function (t) {
         t.eq(transcribe.collapseLoops(words).words.length, 3);
     });
 
+    t.test('el bucle de frase también se colapsa', () => {
+        // El caso real de la clase 4: Whisper rellenó 27 segundos de silencio con
+        // los créditos de un subtitulador, cuarenta y cinco veces seguidas.
+        const words = [];
+        for (let i = 0; i < 45; i++) {
+            words.push({ start: i * 3, end: i * 3 + 1, text: 'Andrea' });
+            words.push({ start: i * 3 + 1, end: i * 3 + 2, text: 'Oroz' });
+            words.push({ start: i * 3 + 2, end: i * 3 + 3, text: 'Sincronización' });
+        }
+        const result = transcribe.collapseLoops(words);
+        t.eq(result.words.length, 3, 'sobrevive una vuelta');
+        t.eq(result.words.map(w => w.text).join(' '), 'Andrea Oroz Sincronización');
+        t.eq(result.removed, 132);
+    });
+
+    t.test('el tiempo de un bucle de frase tampoco desaparece', () => {
+        const words = [];
+        for (let i = 0; i < 10; i++) {
+            words.push({ start: i * 2, end: i * 2 + 1, text: 'muchas' });
+            words.push({ start: i * 2 + 1, end: i * 2 + 2, text: 'gracias' });
+        }
+        const result = transcribe.collapseLoops(words);
+        t.eq(result.words[result.words.length - 1].end, 20, 'el último absorbe el final');
+    });
+
+    t.test('una frase dicha dos veces no es un bucle', () => {
+        // El profesor repite para enfatizar: eso se dijo y tiene que quedar.
+        const words = [];
+        for (let i = 0; i < 2; i++) {
+            words.push({ start: i * 2, end: i * 2 + 1, text: 'muy' });
+            words.push({ start: i * 2 + 1, end: i * 2 + 2, text: 'importante' });
+        }
+        words.push({ start: 4, end: 5, text: 'esto.' });
+        t.eq(transcribe.collapseLoops(words).words.length, 5);
+    });
+
+    t.test('la palabra suelta repetida sigue dejando tres, no una', () => {
+        // Sin esto, el detector de frases vería un bucle de "sí sí" y dejaría dos:
+        // los dos casos existen y cada uno tiene su regla.
+        const words = [];
+        for (let i = 0; i < 20; i++) words.push({ start: i, end: i + 0.5, text: 'sí' });
+        t.eq(transcribe.collapseLoops(words).words.length, transcribe.MAX_REPEATS);
+    });
+
     t.test('la puntuación no engaña al detector de bucles', () => {
         const words = [];
         for (let i = 0; i < 12; i++) words.push({ start: i, end: i + 0.4, text: i % 2 ? 'Gracias.' : 'gracias,' });
@@ -109,7 +153,7 @@ module.exports = function (t) {
         return {
             version: transcribe.TRANSCRIPT_VERSION,
             source,
-            engine: { tool: 'whisper-cli', model: 'ggml-large-v3-turbo.bin', vad: true },
+            engine: { tool: 'whisper-cli', model: 'ggml-large-v3-turbo.bin', vad: false },
             words: [{ start: 0, end: 1, text: 'hola' }],
             ...(overrides || {})
         };
@@ -131,10 +175,12 @@ module.exports = function (t) {
         t.eq(transcribe.isUsable(transcriptFor(source, { version: 0 }), source), false);
     });
 
-    t.test('no sirve uno hecho sin VAD', () => {
+    t.test('no sirve uno hecho con VAD', () => {
+        // Los de antes se hacían con VAD, que arruinaba los tiempos de cada
+        // palabra. Hay que rehacerlos, no darlos por buenos.
         const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
-        const sinVad = transcriptFor(source, { engine: { tool: 'whisper-cli', vad: false } });
-        t.eq(transcribe.isUsable(sinVad, source), false);
+        const conVad = transcriptFor(source, { engine: { tool: 'whisper-cli', vad: true } });
+        t.eq(transcribe.isUsable(conVad, source), false);
     });
 
     t.test('no sirve uno vacío (una corrida cancelada no puede pasar por buena)', () => {

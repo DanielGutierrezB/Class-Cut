@@ -1,0 +1,115 @@
+'use strict';
+/**
+ * medir-cortes.js — Los defectos de los cortes, contados sobre el curso entero.
+ *
+ * Es la vara del plan "Cortes con criterio": antes de tocar nada, el curso tenía
+ * 66 bloques terminando con habla del director, 103 con una frase colgando, 7
+ * arrancando con un conector huérfano, 2 cortados a mitad de palabra y 2
+ * repitiendo el bloque anterior. Esto vuelve a medir lo mismo para poder decir
+ * si el trabajo sirvió, en vez de mirar un XML y confiar.
+ *
+ * Mide sobre los artefactos del Backup, no reprocesando: lo que se juzga es lo
+ * que quedó en el disco, que es lo que el editor va a importar.
+ *
+ *   node tools/medir-cortes.js "/ruta/al/curso" [--detalle]
+ */
+
+const fs = require('fs');
+const path = require('path');
+const defectos = require('./defectos');
+
+const root = process.argv[2];
+const detalle = process.argv.includes('--detalle');
+
+if (!root) {
+    console.error('Falta la carpeta del curso.');
+    process.exit(1);
+}
+
+const baseline = {
+    chatter: 66,
+    colgando: 103,
+    conector: 7,
+    mitadPalabra: 2,
+    repetido: 2,
+    total: 174
+};
+
+function backupDir() {
+    const dir = path.join(root, 'The Cutter', 'Backup');
+    if (!fs.existsSync(dir)) {
+        console.error(`No hay Backup en ${dir}. Procesá el curso primero.`);
+        process.exit(1);
+    }
+    return dir;
+}
+
+/** Las clases del Backup, cada una con su alineado y su transcript. */
+function clases() {
+    const dir = backupDir();
+    return fs.readdirSync(dir)
+        .filter(f => f.endsWith('_align.json'))
+        .sort()
+        .map(file => {
+            const name = file.replace(/_align\.json$/, '');
+            const transcriptPath = path.join(dir, `${name}_transcript.json`);
+            if (!fs.existsSync(transcriptPath)) return null;
+            return {
+                name,
+                align: JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')),
+                words: JSON.parse(fs.readFileSync(transcriptPath, 'utf8')).words || []
+            };
+        })
+        .filter(Boolean);
+}
+
+function fmt(actual, antes) {
+    const pct = n => `${Math.round((n / baseline.total) * 100)}%`;
+    const flecha = actual < antes ? '↓' : (actual > antes ? '↑' : '=');
+    return `${String(antes).padStart(4)} → ${String(actual).padStart(4)} ${flecha}  (${pct(antes)} → ${pct(actual)})`;
+}
+
+// De la definición, no a mano: cada vez que se agregaba un defecto había que
+// acordarse de sumarlo acá, y si no, la medición se caía al encontrarlo.
+const cuenta = Object.fromEntries(defectos.TIPOS.map(t => [t, 0]));
+const ejemplos = Object.fromEntries(defectos.TIPOS.map(t => [t, []]));
+let total = 0;
+
+for (const cls of clases()) {
+    let anterior = null;
+    for (const block of cls.align.blocks || []) {
+        total++;
+        for (const [tipo, texto] of defectos.revisarBloque(cls.words, block, anterior)) {
+            cuenta[tipo]++;
+            ejemplos[tipo].push(`  clase ${cls.name.slice(0, 2)} bloque ${block.index + 1}: ${texto}`);
+        }
+        anterior = block;
+    }
+}
+
+console.log(`\n${total} bloques medidos · vara: los ${baseline.total} de antes de "Cortes con criterio"\n`);
+console.log(`  termina con habla del director   ${fmt(cuenta.chatter, baseline.chatter)}`);
+console.log(`  abre con el conteo de la toma    ${fmt(cuenta.conteo, baseline.conteo || 0)}`);
+console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.colgando)}`);
+console.log(`  arranca con conector huérfano    ${fmt(cuenta.conector, baseline.conector)}`);
+console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}`);
+console.log(`  repite el bloque anterior        ${fmt(cuenta.repetido, baseline.repetido)}`);
+
+const objetivos = [
+    ['0 bloques terminando en chatter', cuenta.chatter === 0],
+    ['0 cortes a mitad de palabra', cuenta.mitadPalabra === 0],
+    ['finales a mitad de frase en una decena', cuenta.colgando <= 15]
+];
+console.log('\nobjetivos del plan:');
+for (const [texto, ok] of objetivos) console.log(`  ${ok ? '✓' : '✗'} ${texto}`);
+
+if (detalle) {
+    for (const [tipo, lista] of Object.entries(ejemplos)) {
+        if (!lista.length) continue;
+        console.log(`\n${tipo} (${lista.length}):`);
+        console.log(lista.slice(0, 20).join('\n'));
+        if (lista.length > 20) console.log(`  … y ${lista.length - 20} más`);
+    }
+}
+
+process.exit(objetivos.every(([, ok]) => ok) ? 0 : 1);

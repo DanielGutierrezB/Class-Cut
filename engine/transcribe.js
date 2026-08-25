@@ -19,7 +19,7 @@
  * exacto del corte lo mide después `audio-onset` sobre el WAV.
  */
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -27,13 +27,26 @@ const path = require('path');
 const paths = require('./paths');
 const workspace = require('./workspace');
 const onset = require('./vendor/audio-onset');
+const silencios = require('./silencios');
 
 // 2: las palabras se guardan como {start, end, text} y ya vienen corregidas
-// contra el audio (`audio-onset.alignWords`).
-const TRANSCRIPT_VERSION = 2;
-// Una frase repetida idéntica más veces que esto es un bucle de whisper en un
+//    contra el audio (`audio-onset.alignWords`).
+// 3: sin VAD, que arruinaba los tiempos de cada palabra, y leyendo el audio ya
+//    convertido a 16 kHz mono, que es como Whisper lo quiere.
+const TRANSCRIPT_VERSION = 3;
+// Una palabra repetida idéntica más veces que esto es un bucle de whisper en un
 // silencio, no algo que alguien dijo.
 const MAX_REPEATS = 3;
+
+// Y el bucle también viene en frases. Whisper rellena los silencios largos con
+// créditos de subtítulos aprendidos de su entrenamiento: en la clase 4 del curso
+// escribió "Andrea Oroz Sincronización" CUARENTA Y CINCO veces seguidas, 134 de
+// sus 4.056 palabras, sobre un tramo donde el profesor no dice nada porque está
+// trabajando en pantalla. Ninguna regla de palabra suelta lo ve —"Andrea" nunca
+// va seguida de "Andrea"— y lo que llega a la lectura del guion es una clase que
+// dice cinco veces el nombre de un subtitulador.
+const MAX_FRASE = 6;      // hasta cuántas palabras puede tener la frase que da vueltas
+const VUELTAS_BUCLE = 3;  // cuántas vueltas hacen falta para llamarlo bucle
 
 class TranscribeError extends Error {
     constructor(message, code) {
@@ -55,13 +68,7 @@ function checkTools() {
             'No encontré el modelo de Whisper. Mirá Diagnóstico para ver dónde lo busqué.',
             'sin_modelo');
     }
-    const vad = paths.vadModel();
-    if (!vad.path) {
-        throw new TranscribeError(
-            'No encontré el modelo de VAD. Sin él los tiempos de las palabras no sirven para alinear.',
-            'sin_vad');
-    }
-    return { cli: cli.path, model: model.path, vad: vad.path, modelName: model.name };
+    return { cli: cli.path, model: model.path, modelName: model.name };
 }
 
 /**
@@ -86,11 +93,25 @@ function round(n) {
 }
 
 /**
- * Whisper entra en bucle en los silencios y repite la misma palabra o frase
- * decenas de veces. Se dejan las primeras y se tiran las demás: como cada
+ * Whisper entra en bucle en los silencios y repite la misma palabra o la misma
+ * frase decenas de veces. Se dejan las primeras y se tiran las demás: como cada
  * repetición ocupa tiempo, dejarlas correría el resto del transcript.
+ *
+ * Van dos pasadas, y en este orden. Primero las frases, porque una palabra
+ * suelta repetida es también una "frase de una palabra" y si se colapsara antes
+ * dejaría al detector de frases sin nada que ver. Después la palabra suelta.
  */
 function collapseLoops(words) {
+    const deFrases = colapsarFrases(words);
+    const dePalabras = colapsarPalabras(deFrases.words);
+    return {
+        words: dePalabras.words,
+        removed: deFrases.removed + dePalabras.removed,
+        phraseLoops: deFrases.bucles
+    };
+}
+
+function colapsarPalabras(words) {
     const out = [];
     let run = 0;
     let removed = 0;
@@ -108,6 +129,71 @@ function collapseLoops(words) {
         out.push(word);
     }
     return { words: out, removed };
+}
+
+/**
+ * ¿Empieza en `i` una frase que se repite a sí misma?
+ *
+ * Se prueba de la frase más corta a la más larga para dar con el período de
+ * verdad: "Andrea Oroz Sincronización" repetida también hace que la frase de
+ * seis palabras se repita, y quedarse con esa dejaría el doble de basura.
+ *
+ * @returns {{largo: number, vueltas: number}|null}
+ */
+function bucleEn(words, i) {
+    for (let largo = 2; largo <= MAX_FRASE; largo++) {
+        if (i + largo * VUELTAS_BUCLE > words.length) break;
+
+        // Una frase hecha de la misma palabra repetida no es cosa de esta
+        // pasada: la resuelve mejor la de palabra suelta, que deja tres y no una.
+        const primera = norm(words[i].text);
+        let variada = false;
+        for (let k = 1; k < largo; k++) {
+            if (norm(words[i + k].text) !== primera) { variada = true; break; }
+        }
+        if (!variada) continue;
+
+        let vueltas = 1;
+        while (mismaFrase(words, i, i + vueltas * largo, largo)) vueltas++;
+        if (vueltas >= VUELTAS_BUCLE) return { largo, vueltas };
+    }
+    return null;
+}
+
+function mismaFrase(words, a, b, largo) {
+    if (b + largo > words.length) return false;
+    for (let k = 0; k < largo; k++) {
+        if (norm(words[a + k].text) !== norm(words[b + k].text)) return false;
+    }
+    return true;
+}
+
+/**
+ * De un bucle de frase sobrevive UNA vuelta, no tres como en la palabra suelta.
+ * Nadie repite tres palabras seguidas idénticas cuatro veces; cuando pasa, es
+ * relleno de silencio, y dejar tres copias es dejar tres veces el ruido.
+ */
+function colapsarFrases(words) {
+    const out = [];
+    let removed = 0;
+    let bucles = 0;
+    let i = 0;
+
+    while (i < words.length) {
+        const bucle = bucleEn(words, i);
+        if (!bucle) { out.push(words[i]); i++; continue; }
+
+        const hasta = i + bucle.largo * bucle.vueltas;
+        for (let k = 0; k < bucle.largo; k++) out.push(words[i + k]);
+        // El tiempo del bucle no desaparece de la línea de tiempo: se lo queda la
+        // última palabra que sobrevive, y el silencio sigue estando donde estaba.
+        const ultima = out[out.length - 1];
+        ultima.end = Math.max(ultima.end, words[hasta - 1].end);
+        removed += bucle.largo * (bucle.vueltas - 1);
+        bucles++;
+        i = hasta;
+    }
+    return { words: out, removed, bucles };
 }
 
 function norm(text) {
@@ -139,6 +225,42 @@ function segmentsFromWords(words) {
 }
 
 /**
+ * Deja el audio como Whisper lo quiere: 16 kHz, mono, 16 bits.
+ *
+ * El Live-Mix del Rodecaster viene en 48 kHz estéreo de 24 bits. Whisper lo
+ * acepta sin quejarse y lo convierte por dentro, pero tarda cuatro veces más:
+ * medido sobre una clase de 42 minutos, 334 s leyendo el original contra 68 s
+ * leyendo el convertido, y la conversión cuesta 12 s. El resultado es el mismo
+ * —recortando cuarenta segundos de las dos fuentes, las palabras salen con menos
+ * de 20 ms de diferencia—, así que lo único que cambia es el reloj.
+ *
+ * También le saca al motor la responsabilidad de lidiar con lo que traiga cada
+ * grabadora: 96 kHz, coma flotante o cuatro canales entran todos por acá.
+ *
+ * @returns {string|null} el temporal, o null si no se pudo (se sigue con el original)
+ */
+function aTasaDeWhisper(wavPath) {
+    const ffmpeg = paths.ffmpeg();
+    if (!ffmpeg || !ffmpeg.path) return null;
+
+    const destino = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'classcut-16k-')), 'audio.wav');
+    const r = spawnSync(ffmpeg.path, [
+        '-v', 'error', '-y', '-i', wavPath,
+        '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+        destino
+    ], { encoding: 'utf8' });
+
+    if (r.status !== 0 || !fs.existsSync(destino)) return null;
+    return destino;
+}
+
+/** Borra el temporal y su carpeta, sin hacer ruido si ya no están. */
+function tirar(temporal) {
+    if (!temporal) return;
+    try { fs.rmSync(path.dirname(temporal), { recursive: true, force: true }); } catch (e) { /* da igual */ }
+}
+
+/**
  * Corre whisper-cli sobre un WAV. Devuelve el transcript ya normalizado.
  * @param {object} options { language, onProgress, signal }
  */
@@ -147,6 +269,19 @@ function runWhisper(wavPath, options) {
     const tools = checkTools();
     const outBase = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'classcut-stt-')), 'out');
 
+    // Sin `--vad` a propósito. El VAD recorta el audio a los pedazos con voz y
+    // después remapea los tiempos al reloj original, y ese remapeo los arruina:
+    // sobre una clase entera deja 788 palabras con una duración de exactamente
+    // 0,10 s y 540 que empiezan antes de que termine la anterior, contra 111 y
+    // CERO sin él. Eso se ve en el panel como palabras que se atropellan y otra
+    // que se queda clavada, que es justo lo que hay que poder leer para validar
+    // un corte. Además se come habla real: en una clase perdió 847 palabras,
+    // entre ellas la charla del director ("Perdón, pausa. Me gustaría…"), que es
+    // lo que el recorte de muletillas necesita oír. Y no era más rápido.
+    //
+    // Lo que el VAD sí evitaba —que Whisper alucine sobre el silencio, típico
+    // "sí, sí, sí…" doce veces— ya lo tapaba `collapseLoops`, que colapsa la
+    // repetición y no depende de estimar dónde hay voz.
     const args = [
         '-m', tools.model,
         '-f', wavPath,
@@ -154,8 +289,6 @@ function runWhisper(wavPath, options) {
         '-oj',
         '-ml', '1',
         '-sow',
-        '--vad',
-        '-vm', tools.vad,
         '-of', outBase,
         '-np',
         '-pp'
@@ -252,11 +385,19 @@ async function transcribeClass(params) {
         if (isUsable(cached, source)) return { ...cached, fromCache: true };
     }
 
-    const result = await runWhisper(wavPath, {
-        language: params.language,
-        onProgress: params.onProgress,
-        signal: params.signal
-    });
+    // Whisper lee el convertido; todo lo demás mira el original, que es el que
+    // manda para los tiempos y para la onda que se dibuja.
+    const paraWhisper = aTasaDeWhisper(wavPath);
+    let result;
+    try {
+        result = await runWhisper(paraWhisper || wavPath, {
+            language: params.language,
+            onProgress: params.onProgress,
+            signal: params.signal
+        });
+    } finally {
+        tirar(paraWhisper);
+    }
 
     // Whisper acierta los finales de palabra y adelanta los arranques después de
     // un silencio (le atribuye a la primera palabra el silencio que la precede).
@@ -273,6 +414,16 @@ async function transcribeClass(params) {
         audioAlign = aligned.stats;
     }
 
+    // Dónde no se dice nada, que el visor lo muestra y así no vuelve a leer el
+    // audio. Va acá y no en el visor porque necesita las palabras: el pico del
+    // audio solo no distingue un silencio de la voz del director hablando lejos
+    // del micrófono, que mide exactamente igual. Y va DESPUÉS de corregirlas,
+    // para que las pausas se recorten contra los mismos tiempos que se guardan.
+    workspace.writeJson(
+        workspace.artifact(root, sequenceName, 'silencios'),
+        silencios.deLaClase(wavPath, { palabras: result.words })
+    );
+
     const transcript = {
         version: TRANSCRIPT_VERSION,
         createdAt: new Date().toISOString(),
@@ -281,7 +432,7 @@ async function transcribeClass(params) {
         engine: {
             tool: 'whisper-cli',
             model: result.model,
-            vad: true,
+            vad: false,
             language: result.language,
             audioAligned: Boolean(audioAlign)
         },
@@ -308,7 +459,7 @@ async function transcribeClass(params) {
 function isUsable(cached, source) {
     if (!cached || cached.version !== TRANSCRIPT_VERSION) return false;
     if (!Array.isArray(cached.words) || !cached.words.length) return false;
-    if (!cached.engine || cached.engine.vad !== true) return false;
+    if (!cached.engine || cached.engine.vad !== false) return false;
     return workspace.sameFingerprint(cached.source, source);
 }
 

@@ -14,12 +14,50 @@
 
 const DEFAULTS = {
     temperature: 0.2,
+    // La misma clase tiene que dar el mismo corte. Sin semilla no lo daba: dos
+    // corridas seguidas sobre los mismos archivos leían la clase 13 y una
+    // encontraba seis cosas y la otra nueve, con el mismo modelo y el mismo
+    // transcript. Para quien edita eso es peor que un fallo —reprocesar deja de
+    // ser repetir y pasa a ser tirar otra vez el dado—, y además hace imposible
+    // medir si un cambio mejoró algo o le tocó una corrida buena.
+    //
+    // El número da igual; que sea siempre el mismo, no.
+    seed: 7,
     numPredict: 400,
     timeoutMs: 120000,
     // El modelo grande tarda en cargarse en memoria; mantenerlo vivo entre
     // llamadas es la diferencia entre 3 s y 30 s por bloque.
     keepAlive: '10m'
 };
+
+// Cuánta ventana pedirle a Ollama, en tokens.
+//
+// Esto no se fija en un número: se calcula de lo que mide el prompt. Ollama, si
+// el prompt no le entra, no falla —tira el principio y contesta igual—, así que
+// un prompt que se cayó a la mitad se ve idéntico a uno que entró entero. Y
+// pedir un número fijo tampoco sirve: medido con `tools/medir-contexto.js`, el
+// default de Ollama aguanta ~20k tokens, o sea que fijar 16384 BAJA el techo en
+// vez de subirlo. Los dos modelos que usamos declaran 262144 de arquitectura, así
+// que el límite real lo pone la memoria, no el modelo: se pide lo que hace falta.
+const VENTANA = {
+    // Whisper en español da alrededor de 3.5 caracteres por token. Se divide por
+    // 3 a propósito: pasarse de ventana cuesta un poco de memoria, quedarse corto
+    // cuesta que el modelo lea medio prompt sin que nadie se entere.
+    charsPorToken: 3,
+    minima: 4096,
+    maxima: 65536,
+    // Lo que ocupan las plantillas de chat y el margen del cálculo de arriba.
+    holgura: 512
+};
+
+function ventanaPara(system, prompt, numPredict) {
+    const chars = String(system || '').length + String(prompt || '').length;
+    const necesita = Math.ceil(chars / VENTANA.charsPorToken) + (numPredict || 0) + VENTANA.holgura;
+    // A múltiplos de 2048: pedir 9973 y 9974 hace que Ollama reserve dos caches
+    // distintos y recargue el modelo entre una consulta y la siguiente.
+    const redondo = Math.ceil(necesita / 2048) * 2048;
+    return Math.min(VENTANA.maxima, Math.max(VENTANA.minima, redondo));
+}
 
 /**
  * Un cliente atado a UN servidor y UN modelo.
@@ -80,6 +118,7 @@ async function probe(config) {
  */
 async function ask(config) {
     const params = config;
+    const numPredict = params.numPredict || config.numPredict;
     const body = {
         model: config.model,
         messages: [
@@ -94,7 +133,9 @@ async function ask(config) {
         think: false,
         options: {
             temperature: config.temperature,
-            num_predict: params.numPredict || config.numPredict
+            seed: config.seed,
+            num_predict: numPredict,
+            num_ctx: params.numCtx || ventanaPara(params.system, params.prompt, numPredict)
         }
     };
 
@@ -155,4 +196,4 @@ function parseJson(text) {
     return null;
 }
 
-module.exports = { cliente, ask, probe, parseJson, DEFAULTS };
+module.exports = { cliente, ask, probe, parseJson, ventanaPara, DEFAULTS, VENTANA };

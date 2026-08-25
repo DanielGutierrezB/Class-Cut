@@ -94,12 +94,17 @@ function localFindings(script) {
     for (let i = 0; i < script.blocks.length; i++) {
         const block = script.blocks[i];
 
+        // Sin habla adentro no es necesariamente un fallo: el CD marca tramos en
+        // los que el profesor trabaja en pantalla sin narrar, y son clase igual.
+        // Se dice, para que quien edita lo confirme, pero no como problema: con
+        // gravedad alta se convertía en un aviso de la corrida y mandaba a mirar
+        // un bloque que estaba bien.
         if (!block.text) {
             findings.push({
                 bloque: block.n,
                 tipo: 'otro',
-                gravedad: 'alta',
-                detalle: 'El bloque no tiene nada hablado adentro.',
+                gravedad: 'baja',
+                detalle: `Son ${Math.round(block.durationSec)}s sin nada hablado: se ve trabajar en pantalla, pero no se narra.`,
                 fuente: 'regla'
             });
             continue;

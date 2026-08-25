@@ -81,6 +81,10 @@ function buildCutplan(params) {
             cueIn: block.cueIn || '',
             cueOut: block.cueOut || '',
             confidence: block.confidence || 'baja',
+            // Por qué quedó fuera, cuando lo apagó la herramienta y no el editor.
+            // Sin esto, un bloque descartado aparece como "fuera" a secas y no hay
+            // forma de saber si alguien lo decidió o si se apagó solo.
+            disabledReason: keep ? '' : (block.disabledReason || ''),
             problems: block.problems || []
         };
 

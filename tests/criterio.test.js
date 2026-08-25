@@ -9,7 +9,10 @@ const speech = require('../engine/speech-edges');
 const refine = require('../engine/cut-refine');
 const coherence = require('../engine/coherence');
 const ai = require('../engine/ai-local');
+const entera = require('../engine/clase-entera');
+const orden = require('../engine/orden-del-cd');
 const fcp = require('../engine/fcp-xml');
+const precision = require('../engine/vendor/marker-precision');
 
 /** Palabras con tiempos a partir de un texto. */
 function say(text, startSec, wordSec) {
@@ -27,7 +30,14 @@ module.exports = function (t) {
     t.test('"pausa" y "corte" son siempre del director', () => {
         t.eq(speech.isChatter({ text: 'Pausa.' }, 0), true);
         t.eq(speech.isChatter({ text: 'corte' }, 0), true);
-        t.eq(speech.isChatter({ text: 'Tres.' }, 0), true);
+    });
+
+    t.test('el número en cifra es conteo; en letra, solo si viene acompañado', () => {
+        // Whisper escribe en cifra el conteo de la toma y en letra el número
+        // hablado. "Tres." suelto es "Tres cosas antes de empezar", que es clase.
+        t.eq(speech.isChatter({ text: '3,' }, 0), true);
+        t.eq(speech.isChatter({ text: 'Tres.' }, 0), false, 'suelto es una palabra normal');
+        t.eq(speech.isChatter({ text: 'Tres.' }, 0, null, { text: 'dos' }), true, 'en fila es conteo');
     });
 
     t.test('"listo" solo cuenta si viene después de un silencio', () => {
@@ -73,6 +83,60 @@ module.exports = function (t) {
         const words = say('tres dos uno', 5).concat(say('ahora sí empieza la clase.', 7));
         const cut = speech.trimChatter(words, 4.9, 9.5);
         t.ok(cut.startSec >= 5.3, `debería arrancar después del conteo, arrancó en ${cut.startSec}`);
+    });
+
+    t.test('con palabras solapadas el conteo se va igual', () => {
+        // Whisper devuelve palabras que se pisan: en la clase 10 el "3," iba de
+        // 76.92 a 77.31 y "para" arrancaba en 77.24, antes de que el "3,"
+        // terminara. Abrir donde empieza la siguiente dejaba el conteo medio
+        // adentro, y el bucle lo sacaba doce veces sin moverse del lugar.
+        const words = [
+            { text: '3,', start: 76.92, end: 77.31 },
+            { text: 'para', start: 77.24, end: 77.34 },
+            { text: 'eso', start: 77.34, end: 78.20 },
+            { text: 'vamos', start: 78.20, end: 78.80 },
+            { text: 'a', start: 78.80, end: 78.90 },
+            { text: 'empezar.', start: 78.90, end: 79.60 }
+        ];
+        const cut = speech.trimChatter(words, 76.57, 79.9);
+        t.deep(cut.removed, ['3,'], 'tenía que sacarlo una sola vez');
+        t.ok(cut.startSec >= 77.31, `el conteo quedó adentro: abre en ${cut.startSec}`);
+
+        const dentro = speech.wordsInside(words, cut.startSec, cut.endSec);
+        t.ok(!speech.isChatter(dentro[0], 999), `abre en «${speech.textOf(dentro[0])}»`);
+    });
+
+    t.test('un "Ok." pegado no le tapa el conteo que viene detrás', () => {
+        // Clase 13: el bloque abría con «Ok. 3, 2, 1. En este curso,» entero. El
+        // bucle miraba el "Ok.", no le encontraba silencio propio delante y
+        // paraba ahí, sin llegar nunca al conteo.
+        const words = [
+            { text: 'proyecto.', start: 700.0, end: 700.6 },
+            { text: 'Ok.', start: 700.7, end: 700.9 },
+            { text: '3,', start: 701.0, end: 701.3 },
+            { text: '2,', start: 701.4, end: 701.7 },
+            { text: '1.', start: 701.8, end: 702.1 },
+            { text: 'En', start: 702.4, end: 702.6 },
+            { text: 'este', start: 702.6, end: 702.9 },
+            { text: 'curso,', start: 702.9, end: 703.4 },
+            { text: 'vamos', start: 703.4, end: 703.9 },
+            { text: 'a', start: 703.9, end: 704.0 },
+            { text: 'ver.', start: 704.0, end: 704.5 }
+        ];
+        const cut = speech.trimChatter(words, 700.7, 704.6);
+        t.ok(cut.startSec >= 702.1, `abre en ${cut.startSec}, con el conteo adentro`);
+        const dentro = speech.wordsInside(words, cut.startSec, cut.endSec);
+        t.eq(speech.textOf(dentro[0]), 'En');
+    });
+
+    t.test('un "Uno" suelto no es un conteo y no se toca', () => {
+        // "Uno de los problemas más comunes" abre una clase de verdad. Pedir dos
+        // seguidas es lo único que separa el conteo de la palabra.
+        const words = say('Uno de los problemas más comunes es este.', 20);
+        const cut = speech.trimChatter(words, 19.9, 24);
+        t.eq(cut.startSec, 19.9, 'no tenía que moverse');
+        const dentro = speech.wordsInside(words, cut.startSec, cut.endSec);
+        t.eq(speech.textOf(dentro[0]), 'Uno');
     });
 
     t.test('recortar no puede dejar el bloque en nada', () => {
@@ -140,6 +204,115 @@ module.exports = function (t) {
         t.eq(refine.dropsChatter(bad, words, 'OUT'), true);
     });
 
+    t.test('no se le ofrece un corte que deja la claqueta hablada adentro', () => {
+        // Clase 6, bloque 1: abría con «Claqueta 6, clase 6. 3, 2, 1. Ya Clauco…»
+        // y el candidato pasaba el filtro porque mira solo la palabra que sigue al
+        // corte, y "Claqueta" no está en ninguna lista de charla.
+        const words = say('Claqueta 6, clase 6. 3, 2, 1. Ya Clauco nos entregó los planos.', 8);
+        t.eq(refine.dropsChatter({ frontier: 7.9, gapSec: 1 }, words, 'IN'), true);
+        const despues = words.find(w => w.text === 'Clauco');
+        t.eq(refine.dropsChatter({ frontier: despues.start, gapSec: 1 }, words, 'IN'), false,
+            'el que abre después del conteo sí sirve');
+    });
+
+    t.test('un borde no puede pasarse del otro extremo del bloque', () => {
+        const block = { startSec: 578, endSec: 587 };
+        // El IN no puede irse tan adelante que se coma el bloque entero.
+        t.eq(refine.fitsInBlock({ time: 582.5 }, block, 'IN', {}), true);
+        t.eq(refine.fitsInBlock({ time: 586.5 }, block, 'IN', {}), false);
+        // Ni el OUT retroceder por detrás del IN.
+        t.eq(refine.fitsInBlock({ time: 582.5 }, block, 'OUT', {}), true);
+        t.eq(refine.fitsInBlock({ time: 578.4 }, block, 'OUT', {}), false);
+    });
+
+    t.test('afinar los dos bordes no deja el bloque en duración negativa', async () => {
+        // La clase 13: el IN se fue a 582.567 y el OUT a 582.533, cruzados por 34
+        // milésimas, y el bloque desapareció del corte sin que nadie lo decidiera.
+        const words = say('esto es una toma que se repite y se repite sin parar acá.', 578, 0.25)
+            .concat(say('y esto ya es lo que de verdad importa de la clase.', 583, 0.25));
+        const block = { note: '', cueIn: '', cueOut: '', startSec: 578, endSec: 587 };
+
+        // Un modelo que empuja cada borde hacia el otro: el IN lo más adelante
+        // que le dejen, el OUT lo más atrás. Es lo que pasó en la clase 13, donde
+        // el modelo movió el IN para saltarse una toma repetida.
+        const aiQueCruza = kind => ({
+            ask: async ({ prompt }) => {
+                const nums = [...prompt.matchAll(/\[(\d+)\] t=/g)].map(m => Number(m[1]));
+                return { choice: kind === 'IN' ? nums[nums.length - 1] : nums[0], reason: 'al medio' };
+            }
+        });
+
+        for (const kind of ['IN', 'OUT']) {
+            const edge = { timeSec: kind === 'IN' ? block.startSec : block.endSec, decidedBy: 'nota' };
+            const res = await refine.refineEdge({
+                words, edge, block, blocks: [block], index: 0, kind,
+                options: { fps: 30, clearMargin: 999 }, ai: aiQueCruza(kind)
+            });
+            if (res.changed) {
+                if (kind === 'IN') block.startSec = res.timeSec;
+                else block.endSec = res.timeSec;
+            }
+        }
+
+        t.ok(block.endSec - block.startSec >= 1,
+            `el bloque quedó durando ${(block.endSec - block.startSec).toFixed(3)}s`);
+    });
+
+    t.test('la lista que ve el modelo va numerada corrida', () => {
+        // Al filtrar quedan huecos en los índices, y `resolveChoice` resuelve la
+        // elección por posición: sin renumerar, "[5]" cae en otro corte.
+        const filtrados = [
+            { index: 1, time: 10, isCurrent: false },
+            { index: 4, time: 12, isCurrent: true },
+            { index: 7, time: 14, isCurrent: false }
+        ];
+        const shown = refine.renumbered(filtrados);
+        t.deep(shown.candidates.map(c => c.index), [1, 2, 3]);
+        t.eq(shown.current, 2, 'el punto actual tiene que seguir siendo el de t=12');
+        t.eq(shown.candidates[shown.current - 1].time, 12);
+    });
+
+    t.test('al modelo no se le ofrece un corte que deja "Pausa" adentro', async () => {
+        // El bloque 7 de la clase 01: las reglas descartaban el corte que dejaba
+        // "Pausa." dentro, pero al modelo se le pasaba la lista sin filtrar y lo
+        // elegía igual, así que el bloque cerraba en "Pausa." de todos modos.
+        const words = say('y esto es justo lo que nos ocurre con el asunto.', 900)
+            .concat(say('Pausa.', 910))
+            .concat(say('Tres. Dos. Uno.', 914));
+        const block = { note: '', cueIn: '', cueOut: '', startSec: 890, endSec: 911.5 };
+
+        // Un modelo que siempre elige el último punto de la lista: si le ofrecen
+        // uno que deja chatter adentro, lo va a tomar.
+        let preguntado = false;
+        const ai = {
+            ask: async ({ prompt }) => {
+                preguntado = true;
+                const nums = [...prompt.matchAll(/\[(\d+)\] t=/g)].map(m => Number(m[1]));
+                t.deep(nums, nums.map((_, i) => i + 1), 'los puntos van corridos desde [1]');
+                return { choice: nums[nums.length - 1], reason: 'el último' };
+            }
+        };
+
+        const res = await refine.refineEdge({
+            words,
+            edge: { timeSec: 911.5, decidedBy: 'nota' },
+            block,
+            blocks: [block],
+            index: 0,
+            kind: 'OUT',
+            // Sin margen que alcance, no gana ninguno por regla y hay que preguntar.
+            options: { fps: 30, clearMargin: 999 },
+            ai
+        });
+
+        t.eq(preguntado, true, 'el escenario tiene que llegar a preguntarle al modelo');
+
+        const dentro = speech.wordsInside(words, block.startSec, res.timeSec);
+        const ultima = dentro[dentro.length - 1];
+        t.ok(!speech.isChatter(ultima, 999),
+            `el bloque cerró en «${speech.textOf(ultima)}»`);
+    });
+
     t.test('cerrar una frase puntúa más que cortar en cualquier frontera', () => {
         const words = say('esto cierra la idea completa.', 10).concat(say('y esto es otra cosa', 12.5));
         const enFrase = refine.scoreCandidate({ frontier: 11.5, gapSec: 0.05 }, words, 'OUT', 11.5);
@@ -147,13 +320,29 @@ module.exports = function (t) {
         t.ok(cierre > enFrase, `cerrar (${cierre}) tiene que ganarle a cortar al voleo (${enFrase})`);
     });
 
-    t.test('solo se revisan los bloques que lo necesitan', () => {
-        const bueno = { confidence: 'alta', in: { anchored: true, snap: { how: 'ya cerraba' } }, out: { anchored: true, snap: { how: 'ya cerraba' } } };
-        const dudoso = { confidence: 'media', in: { anchored: true }, out: { anchored: true } };
-        const sinAnclar = { confidence: 'alta', in: { anchored: false }, out: { anchored: true } };
-        t.eq(refine.needsCriterion(bueno), false);
+    const bienAnclado = { confidence: 'alta', in: { anchored: true, snap: { how: 'ya cerraba' } }, out: { anchored: true, snap: { how: 'ya cerraba' } } };
+    const dudoso = { confidence: 'media', in: { anchored: true }, out: { anchored: true } };
+    const sinAnclar = { confidence: 'alta', in: { anchored: false }, out: { anchored: true } };
+
+    t.test('por defecto se saltea el bloque que enganchó bien', () => {
+        t.eq(refine.needsCriterion(bienAnclado), false);
         t.eq(refine.needsCriterion(dudoso), true);
         t.eq(refine.needsCriterion(sinAnclar), true);
+    });
+
+    t.test('con «todos» se mira hasta el de confianza alta', () => {
+        // Existe para el banco: `confidence` mide si la nota del CD enganchó con
+        // el transcript, no si el corte quedó bueno, así que valía preguntarse si
+        // saltear esos bloques dejaba cortes malos sin revisar. Medido, no los
+        // deja —de ahí que el default siga siendo 'dudosos'—, pero la palanca se
+        // conserva para poder volver a medirlo con otro modelo.
+        t.eq(refine.needsCriterion(bienAnclado, { mirar: 'todos' }), true);
+        t.eq(refine.needsCriterion(dudoso, { mirar: 'todos' }), true);
+    });
+
+    t.test('un bloque que no existe no se mira nunca', () => {
+        t.eq(refine.needsCriterion(null), false);
+        t.eq(refine.needsCriterion(null, { mirar: 'todos' }), false);
     });
 
     t.group('IA local · nada de lo que diga se aplica sin validar');
@@ -165,6 +354,46 @@ module.exports = function (t) {
     t.test('un JSON envuelto en texto se rescata', () => {
         t.deep(ai.parseJson('```json\n{"choice": 4}\n```'), { choice: 4 });
         t.deep(ai.parseJson('Claro: {"choice": 2, "reason": "x"}'), { choice: 2, reason: 'x' });
+    });
+
+    t.test('un punto que no existe en la lista se rechaza', () => {
+        const unit = { candidates: [{ index: 1, time: 10 }, { index: 2, time: 12 }], current: 0 };
+        for (const inventado of [7, 0, -1]) {
+            const res = precision.resolveChoice({ choice: inventado }, unit);
+            t.eq(res.ok, false, `[${inventado}] no está en la lista y se aceptó`);
+            t.eq(res.move, false);
+        }
+    });
+
+    t.test('un tiempo en vez de un número de punto se rechaza', () => {
+        const unit = { candidates: [{ index: 1, time: 10 }, { index: 2, time: 12 }], current: 0 };
+        // El modelo contesta el segundo del corte, que es justo lo que no se le pide.
+        for (const tiempo of ['920.5s', 't=920.5', 920.5]) {
+            const res = precision.resolveChoice({ choice: tiempo }, unit);
+            t.eq(res.ok, false, `«${tiempo}» pasó como si fuera un punto`);
+        }
+    });
+
+    t.test('una respuesta inventada deja el corte donde estaba', async () => {
+        const words = say('esto cierra una idea completa acá.', 100)
+            .concat(say('y esto ya es del bloque siguiente.', 104));
+        const block = { note: '', cueIn: '', cueOut: '', startSec: 95, endSec: 103 };
+        const antes = 103;
+
+        const res = await refine.refineEdge({
+            words,
+            edge: { timeSec: antes, decidedBy: 'nota' },
+            block,
+            blocks: [block],
+            index: 0,
+            kind: 'OUT',
+            options: { fps: 30, clearMargin: 999 },
+            ai: { ask: async () => ({ choice: 99, reason: 'me lo inventé' }) }
+        });
+
+        t.eq(res.changed, false, 'no se tenía que mover nada');
+        t.eq(res.timeSec, antes);
+        t.ok(/no ayudó/.test(res.reason), res.reason);
     });
 
     t.test('un hallazgo que apunta a un bloque que no existe se tira', () => {
@@ -186,6 +415,217 @@ module.exports = function (t) {
         }, { blocks: [{ n: 1 }] });
         t.eq(valid[0].tipo, 'otro');
         t.eq(valid[0].gravedad, 'media');
+    });
+
+    t.group('IA local · cuánta ventana se le pide a Ollama');
+
+    t.test('un prompt corto no pide una ventana enorme', () => {
+        t.eq(ai.ventanaPara('sistema', 'hola', 400), 4096);
+    });
+
+    t.test('un prompt largo pide más de lo que ocupa', () => {
+        // Ollama, si no entra, tira el principio sin avisar: la ventana pedida
+        // tiene que sobrarle al prompt, nunca quedarle justa.
+        const largo = 'palabra '.repeat(6000); // ~48 000 caracteres
+        const pedida = ai.ventanaPara('', largo, 400);
+        t.ok(pedida > largo.length / ai.VENTANA.charsPorToken, `pidió ${pedida} para ${largo.length} chars`);
+    });
+
+    t.test('la ventana crece con el prompt', () => {
+        const chico = ai.ventanaPara('', 'x'.repeat(2000), 400);
+        const grande = ai.ventanaPara('', 'x'.repeat(40000), 400);
+        t.ok(grande > chico, `${chico} vs ${grande}`);
+    });
+
+    t.test('va en múltiplos de 2048, para no recargar el modelo entre consultas', () => {
+        for (const chars of [5000, 5001, 12345, 30000]) {
+            const pedida = ai.ventanaPara('', 'x'.repeat(chars), 400);
+            t.eq(pedida % 2048, 0, `${chars} chars dio ${pedida}`);
+        }
+    });
+
+    t.test('nunca se pasa del techo, por más largo que venga', () => {
+        t.eq(ai.ventanaPara('', 'x'.repeat(5000000), 400), ai.VENTANA.maxima);
+    });
+
+    t.group('las órdenes que el CD escribió en la nota');
+
+    t.test('se lee la orden y se le asigna al borde del que habla', () => {
+        // La nota viaja en el marcador de ENTRADA pero habla de la SALIDA.
+        const block = { note: 'OUT ANTES DE: "En Spec-Driven Development, la"' };
+        t.eq(orden.para(block, 'IN'), null, 'el IN no tiene nada que ver con esta orden');
+        const salida = orden.para(block, 'OUT');
+        t.eq(salida.relacion, 'antes');
+        t.eq(salida.frase, 'En Spec-Driven Development, la');
+    });
+
+    t.test('también las que hablan de la entrada', () => {
+        const block = { note: 'IN DESPUÉS DE: "3, 2, 1. Vamos a ver qué hallazgos generó"' };
+        t.eq(orden.para(block, 'OUT'), null);
+        t.eq(orden.para(block, 'IN').relacion, 'después');
+    });
+
+    t.test('una nota de post no es una orden de corte', () => {
+        for (const nota of [
+            'POST: Highlight en Archivo Task.md',
+            'PV EN: "Te preguntarás cómo fue que Claude Code pudo hacer esto". Luego pasamos a SR.',
+            'POST: Logo Git',
+            // Cortada a la mitad no pide nada: no hay qué buscar.
+            'OUT ANTES DE:',
+            'OUT ANTES DE: ""',
+            ''
+        ]) {
+            t.eq(orden.para({ note: nota }, 'OUT'), null, `«${nota.slice(0, 30)}» pasó como orden`);
+            t.eq(orden.para({ note: nota }, 'IN'), null, `«${nota.slice(0, 30)}» pasó como orden`);
+        }
+    });
+
+    t.test('las comillas raras y la falta de dos puntos no la rompen', () => {
+        t.eq(orden.para({ note: 'OUT ANTES DE:“Finalmente, vemos la estructura”' }, 'OUT').frase,
+            'Finalmente, vemos la estructura');
+        t.eq(orden.para({ note: 'OUT ANTES DE «Esto puede»' }, 'OUT').frase, 'Esto puede');
+    });
+
+    t.test('la frase se ubica aunque el CD la escriba distinto de como salió', () => {
+        // El CD escribe de memoria, Whisper transcribe a su manera: comparar
+        // letra a letra no encuentra nada.
+        const words = say('bueno hasta acá la primera parte.', 0)
+            .concat(say('en spectriven development la documentación manda.', 10));
+        const block = { startSec: 0, endSec: 14, note: 'OUT ANTES DE: "En Spec-Driven Development, la"' };
+        const ubicada = orden.ubicar(words, orden.para(block, 'OUT'), [block], 0, { fps: 30 });
+        t.ok(ubicada, 'no ubicó la frase');
+        t.ok(Math.abs(ubicada.timeSec - 10) < 0.5, `la ubicó en ${ubicada && ubicada.timeSec}, se esperaba ~10`);
+    });
+
+    t.test('no se sale del territorio del bloque', () => {
+        // La misma frase repetida en toda la clase: sin territorio se ubica en
+        // cualquier lado. La del bloque de al lado no cuenta.
+        const words = say('arrancamos con la introducción del tema.', 0)
+            .concat(say('vamos a ver qué pasa acá.', 10))
+            .concat(say('relleno del medio para separar.', 30))
+            .concat(say('vamos a ver qué pasa acá.', 100));
+        const blocks = [
+            { startSec: 0, endSec: 16, note: 'OUT ANTES DE: "vamos a ver qué pasa"' },
+            { startSec: 98, endSec: 106 }
+        ];
+        const ubicada = orden.ubicar(words, orden.para(blocks[0], 'OUT'), blocks, 0, { fps: 30 });
+        t.ok(ubicada && ubicada.timeSec < 20, `se fue al bloque siguiente: ${ubicada && ubicada.timeSec}`);
+    });
+
+    t.test('entre retomas de la misma frase gana la que mira el marcador', () => {
+        // El profesor se traba y repite: la misma frase, tres veces, con puntaje
+        // perfecto las tres. La buena es la que el CD tenía delante.
+        const words = say('bueno arranquemos con esto de una vez.', 0)
+            .concat(say('en spectriven development la documentación manda.', 10))
+            .concat(say('en spectriven development la documentación manda.', 48))
+            .concat(say('en spectriven development la documentación manda.', 70));
+        const block = { startSec: 0, endSec: 22, note: 'OUT ANTES DE: "En Spec-Driven Development, la"' };
+        const blocks = [block, { startSec: 68, endSec: 80 }];
+
+        const ubicada = orden.ubicar(words, orden.para(block, 'OUT'), blocks, 0,
+            { fps: 30, referencia: 22 });
+        t.ok(Math.abs(ubicada.timeSec - 10) < 0.5, `eligió la toma de ${ubicada.timeSec}, se esperaba ~10`);
+        t.eq(ubicada.seguro, true, 'con el marcador cerca de una sola toma no hay empate');
+    });
+
+    t.test('dos tomas equidistantes no se deciden solas', () => {
+        const words = say('bueno arranquemos con esto de una vez.', 0)
+            .concat(say('en spectriven development la documentación manda.', 10))
+            .concat(say('en spectriven development la documentación manda.', 30));
+        const block = { startSec: 0, endSec: 42, note: 'OUT ANTES DE: "En Spec-Driven Development, la"' };
+        // El marcador cae justo en el medio de las dos: es una moneda al aire.
+        const ubicada = orden.ubicar(words, orden.para(block, 'OUT'), [block], 0,
+            { fps: 30, referencia: 21 });
+        t.eq(ubicada.seguro, false, 'se impuso una toma sin poder distinguirla de la otra');
+    });
+
+    t.test('"después de" corta al final de la frase, no al principio', () => {
+        // Si se corta al arranque, la clase abre con el conteo del director: lo
+        // que la nota justamente pedía sacar.
+        const words = say('listo dale. tres, dos, uno. vamos a ver qué hallazgos generó.', 0)
+            .concat(say('acá tenemos los resultados del análisis completo.', 20));
+        const block = {
+            startSec: 0.2, endSec: 30,
+            note: 'IN DESPUÉS DE: "tres, dos, uno. Vamos a ver qué hallazgos generó"'
+        };
+        const ubicada = orden.ubicar(words, orden.para(block, 'IN'), [block], 0, { fps: 30 });
+        t.ok(ubicada, 'no ubicó la frase');
+        const dicho = speech.textInside(words, ubicada.timeSec, 30);
+        t.ok(!/hallazgos/.test(dicho), `el corte dejó la frase adentro: «${dicho.slice(0, 60)}»`);
+        t.ok(/resultados/.test(dicho), `se comió lo que venía después: «${dicho.slice(0, 60)}»`);
+    });
+
+    t.test('una frase que no está en el tramo no se inventa', () => {
+        const words = say('acá no se dice nada parecido a eso.', 0);
+        const block = { startSec: 0, endSec: 5, note: 'OUT ANTES DE: "la promesa de valor del producto"' };
+        t.eq(orden.ubicar(words, orden.para(block, 'OUT'), [block], 0, { fps: 30 }), null);
+    });
+
+    t.test('el borde se mueve a donde el CD pidió, sin preguntarle a nadie', async () => {
+        const words = say('bueno hasta acá la primera parte.', 0)
+            .concat(say('en spectriven development la documentación manda.', 10));
+        const block = { startSec: 0, endSec: 14, note: 'OUT ANTES DE: "En Spec-Driven Development, la"', cueOut: '' };
+
+        let preguntaron = false;
+        const res = await refine.refineEdge({
+            words,
+            edge: { timeSec: 14, decidedBy: 'nota' },
+            block, blocks: [block], index: 0, kind: 'OUT',
+            options: { fps: 30 },
+            ai: { ask: async () => { preguntaron = true; return { choice: 1 }; } }
+        });
+
+        t.eq(res.decidedBy, 'orden');
+        t.eq(preguntaron, false, 'la orden del CD no se somete a votación');
+        t.ok(Math.abs(res.timeSec - 10) < 0.5, `quedó en ${res.timeSec}, se esperaba ~10`);
+    });
+
+    t.test('un bloque con orden se mira aunque haya enganchado perfecto', () => {
+        const perfecto = {
+            confidence: 'alta',
+            in: { anchored: true, snap: { how: 'ya cerraba' } },
+            out: { anchored: true, snap: { how: 'ya cerraba' } }
+        };
+        t.eq(refine.needsCriterion(perfecto), false);
+        t.eq(refine.needsCriterion({ ...perfecto, note: 'OUT ANTES DE: "algo"' }), true);
+        t.eq(refine.needsCriterion({ ...perfecto, note: 'POST: highlight' }), false,
+            'una nota de post no es motivo para revisar');
+    });
+
+    t.group('la clase entera como contexto');
+
+    t.test('trae los bloques marcados y lo que se descarta entre medio', () => {
+        const words = say('esto es el primer bloque completo.', 0)
+            .concat(say('pausa pausa va de nuevo.', 10))
+            .concat(say('y esto es el segundo bloque.', 20));
+        const blocks = [
+            { startSec: 0, endSec: 2, note: 'arranque' },
+            { startSec: 20, endSec: 22, note: '' }
+        ];
+        const texto = entera.texto(blocks, words);
+
+        t.ok(/BLOQUE 1/.test(texto), 'no marcó el bloque 1');
+        t.ok(/BLOQUE 2/.test(texto), 'no marcó el bloque 2');
+        t.ok(/nota del CD: «arranque»/.test(texto), 'perdió la nota del CD');
+        t.ok(/se descarta/.test(texto), 'no mostró lo que se tira entre bloques');
+    });
+
+    t.test('sin bloques o sin palabras no inventa nada', () => {
+        t.eq(entera.texto([], say('algo', 0)), '');
+        t.eq(entera.texto([{ startSec: 0, endSec: 1 }], []), '');
+    });
+
+    t.test('sin clase, el sistema queda igual que antes', () => {
+        t.eq(entera.conLaClase('SISTEMA', ''), 'SISTEMA');
+        t.eq(entera.conLaClase('SISTEMA', null), 'SISTEMA');
+    });
+
+    t.test('con clase, el sistema la lleva detrás y sigue empezando igual', () => {
+        // El prefijo tiene que ser idéntico entre consultas para que Ollama no
+        // vuelva a leer la clase entera en cada borde.
+        const con = entera.conLaClase('SISTEMA', '⟦BLOQUE 1⟧\nhola');
+        t.ok(con.startsWith('SISTEMA'), 'el sistema dejó de ir primero');
+        t.ok(con.includes('⟦BLOQUE 1⟧'), 'no pegó la clase');
     });
 
     t.group('coherencia · el guion final');

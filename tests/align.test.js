@@ -170,6 +170,33 @@ module.exports = function (t) {
         t.eq(result.blocks[0].confidence, 'baja');
     });
 
+    t.test('una toma repetida lejos no se lleva el marcador', () => {
+        // El bloque 13 de la clase 13: el CD repite la frase de cierre toma tras
+        // toma durante tres minutos. La coincidencia de texto puntúa igual —o
+        // mejor— en una toma fallida de hace 200 s que en la buena, que quedó a
+        // dos segundos del marcador. Ganaba la lejana y el bloque pasaba de los
+        // 10 s marcados a 3.4 minutos de tomas falsas.
+        // La toma vieja empareja EXACTO; la buena quedó con un "si" de menos, así
+        // que puntúa un poco peor. Sin mirar la distancia, gana la vieja.
+        const cue = 'pero si quieres comenzar a desarrollar productos reales';
+        const words = say(`${cue} eh no, pausa`, 960)
+            .concat(say('tres dos uno', 1150))
+            .concat(say('pero quieres comenzar a desarrollar productos reales y a materializar tus ideas.', 1158));
+
+        const result = align.alignClass({
+            blocks: [block(0, 1158, 1168, cue, 'materializar tus ideas')],
+            words,
+            classNumber: 1,
+            clapMarkerSec: null
+        });
+
+        const b = result.blocks[0];
+        t.ok(b.startSec > 1100,
+            `el marcador se fue a la toma vieja: quedó en ${b.startSec}`);
+        t.ok(b.endSec - b.startSec < 60,
+            `el bloque se comió las tomas falsas: dura ${(b.endSec - b.startSec).toFixed(1)}s`);
+    });
+
     t.test('sin transcript no se mueve nada y no falla', () => {
         const blocks = [block(0, 60, 90, 'una frase cualquiera del bloque', 'el cierre del bloque')];
         const result = align.alignClass({ blocks, words: [], classNumber: 1, clapMarkerSec: 8 });

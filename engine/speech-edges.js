@@ -33,7 +33,30 @@ const WEAK_CHATTER = /^(ok|okay|okey|vale|listo|listos|perfecto|perfecta|dale|va
 // El conteo con el que arranca cada toma, y las sobras del conteo siguiente.
 const COUNT_WORD = /^(tres|dos|uno|3|2|1)[.,;:!?…"»]*$/i;
 
+// En cifra es siempre el conteo: nadie dice "3" a mitad de clase, Whisper escribe
+// el número hablado en letra. En letra, en cambio, es una palabra normal —"Uno de
+// los problemas más comunes", "dos formas de hacerlo"— y solo es conteo si viene
+// con otra al lado.
+const COUNT_DIGIT = /^[321][.,;:!?…"»]*$/;
+
+// Hasta dónde se busca el conteo desde el arranque del bloque. Con el "Ok." o el
+// "Listo." del director delante, la cuenta empieza en la tercera o la cuarta;
+// más allá de la octava ya no es el arranque de la toma, es la clase.
+const MIRAR_CONTEO = 8;
+
 const SENTENCE_END = /[.!?…]["»)]*$/;
+
+// Con esto no se abre un bloque: son conectores que apuntan hacia atrás, a algo
+// que se dijo antes, y si ese antes quedó fuera del corte el bloque abre en
+// falso. Ojo con ampliar la lista: "ahora", "luego", "después" y "bueno"
+// apuntan hacia adelante y abren perfecto ("Ahora quiero mostrarte un caso
+// concreto"), así que meterlos cuenta como defecto lo que está bien.
+const CONECTOR_HUERFANO = /^(entonces|pero|porque|además|ademas|también|tambien|igual|y|sin embargo|es decir|o sea|por eso|así que|asi que)[.,;:!?¡¿…"»]*$/i;
+
+/** ¿Esta palabra es uno de esos conectores que se apoyan en lo de antes? */
+function esConector(word) {
+    return CONECTOR_HUERFANO.test(textOf(word).trim());
+}
 
 const DEFAULTS = {
     weakPauseSec: 0.35,   // silencio a partir del cual una palabra suelta es un aparte
@@ -68,15 +91,55 @@ function endsSentence(word) {
  * @param {object} word
  * @param {number} pauseBefore silencio que la precede, en segundos
  */
-function isChatter(word, pauseBefore, options) {
+function isChatter(word, pauseBefore, options, vecina) {
     const text = textOf(word).trim();
     if (!text) return false;
     if (STRONG_CHATTER.test(text)) return true;
-    if (COUNT_WORD.test(text)) return true;
+    if (esConteo(word, vecina)) return true;
     if (WEAK_CHATTER.test(text)) {
         return (pauseBefore == null ? 0 : pauseBefore) >= opt(options, 'weakPauseSec');
     }
     return false;
+}
+
+/**
+ * ¿Es un conteo de toma y no un número dicho dentro de la clase?
+ * @param {object} vecina la palabra de al lado, para ver si van en fila
+ */
+function esConteo(word, vecina) {
+    const text = textOf(word).trim();
+    if (!COUNT_WORD.test(text)) return false;
+    if (COUNT_DIGIT.test(text)) return true;
+    return Boolean(vecina) && COUNT_WORD.test(textOf(vecina).trim());
+}
+
+/**
+ * ¿Dónde termina el conteo de toma que abre esta lista de palabras?
+ *
+ * Vive acá y no en cada sitio que lo necesita porque son tres: el recorte lo
+ * quita, el filtro de candidatos descarta los cortes que abren con él y la
+ * medición lo cuenta. Con una copia en cada uno, el modelo podía elegir un corte
+ * que el recorte hubiera rechazado.
+ *
+ * @returns {number} índice de la última palabra del conteo, o -1 si no hay
+ */
+function finDeConteo(lista) {
+    let fin = -1;
+    for (let i = 0; i + 1 < Math.min(lista.length, MIRAR_CONTEO); i++) {
+        if (esConteo(lista[i], lista[i + 1]) && esConteo(lista[i + 1], lista[i])) fin = i + 1;
+    }
+    return fin;
+}
+
+/** ¿Un corte en este punto dejaría el conteo dentro del bloque? */
+function abreConConteo(words, timeSec) {
+    return finDeConteo(spoken(words).filter(w => w.end > timeSec + 0.02).slice(0, MIRAR_CONTEO)) >= 0;
+}
+
+/** Las que se van solas, sin depender del silencio que traigan delante. */
+function isHardChatter(word, vecina) {
+    const text = textOf(word).trim();
+    return Boolean(text) && (STRONG_CHATTER.test(text) || esConteo(word, vecina));
 }
 
 /**
@@ -137,16 +200,54 @@ function trimChatter(words, startSec, endSec, options) {
 
     const inside = () => list.filter(w => w.end > start + 0.02 && w.start < end - 0.02);
 
+    // El silencio es lo que delata a un "listo" o un "ya" sueltos: sin él son
+    // parte de la frase. Pero si lo que viene justo antes ya es una orden —un
+    // "Pausa.", un conteo—, el aparte ya empezó y no hace falta buscarle silencio
+    // propio, porque el silencio quedó del otro lado de la orden. En "…el
+    // proyecto. Pausa. Listo. 3, 2, 1." el hueco delante de "Listo." mide 0.30s,
+    // por debajo del listón, y por eso el borde se quedaba terminando en "Listo.".
+    const silencioAntesDe = (block, at) => {
+        if (at > 0 && isHardChatter(block[at - 1], block[at - 2])) return 999;
+        return at > 0 ? block[at].start - block[at - 1].end : 999;
+    };
+
     // Por el final: la orden al editor llega después de la última frase.
     for (let guard = 0; guard < 6; guard++) {
         const block = inside();
         if (block.length < 2) break;
         const last = block[block.length - 1];
         const before = block[block.length - 2];
-        const pause = last.start - before.end;
-        if (!isChatter(last, pause, options)) break;
+        const pause = silencioAntesDe(block, block.length - 1);
+        if (!isChatter(last, pause, options, before)) break;
         removed.push(textOf(last));
-        end = before.end;
+        // Whisper entrega palabras que se solapan, así que llevar el borde al
+        // final de la anterior puede dejar el chatter medio adentro y el bucle lo
+        // saca de nuevo sin haberse movido. Se cierra donde el chatter arranca.
+        end = Math.min(before.end, last.start);
+    }
+
+    // La cuenta atrás es el "ya" de la toma: lo que viene detrás es la clase y lo
+    // que viene delante, no. Se mira antes que nada porque el bucle de abajo va
+    // palabra por palabra y para en la primera que no es charla, así que un "Ok."
+    // que no traiga silencio propio le tapa el conteo que viene detrás y el
+    // bloque abre con "Ok. 3, 2, 1. En este curso…" entero.
+    //
+    // Hace falta que sean DOS seguidas. Una sola no es un conteo: "Uno de los
+    // problemas más comunes" y "Tres cosas antes de empezar" abren clases de
+    // verdad, y tirarlas por parecerse a un conteo se lleva por delante justo la
+    // frase que presenta el bloque.
+    const arranque = inside();
+    const finDelConteo = finDeConteo(arranque);
+    if (finDelConteo >= 0 && finDelConteo + 1 < arranque.length) {
+        for (let i = 0; i <= finDelConteo; i++) removed.push(textOf(arranque[i]));
+        // Donde ARRANCA la palabra siguiente, no donde termina el conteo. Whisper
+        // entrega palabras que se pisan, y el "uno." de la cuenta terminaba
+        // después de que empezara la frase: llevar el borde a ese final se comía
+        // «Para ver» en la clase 9 y «En» en la 13. Dejar dentro la cola de un
+        // conteo no molesta —el afinado con la onda la resuelve, porque entre la
+        // cuenta y la toma siempre hay silencio—; perder las dos primeras
+        // palabras de la clase, sí.
+        start = arranque[finDelConteo + 1].start;
     }
 
     // Por el principio: sobras del conteo o un "ok" del director.
@@ -156,9 +257,12 @@ function trimChatter(words, startSec, endSec, options) {
         const first = block[0];
         const idx = list.indexOf(first);
         const pause = idx > 0 ? first.start - list[idx - 1].end : 999;
-        if (!isChatter(first, pause, options)) break;
+        if (!isChatter(first, pause, options, block[1])) break;
         removed.push(textOf(first));
-        start = block[1].start;
+        // Igual que arriba: con palabras solapadas, abrir donde empieza la
+        // siguiente puede dejar adentro el final del conteo. Se abre pasado el
+        // chatter, que es lo único que garantiza avanzar.
+        start = Math.max(block[1].start, first.end);
     }
 
     if (end - start < opt(options, 'minKeepSec')) {
@@ -272,6 +376,9 @@ function textInside(words, startSec, endSec) {
 
 module.exports = {
     isChatter,
+    isHardChatter,
+    esConector,
+    CONECTOR_HUERFANO,
     endsSentence,
     wordLimits,
     tightest,
@@ -281,6 +388,9 @@ module.exports = {
     textInside,
     spoken,
     textOf,
+    esConteo,
+    finDeConteo,
+    abreConConteo,
     STRONG_CHATTER,
     WEAK_CHATTER,
     COUNT_WORD,
