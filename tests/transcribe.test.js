@@ -21,6 +21,19 @@ function whisperJson(segments) {
     };
 }
 
+/**
+ * Lo que deja `-ojf`: cada segmento con los tokens con los que el modelo escribió
+ * la palabra, y en cada uno el `t_dtw` de la alineación. En CENTÉSIMAS, que es lo
+ * único que el JSON no avisa.
+ */
+function conTokens(text, from, to, dtwCentesimas) {
+    return {
+        text,
+        offsets: { from: from * 1000, to: to * 1000 },
+        tokens: dtwCentesimas.map(cs => ({ text, t_dtw: cs }))
+    };
+}
+
 module.exports = function (t) {
     t.group('transcribe · salida de whisper');
 
@@ -41,6 +54,67 @@ module.exports = function (t) {
         ]));
         t.eq(words.length, 1);
         t.eq(words[0].text, 'hola');
+    });
+
+    t.group('transcribe · la alineación por DTW');
+
+    t.test('el instante del DTW entra en su propio campo, en segundos', () => {
+        // Las centésimas son de whisper.cpp; acá todo se habla en segundos.
+        const words = transcribe.wordsFromWhisperJson({
+            transcription: [conTokens(' en', 0.31, 0.37, [50])]
+        });
+        t.eq(words[0].dtw, 0.5);
+    });
+
+    t.test('el DTW no toca start ni end: de ahí viven los cortes', () => {
+        const words = transcribe.wordsFromWhisperJson({
+            transcription: [conTokens(' en', 0.31, 0.37, [50])]
+        });
+        t.eq(words[0].start, 0.31);
+        t.eq(words[0].end, 0.37);
+    });
+
+    t.test('de una palabra escrita en varios tokens vale el primero', () => {
+        // "Reside" sale como " Res" + "ide": el instante de la palabra es el del
+        // pedazo con el que arranca.
+        const words = transcribe.wordsFromWhisperJson({
+            transcription: [conTokens(' Reside', 0.11, 0.28, [30, 40])]
+        });
+        t.eq(words[0].dtw, 0.3);
+    });
+
+    t.test('un -1 no es un cero: la palabra queda sin campo', () => {
+        // whisper.cpp pone -1 cuando no pudo ubicar el token en su grilla. Son 3
+        // de cada 189 palabras, y tomarlo por un cero las mandaría al arranque de
+        // la clase.
+        const words = transcribe.wordsFromWhisperJson({
+            transcription: [conTokens(' hola', 1, 1.5, [-1])]
+        });
+        t.eq('dtw' in words[0], false);
+    });
+
+    t.test('si el primer token no tiene dato se usa el primero que sí', () => {
+        const words = transcribe.wordsFromWhisperJson({
+            transcription: [conTokens(' hola', 1, 1.5, [-1, 120])]
+        });
+        t.eq(words[0].dtw, 1.2);
+    });
+
+    t.test('un JSON sin tokens sale como siempre, sin el campo', () => {
+        // Es el de los transcripts de antes y el de cualquier corrida sin `-ojf`.
+        const words = transcribe.wordsFromWhisperJson(whisperJson([[' hola', 2, 2.5]]));
+        t.deep(words, [{ start: 2, end: 2.5, text: 'hola' }]);
+    });
+
+    t.test('cada modelo pide su propia grilla de DTW', () => {
+        // Pasarle la de otro modelo no degrada la alineación: whisper-cli no
+        // arranca ("alignment head on text layer 14, but model only has 4").
+        t.eq(transcribe.DTW_POR_MODELO['ggml-large-v3-turbo.bin'], 'large.v3.turbo');
+        t.eq(transcribe.DTW_POR_MODELO['ggml-medium.bin'], 'medium');
+    });
+
+    t.test('un modelo desconocido no pide DTW en vez de arriesgar la corrida', () => {
+        t.eq(transcribe.DTW_POR_MODELO['ggml-lo-que-venga.bin'], undefined);
     });
 
     t.group('transcribe · bucles de whisper');
@@ -173,6 +247,16 @@ module.exports = function (t) {
     t.test('no sirve un transcript de una versión anterior', () => {
         const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
         t.eq(transcribe.isUsable(transcriptFor(source, { version: 0 }), source), false);
+    });
+
+    t.test('el de la 4 —sin DTW— sigue sirviendo tal cual', () => {
+        // Es todo lo que hay en los Backup de hoy. La 5 solo agrega un campo que
+        // lee el reloj del panel: ninguna decisión cambia por que falte, así que
+        // rechazarlo sería cobrarle al editor el curso entero de nuevo para poder
+        // abrir una clase que ya estaba lista.
+        const source = { path: '/x/Live-Mix.wav', size: 100, mtimeMs: 5 };
+        t.eq(transcribe.isUsable(transcriptFor(source, { version: 4 }), source), true);
+        t.ok(transcribe.TRANSCRIPT_VERSION > 4, 'la versión de hoy tiene que ser posterior a la 4');
     });
 
     t.test('no sirve uno hecho con VAD', () => {

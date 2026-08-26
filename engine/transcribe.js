@@ -2,7 +2,7 @@
 /**
  * transcribe.js — El Live-Mix a palabras con tiempos, con whisper.cpp local.
  *
- * Dos decisiones que se tomaron midiendo, no leyendo documentación:
+ * Tres decisiones que se tomaron midiendo, no leyendo documentación:
  *
  * 1. **VAD obligatorio.** Sin él, whisper reparte las palabras a lo largo de todo
  *    el segmento, y en material crudo un segmento es media toma más el silencio
@@ -14,6 +14,12 @@
  * 2. **Una palabra por segmento** (`-ml 1 -sow`): los tiempos de segmento de
  *    whisper.cpp son mucho más fiables que repartir los tokens de adentro. Las
  *    frases se rearman acá con la puntuación, que sale gratis.
+ * 3. **La alineación por DTW, prendida** (`-nfa -dtw … -ojf`). whisper.cpp sabe
+ *    calcular una alineación de cada token contra el espectrograma, y hasta hoy
+ *    nunca corrió: desde que *flash attention* viene prendida por defecto, la
+ *    apaga sin decir nada. Medido sobre 90 s de la clase 1 con el mismo audio y
+ *    el mismo modelo: con las banderas de antes, `t_dtw` venía en -1 en las
+ *    221/221 palabras; con `-nfa`, poblado en las 199/199.
  *
  * Los tiempos que salen de acá dicen QUÉ se dijo y MÁS O MENOS cuándo. El frame
  * exacto del corte lo mide después `audio-onset` sobre el WAV.
@@ -37,7 +43,44 @@ const speech = require('./speech-edges');
 // 4: sin arrastrar el texto de una ventana a la siguiente (`-mc 0`). Los
 //    transcripts de la 3 pueden traer tramos enteros sin puntuación, y de la
 //    puntuación viven los cortes: hay que rehacerlos.
-const TRANSCRIPT_VERSION = 4;
+// 5: cada palabra puede traer además `dtw`, el instante que le puso la
+//    alineación contra el espectrograma.
+const TRANSCRIPT_VERSION = 5;
+
+/**
+ * Qué versiones del Backup se dan por buenas sin volver a transcribir.
+ *
+ * La 4 entra, y a propósito. Todo lo que agrega la 5 es un campo NUEVO que solo
+ * lee el reloj del panel; ni un corte, ni una repetición, ni un SRT cambian de
+ * decisión por que esté o falte. Sacarla de la lista sería cobrarle al editor
+ * cuarenta minutos de Whisper por clase —el curso entero de nuevo— nada más que
+ * para poder abrir una clase que ya estaba lista. Un transcript de la 4 sigue
+ * andando por el camino de siempre (`retimeo`), que es lo que hay hoy en todos
+ * los Backup.
+ */
+const VERSIONES_QUE_SIRVEN = new Set([4, TRANSCRIPT_VERSION]);
+
+/**
+ * El nombre con el que whisper.cpp identifica la grilla de cabezas de atención
+ * de cada modelo, que es lo que el DTW necesita para saber dónde mirar.
+ *
+ * No es un detalle cosmético: pasarle la grilla de otro modelo no degrada la
+ * alineación, **no arranca**. Con `ggml-large-v3-turbo.bin` y `-dtw medium`,
+ * whisper-cli sale con código 3 y "tried to set alignment head on text layer
+ * 14, but model only has 4 text layers". Y `paths.whisperModel()` cae al mejor
+ * modelo que encuentre, que en una instalación vieja puede ser cualquiera de
+ * los siete: si el nombre no está en esta tabla no se pide DTW, porque un
+ * transcript sin alineación sirve y una transcripción que no arranca no.
+ */
+const DTW_POR_MODELO = {
+    'ggml-large-v3-turbo.bin': 'large.v3.turbo',
+    'ggml-large-v3.bin': 'large.v3',
+    'ggml-large-v2.bin': 'large.v2',
+    'ggml-large.bin': 'large.v1',
+    'ggml-medium.bin': 'medium',
+    'ggml-small.bin': 'small',
+    'ggml-base.bin': 'base'
+};
 // Una palabra repetida idéntica más veces que esto es un bucle de whisper en un
 // silencio, no algo que alguien dijo.
 const MAX_REPEATS = 3;
@@ -77,7 +120,15 @@ function checkTools() {
 
 /**
  * Palabras crudas del JSON de whisper → `{start, end, text}`, que es el formato
- * que hablan los módulos de análisis (`marker-anchor`, `audio-onset`).
+ * que hablan los módulos de análisis (`marker-anchor`, `audio-onset`), más `dtw`
+ * cuando la alineación contra el espectrograma dejó algo.
+ *
+ * `dtw` va en un campo APARTE y no encima de `start`. De `start`/`end` viven los
+ * cortes, y eso ya se midió: correr el motor con otros tiempos para las palabras
+ * empeora los bordes (30 defectos contra 32 sobre 172 bloques) por cómo
+ * `speech-edges.wordLimits` se apoya en la duración de la palabra vecina para
+ * encerrar la búsqueda de onda. Mientras el DTW viva en su propio campo, esto no
+ * puede mover un corte ni un frame.
  */
 function wordsFromWhisperJson(data) {
     const out = [];
@@ -87,9 +138,37 @@ function wordsFromWhisperJson(data) {
         const from = segment.offsets ? segment.offsets.from / 1000 : null;
         const to = segment.offsets ? segment.offsets.to / 1000 : null;
         if (from == null || to == null) continue;
-        out.push({ start: round(from), end: round(Math.max(to, from)), text });
+        const word = { start: round(from), end: round(Math.max(to, from)), text };
+        const dtw = dtwDelSegmento(segment);
+        // El campo se pone solo cuando hay dato: así una palabra sin alineación y
+        // un transcript entero sin ella se leen igual, con una sola pregunta.
+        if (dtw != null) word.dtw = dtw;
+        out.push(word);
     }
     return out;
+}
+
+/**
+ * El instante que el DTW le puso a una palabra, en segundos.
+ *
+ * Dos cosas que el JSON de whisper.cpp no avisa. Primero, `t_dtw` viene en
+ * CENTÉSIMAS de segundo, mientras que los `offsets` de al lado vienen en
+ * milésimas. Segundo, vale `-1` cuando el token no se pudo ubicar en la grilla,
+ * y eso no es un cero: es "no sé".
+ *
+ * Con `-ml 1 -sow` un segmento es una palabra y sus tokens son los pedazos con
+ * los que el modelo la escribió ("Reside" sale como " Res" + "ide"), así que el
+ * instante de la palabra es el del primero que traiga dato. Se puede tomar el
+ * primero porque el DTW no vuelve para atrás: sobre 634 palabras de un tramo de
+ * 6 minutos de la clase 1, cero veces `t_dtw` bajó respecto de la anterior.
+ */
+function dtwDelSegmento(segment) {
+    for (const token of (segment.tokens || [])) {
+        const centesimas = token ? token.t_dtw : null;
+        if (typeof centesimas !== 'number' || centesimas < 0) continue;
+        return round(centesimas / 100);
+    }
+    return null;
 }
 
 function round(n) {
@@ -319,6 +398,25 @@ function runWhisper(wavPath, options) {
         '-mc', '0'
     ];
 
+    // La alineación por DTW: whisper.cpp la calcula contra el espectrograma, o
+    // sea contra el sonido, en vez de deducirla de los tokens de tiempo que el
+    // modelo escribe. Hasta hoy no corría nunca, y no porque no se pidiera: con
+    // *flash attention* prendida whisper.cpp la apaga sin avisar por ningún lado
+    // que se mire. Medido sobre 90 s de la clase 1, mismo audio y mismo modelo:
+    // con las banderas de antes `t_dtw` venía en -1 en las 221/221 palabras; con
+    // `-nfa` viene poblado en las 199/199.
+    //
+    // Lo que cuesta apagar flash attention, medido sobre 6 minutos de la clase
+    // 1: 10,64 s de reloj contra 9,12 s, un 17% más. Y el texto casi no se
+    // mueve: el habla limpia sale palabra por palabra idéntica y lo único que
+    // divergió fue la cola, donde el micrófono no registra a nadie y las dos
+    // versiones inventan distinto.
+    //
+    // `-ojf` es lo único que hace aparecer los tokens en el JSON, que es donde
+    // vive `t_dtw`. Sin él la alineación se calcula y se tira.
+    const dtwModel = DTW_POR_MODELO[tools.modelName] || null;
+    if (dtwModel) args.push('-nfa', '-dtw', dtwModel, '-ojf');
+
     return new Promise((resolve, reject) => {
         const child = spawn(tools.cli, args, { stdio: ['ignore', 'pipe', 'pipe'] });
         let stderr = '';
@@ -383,6 +481,7 @@ function runWhisper(wavPath, options) {
             resolve({
                 language: (data.result && data.result.language) || opts.language || null,
                 model: tools.modelName,
+                dtwModel,
                 words: collapsed.words,
                 segments: segmentsFromWords(collapsed.words),
                 loopsRemoved: collapsed.removed
@@ -457,10 +556,19 @@ async function transcribeClass(params) {
             model: result.model,
             vad: false,
             language: result.language,
-            audioAligned: Boolean(audioAlign)
+            audioAligned: Boolean(audioAlign),
+            // Con qué grilla se pidió el DTW, o null si este modelo no tiene una
+            // conocida. Se guarda para que abriendo el JSON se pueda distinguir
+            // "esta clase se transcribió sin alineación" de "la alineación corrió
+            // y no encontró nada", que se ven igual desde las palabras.
+            dtw: result.dtwModel || null
         },
         language: result.language,
         wordCount: result.words.length,
+        // Cuántas palabras quedaron con instante de DTW. Es la cuenta que dice si
+        // el reloj del panel va a poder armarse: por debajo del casi-total, algo
+        // apagó la alineación de nuevo.
+        dtwWords: result.words.filter(w => w.dtw != null).length,
         loopsRemoved: result.loopsRemoved,
         // Cuánta puntuación de cierre quedó. Se guarda y no se recalcula al
         // vuelo porque es la medida que dice si este transcript sirve para
@@ -479,6 +587,9 @@ async function transcribeClass(params) {
         `transcript: ${transcript.wordCount} palabras · idioma ${transcript.language} · modelo ${transcript.engine.model}` +
         ` · ${(transcript.puntuacion.ratio * 100).toFixed(1)}% cierran frase (pozo de ${transcript.puntuacion.pozoSec}s)` +
         (audioAlign ? ` · ${audioAlign.movedStarts || 0} arranques corregidos contra el audio` : ' · SIN corregir contra el audio') +
+        (transcript.engine.dtw
+            ? ` · DTW en ${transcript.dtwWords} de ${transcript.wordCount} palabras`
+            : ' · SIN alineación por DTW') +
         (transcript.loopsRemoved ? ` · ${transcript.loopsRemoved} repeticiones colapsadas` : ''));
 
     return { ...transcript, fromCache: false };
@@ -486,7 +597,7 @@ async function transcribeClass(params) {
 
 /** ¿Sirve el transcript guardado para este audio y este motor? */
 function isUsable(cached, source) {
-    if (!cached || cached.version !== TRANSCRIPT_VERSION) return false;
+    if (!cached || !VERSIONES_QUE_SIRVEN.has(cached.version)) return false;
     if (!Array.isArray(cached.words) || !cached.words.length) return false;
     if (!cached.engine || cached.engine.vad !== false) return false;
     return workspace.sameFingerprint(cached.source, source);
@@ -501,5 +612,7 @@ module.exports = {
     isUsable,
     TranscribeError,
     TRANSCRIPT_VERSION,
+    VERSIONES_QUE_SIRVEN,
+    DTW_POR_MODELO,
     MAX_REPEATS
 };

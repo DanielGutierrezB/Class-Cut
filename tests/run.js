@@ -36,6 +36,7 @@ const FILES = [
     'regenerar.test.js',
     'silencios.test.js',
     'retimeo.test.js',
+    'reloj.test.js',
     'repeticiones.test.js',
     'retoma.test.js',
     'repasar.test.js',
