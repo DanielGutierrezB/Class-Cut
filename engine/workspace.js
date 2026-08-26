@@ -29,6 +29,10 @@ const FILES = {
     // disco y no cambia nunca: se calcula la primera vez que se abre el visor y
     // queda guardado.
     silencios: 'silencios.json',
+    // Dónde suena alguien, a resolución de sílaba. Sale del audio y tampoco
+    // cambia nunca: con él se corrigen los tiempos de las palabras, que Whisper
+    // no mide (`voz.js`, `retimeo.js`).
+    voz: 'voz.json',
     // Lo escribe el editor, no el pipeline: es lo único del Backup que no se
     // puede volver a calcular, así que reprocesar no lo toca.
     notas: 'notas.json',

@@ -16,6 +16,8 @@ const exporter = require('./export');
 const cutplanEngine = require('./cutplan');
 const notas = require('./notas');
 const silencios = require('./silencios');
+const voz = require('./voz');
+const retimeo = require('./retimeo');
 const estadoClase = require('./estado-clase');
 
 const CONTEXT_SEC = 12;
@@ -47,6 +49,15 @@ function loadReview(params) {
 
     const wave = cls.liveMixPath ? waveform.peaks(cls.liveMixPath, params.buckets || 3000) : null;
 
+    // Los tiempos con los que el panel alumbra no son los que Whisper guardó:
+    // son esos corregidos contra la onda. El transcript del Backup no se toca
+    // —de él viven los cortes, y rehacerlo obligaría a reprocesar las trece
+    // clases—, así que la corrección se hace acá, al servir. Cuesta 0,3 s por
+    // clase la primera vez y después sale del cache.
+    const palabras = transcript ? transcript.words || [] : [];
+    const mapaDeVoz = voz.asegurar({ root, sequenceName, wavPath: cls.liveMixPath });
+    const alSonido = mapaDeVoz ? retimeo.retimear(palabras, mapaDeVoz) : null;
+
     return {
         ok: true,
         sequenceName,
@@ -61,6 +72,10 @@ function loadReview(params) {
         // Lo que se dijo dos veces y ya se quitó. Va al visor para que el guion
         // pueda contar lo que se hizo en vez de dejarlo como pendiente.
         repeticiones: align ? align.repeticiones || null : null,
+        // Y lo mismo dicho dos veces DENTRO de un bloque, que es otro detector y
+        // otra cuenta: va aparte para que el guion pueda decir cuántos segundos
+        // se fueron por ahí en vez de dejar el hueco sin explicación.
+        retomas: align ? align.retomas || null : null,
         repaso: align ? align.repaso || null : null,
         // Los bordes traen quién los decidió (la nota, una regla o el modelo) y
         // por qué; el visor lo muestra al lado de cada bloque.
@@ -78,7 +93,17 @@ function loadReview(params) {
         // borde hacia afuera deja al descubierto material que no estaba adentro,
         // y el panel tiene que poder leerlo sin volver a pedir nada. La clase más
         // habladora del curso pesa 272 KB acá.
-        words: transcript ? transcript.words || [] : [],
+        //
+        // Van corregidas contra la onda (`retimeo`): las que guardó Whisper
+        // tienen 3.735 palabras del curso durando cero y tiradas enteras puestas
+        // encima de un silencio, y con eso el karaoke no correlaciona con nada.
+        // Sin mapa de voz —una clase sin Live-Mix— salen como vinieron, que es
+        // peor pero es lo que hay.
+        words: alSonido ? alSonido.palabras : palabras,
+        // Cuánto hubo que corregir. Se manda porque es lo que explica una clase
+        // donde el panel sigue yendo por su lado: si acá dice que no se movió
+        // nada, el audio no se pudo leer.
+        retimeo: alSonido ? alSonido.stats : null,
         // Lo que el editor escribió revisando: la nota de cada bloque cuando la
         // cambió, y los comentarios que dejó sobre pedazos del transcript.
         notas: notas.leer(root, sequenceName),
