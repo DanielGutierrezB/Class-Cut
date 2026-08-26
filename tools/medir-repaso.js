@@ -23,8 +23,25 @@
  * el editor tiene configurado, no una copia. Para el A/B entre proveedores
  * están `--ia local|cursor|anthropic` y `--modelo`.
  *
+ * Con `--retimeo` el motor decide sobre las palabras corregidas contra la onda
+ * (`engine/retimeo.js`) en vez de sobre las que guardó Whisper. Es el A/B que
+ * decide si esa corrección —que hoy solo endereza el panel del visor— también
+ * mejora los cortes. Corrido sobre el curso entero dio que no (30 → 32 defectos
+ * de borde, 4 bloques mejor y 9 peor); el porqué está en la cabecera de
+ * `engine/retimeo.js`. La bandera queda porque el resultado hay que poder
+ * volver a sacarlo cuando se toque lo que lo explica.
+ *
+ * Cada plan se mide con los DOS relojes y `tools/comparar-bordes.js` pone las
+ * cuatro celdas una al lado de la otra: los defectos se cuentan mirando qué
+ * palabras caen dentro del bloque, así que cambiarle los tiempos a las palabras
+ * cambia también la vara, y sin las cuatro celdas una variante puede "mejorar"
+ * nada más porque se la mide distinto.
+ *
  *   node tools/medir-repaso.js /ruta/al/curso [--clases 1,4,10] [--sin-repaso] [--ia cursor]
+ *                              [--retimeo] [--volcar /tmp/x.json]
  */
+
+const fs = require('fs');
 
 const scanner = require('../engine/course-scan');
 const probe = require('../engine/media-probe');
@@ -34,6 +51,8 @@ const decidir = require('../engine/decidir');
 const coherence = require('../engine/coherence');
 const ia = require('../engine/ia');
 const ajustes = require('../engine/ajustes');
+const voz = require('../engine/voz');
+const retimeo = require('../engine/retimeo');
 const defectos = require('./defectos');
 
 const root = process.argv[2];
@@ -56,6 +75,15 @@ const sinRepaso = process.argv.includes('--sin-repaso');
 // reprocesar, porque el colapso no toca los tiempos —el bucle se lo queda la
 // última palabra que sobrevive— y el resto del transcript no se mueve.
 const limpiando = process.argv.includes('--limpiar');
+// Decidir sobre los tiempos corregidos contra la onda en vez de sobre los de
+// Whisper. Es lo único que cambia entre los dos brazos del A/B: el transcript,
+// el criterio y su semilla son los mismos.
+const conRetimeo = process.argv.includes('--retimeo');
+// Dónde dejar los bordes de cada bloque para poder compararlos después. La
+// tabla de defectos dice cuántos hay, no cuáles se movieron: un brazo que
+// arregla tres bordes y rompe tres empata en el total y no es lo mismo que uno
+// que no tocó nada.
+const volcarEn = arg('volcar');
 
 (async () => {
     const scan = scanner.scan(root);
@@ -78,6 +106,12 @@ const limpiando = process.argv.includes('--limpiar');
     const pendientes = Object.fromEntries(TIPOS.map(t => [t, 0]));
     const corregidos = Object.fromEntries(TIPOS.map(t => [t, 0]));
     const cortes = Object.fromEntries(defectos.TIPOS.map(t => [t, 0]));
+    // La misma cuenta, medida con el otro reloj. Los defectos se cuentan mirando
+    // qué palabras caen dentro del bloque, así que cambiar los tiempos cambia
+    // también la vara: un brazo podría "mejorar" nada más porque se mide
+    // distinto. Con las dos columnas eso se ve en vez de esconderse.
+    const cortesOtro = Object.fromEntries(defectos.TIPOS.map(t => [t, 0]));
+    const volcado = [];
     const lineas = [];
     const bordes = [];
     let bloques = 0;
@@ -101,8 +135,17 @@ const limpiando = process.argv.includes('--limpiar');
             words = limpio.words;
         }
 
+        // El mapa de voz se calcula y no se pide con `voz.asegurar`: guardarlo
+        // escribiría en el Backup, que es justo lo que esta herramienta promete
+        // no hacer para poder correrse sobre un curso ya entregado. Cuesta 0,3 s
+        // por clase y hace falta en los dos brazos, porque la segunda vara se
+        // mide con los tiempos corregidos aunque el motor no los use.
+        const mapa = cls.liveMixPath ? voz.deLaClase(cls.liveMixPath) : null;
+        const alSonido = mapa ? retimeo.retimear(words, mapa).palabras : null;
+        const paraDecidir = conRetimeo && alSonido ? alSonido : words;
+
         const salida = await decidir.decidirCortes({
-            cls, words, wav, ai: cliente,
+            cls, words: paraDecidir, wav, ai: cliente,
             options: sinRepaso ? { repaso: 'no' } : null
         });
 
@@ -112,10 +155,40 @@ const limpiando = process.argv.includes('--limpiar');
         const rep = salida.alignResult.repeticiones;
         if (rep) segundosQuitados += rep.stats.segundos || 0;
 
-        const medido = defectos.contarClase(words, salida.alignResult.blocks);
+        // La vara principal es la del reloj con el que se decidió, que es la
+        // única lectura coherente: preguntarle a un plan hecho con un reloj qué
+        // dice el otro mezcla dos cosas. La otra va al lado para poder separar
+        // lo que mejoró el corte de lo que mejoró la medición.
+        const medido = defectos.contarClase(paraDecidir, salida.alignResult.blocks);
         for (const tipo of defectos.TIPOS) cortes[tipo] += medido.cuenta[tipo];
+        const otro = alSonido
+            ? defectos.contarClase(conRetimeo ? words : alSonido, salida.alignResult.blocks)
+            : medido;
+        for (const tipo of defectos.TIPOS) cortesOtro[tipo] += otro.cuenta[tipo];
         if (detalle) {
             for (const e of medido.ejemplos) bordes.push(`  clase ${cls.classNumber} · bloque ${e.bloque} · ${e.tipo}: ${e.texto}`);
+        }
+
+        if (volcarEn) {
+            volcado.push({
+                clase: cls.classNumber,
+                sequenceName: cls.sequenceName,
+                defectos: medido.cuenta,
+                defectosOtroReloj: otro.cuenta,
+                ejemplos: medido.ejemplos,
+                bloques: (salida.alignResult.blocks || []).map(b => ({
+                    index: b.index,
+                    startSec: b.startSec,
+                    endSec: b.endSec,
+                    enabled: b.enabled !== false,
+                    inPor: b.in ? b.in.decidedBy || null : null,
+                    outPor: b.out ? b.out.decidedBy || null : null
+                })),
+                hallazgos: ((salida.review && salida.review.findings) || []).map(f => ({
+                    bloque: f.bloque, tipo: f.tipo, gravedad: f.gravedad,
+                    corregido: Boolean(f.corregido), detalle: f.detalle
+                }))
+            });
         }
 
         let quedan = 0;
@@ -163,10 +236,22 @@ const limpiando = process.argv.includes('--limpiar');
 
     // Y la vara de siempre, para que arreglar el guion no pueda empeorar los
     // bordes sin que se vea.
-    console.log(`\n  defectos de borde: ${defectos.TIPOS.map(t => `${t}=${cortes[t]}`).join(' · ')}`);
+    const suma = tabla => defectos.TIPOS.reduce((n, t) => n + tabla[t], 0);
+    console.log(`\n  decidido con: ${conRetimeo ? 'las palabras corregidas contra la onda' : 'las palabras de Whisper'}`);
+    console.log(`  defectos de borde: ${defectos.TIPOS.map(t => `${t}=${cortes[t]}`).join(' · ')} · TOTAL ${suma(cortes)}`);
+    console.log(`  medido con el otro reloj: ${defectos.TIPOS.map(t => `${t}=${cortesOtro[t]}`).join(' · ')} · TOTAL ${suma(cortesOtro)}`);
     if (detalle && bordes.length) console.log(`\n${bordes.join('\n')}`);
 
     if (detalle && lineas.length) console.log(`\n${lineas.join('\n')}`);
+
+    if (volcarEn) {
+        fs.writeFileSync(volcarEn, JSON.stringify({
+            retimeo: conRetimeo,
+            modelo: arranque.model,
+            clases: volcado
+        }, null, 1));
+        console.log(`\n  bordes volcados en ${volcarEn}`);
+    }
 
     ia.parar();
     process.exit(0);

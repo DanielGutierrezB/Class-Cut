@@ -57,6 +57,33 @@
  * la traducción entre el tiempo de la grabación y el del corte —eso `letra.js`
  * ya lo hace bien—, era que los tiempos están mal en el reloj de la grabación.
  *
+ * **Por qué esto no decide los cortes.** La pregunta se hizo y se midió: si el
+ * motor sabe dónde suena de verdad cada palabra, ¿corta mejor? Se corrió el
+ * curso entero por duplicado con `tools/medir-repaso.js --retimeo` —mismo
+ * transcript, mismo criterio, lo único distinto el reloj— y la respuesta fue que
+ * no. Con la vara medida sobre los tiempos corregidos, que es la única lectura
+ * honesta de los dos planes, los defectos de borde van de 30 a 32 sobre 172
+ * bloques: 4 bloques mejoran y 9 empeoran.
+ *
+ * Y mejora justo donde se esperaba —el conteo de toma que se colaba baja de 1 a
+ * 0, el chatter de 3 a 2, los finales colgando de 9 a 8, y 13 IN se corren más
+ * tarde con una mediana de 3,2 s, hasta 27,8 s— pero lo paga en el peor defecto
+ * que hay: los cortes que entran en el sonido pasan de 3 a 8.
+ *
+ * El motivo de eso no es el reparto, es una interacción con
+ * `speech-edges.wordLimits`. Los límites con los que `borde.aplicar` encierra la
+ * búsqueda de onda salen de la palabra vecina, y mientras la palabra rota ocupa
+ * un tramo enorme de reloj, ese tramo hace de barandilla sin querer. Al
+ * corregirla, la barandilla desaparece: en el bloque 4 de la clase 2, "anterior"
+ * pasa de ocupar 793,53-801,02 a 800,63-801,02, el límite de abajo se afloja de
+ * 793,53 a 774,40, y la medición de onda se va a buscar más lejos y se agarra de
+ * un ruido en 798,18 en vez del "¿Te" de 798,86. El corte queda 0,4 s adentro.
+ *
+ * O sea que el defecto que quedó por arreglar no está acá: está en que los
+ * límites de la búsqueda de onda se apoyan en una duración de palabra en la que
+ * este mismo archivo demuestra que no se puede confiar. Hasta que eso se
+ * resuelva, el reparto se queda sirviendo el panel.
+ *
  * Sin estado y sin audio: acá entra un mapa de voz ya medido, así que esto se
  * prueba solo (`tests/retimeo.test.js`).
  */
