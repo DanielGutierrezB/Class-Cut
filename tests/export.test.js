@@ -49,11 +49,12 @@ module.exports = function (t) {
         t.eq(plan.totals.keepSec, 50);
     });
 
-    t.group('export · todos los bloques llevan marcador, en dos formas');
+    t.group('export · solo lleva marcador el bloque que tiene algo escrito');
 
-    t.test('cada bloque del corte tiene el suyo', () => {
-        // En Premiere se salta de marcador en marcador: si falta el de un bloque,
-        // ese bloque no se puede alcanzar con esa navegación.
+    t.test('el bloque sin nota no lleva nada', () => {
+        // Antes iban todos, y los mudos iban de un frame con el nombre de la
+        // vista, para poder saltar de bloque en bloque. Con la vista ya elegida y
+        // encendida en su pista, esa raya no dice nada que el clip no diga.
         const plan = cutplan.buildCutplan({
             blocks: [
                 alignedBlock(0, 100, 130),
@@ -63,14 +64,12 @@ module.exports = function (t) {
             videos: CAMERAS, audios: AUDIOS, durationSec: 600
         });
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
-        t.eq(cut.markers.length, 3, 'tres bloques, tres marcadores');
-        t.eq(cut.markers.filter(m => m.endSec != null).length, 1, 'uno largo, el que tiene nota');
+        t.eq(cut.markers.length, 1, 'de tres bloques, uno solo escribió algo');
+        t.eq(cut.markers[0].endSec != null, true, 'y abarca su bloque entero');
     });
 
-    t.test('la cuenta cierra: un marcador por bloque más los de selección', () => {
+    t.test('la cuenta cierra: los que dicen algo más los de selección', () => {
         // Con la forma de la clase 1 del curso: 15 bloques, 3 con nota del CD.
-        // Esta es la afirmación que faltaba — sin ella, "solo los que dicen algo"
-        // pasaba todas las pruebas y dejaba 12 bloques sin manera de alcanzarlos.
         const conNota = new Set([2, 9, 12]);
         const blocks = [];
         for (let i = 0; i < 15; i++) {
@@ -89,22 +88,24 @@ module.exports = function (t) {
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
 
         const deBloque = cut.markers.filter(m => m.name !== 'Nota');
-        t.eq(deBloque.length, 15, 'quince bloques, quince marcadores');
-        t.eq(deBloque.filter(m => m.endSec != null).length, 3, 'tres largos, los que tienen nota');
-        t.eq(deBloque.filter(m => m.endSec == null).length, 12, 'y doce cortos para saltar');
-        t.eq(cut.markers.length, 16, 'más el comentario de selección');
+        t.eq(deBloque.length, 3, 'tres bloques con nota, tres marcadores');
+        t.eq(deBloque.every(m => m.endSec != null), true, 'los tres abarcan su bloque');
+        t.eq(cut.markers.length, 4, 'más el comentario de selección');
     });
 
-    t.test('sin nota va corto y solo con el nombre de la vista', () => {
+    t.test('un bloque que el editor comentó después sí lleva', () => {
+        // El CD no escribió nada, pero el editor sí: la nota corregida manda, y
+        // es la única razón por la que este bloque aparece en la regla.
         const plan = cutplan.buildCutplan({
             blocks: [{ ...alignedBlock(0, 100, 130), note: '', view: 'R' }],
             videos: CAMERAS, audios: AUDIOS, durationSec: 600
         });
-        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        const guardadas = { bloques: { 0: { note: 'esto lo escribí yo' } }, comentarios: [] };
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
         t.eq(cut.markers.length, 1);
         t.eq(cut.markers[0].name, 'R');
-        t.eq(cut.markers[0].comment, '', 'no dice nada: nadie escribió nada');
-        t.eq(cut.markers[0].endSec, null, 'sin duración, que el formato escribe out=-1');
+        t.eq(cut.markers[0].comment, 'esto lo escribí yo');
+        t.eq(cut.markers[0].endSec != null, true, 'y dura lo que dura el bloque');
     });
 
     t.test('el cue no cuenta como nota: es transcript, no algo que alguien escribió', () => {
@@ -113,8 +114,7 @@ module.exports = function (t) {
             videos: CAMERAS, audios: AUDIOS, durationSec: 600
         });
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
-        t.eq(cut.markers[0].comment, '', 'el cue no se cuela como comentario');
-        t.eq(cut.markers[0].endSec, null, 'y tener cue no lo hace largo');
+        t.eq(cut.markers.length, 0, 'tener cue no le da marcador a un bloque mudo');
     });
 
     t.test('el marcador de un bloque con nota dura el bloque entero', () => {
@@ -123,11 +123,10 @@ module.exports = function (t) {
             videos: CAMERAS, audios: AUDIOS, durationSec: 600
         });
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.eq(cut.markers.length, 1, 'el segundo bloque no escribió nada');
         t.eq(cut.markers[0].startSec, 0);
         t.eq(cut.markers[0].endSec, 30, 'de borde a borde del bloque');
         t.eq(cut.markers[0].comment, 'nota 0');
-        t.eq(cut.markers[1].startSec, 30, 'y el corto del siguiente arranca ahí');
-        t.eq(cut.markers[1].endSec, null);
     });
 
     t.test('la nota que corrigió el editor manda sobre la del marcador', () => {
@@ -173,7 +172,7 @@ module.exports = function (t) {
             comentarios: [{ sourceStartSec: 110, sourceEndSec: 114.5, comentario: 'esto se repite después' }]
         };
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, guardadas);
-        t.eq(cut.markers.length, 2, 'el corto del bloque y este');
+        t.eq(cut.markers.length, 1, 'el bloque no escribió nada: queda solo este');
         const nota = cut.markers.find(m => m.name === 'Nota');
         t.eq(nota.startSec, 10);
         t.eq(nota.endSec, 14.5, 'los 4,5 s de la selección');
@@ -260,6 +259,28 @@ module.exports = function (t) {
         // El mismo tramo del original que la pantalla: es el mismo momento.
         t.eq(recuadro[0].sourceInSec, 30);
         t.eq(recuadro[0].startSec, 10, 'y va donde va ese bloque en el corte');
+    });
+
+    t.test('el clip del recuadro llega con su encuadre y los demás sin nada', () => {
+        // Sin esto el editor tiene que escalar y ubicar el recuadro a mano en cada
+        // bloque de pantalla. Y al revés importa igual: un encuadre colado en un
+        // clip a pantalla completa lo achicaría sin que nadie lo haya pedido.
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, planMixto(), null);
+        t.eq(cut.videoTracks[2][0].encuadre.escala, 26);
+        t.eq(cut.videoTracks[2][0].encuadre.recorte.izq, 18, 'recortado por los lados');
+        t.eq(cut.videoTracks[2][0].encuadre.recorte.der, 18, 'y por los dos igual');
+        t.eq(cut.videoTracks[0][0].encuadre, undefined, 'la cámara a pantalla completa, sin nada');
+        t.eq(cut.videoTracks[1][1].encuadre, undefined, 'y la pantalla tampoco');
+    });
+
+    t.test('el recorte es simétrico, que es lo que deja el recuadro en su lugar', () => {
+        // El recorte reemplaza al efecto Recorte redondeado, que no sobrevive al
+        // export de Premiere. Si fuera desparejo movería el centro de lo que se ve
+        // y el recuadro se correría respecto de donde el editor lo puso.
+        const { recorte } = exporter.ENCUADRE_DEL_RECUADRO;
+        t.eq(recorte.izq, recorte.der, 'lo que se saca de un lado se saca del otro');
+        t.eq(recorte.arriba, 0, 'y el alto queda entero');
+        t.eq(recorte.abajo, 0);
     });
 
     t.test('una clase toda de cámara no estrena pista de recuadro', () => {

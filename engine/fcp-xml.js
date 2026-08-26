@@ -188,6 +188,62 @@ class FileRegistry {
     }
 }
 
+/**
+ * Un parámetro de Basic Motion, escrito como lo escribe Premiere.
+ *
+ * Los `valuemin`/`valuemax` no son adorno: van en el archivo que exporta Premiere
+ * y se copian tal cual, porque lo que se importa bien es lo que él mismo escribe.
+ */
+function paramXml(id, name, value, min, max) {
+    const rango = min == null ? ''
+        : `<valuemin>${min}</valuemin><valuemax>${max}</valuemax>`;
+    return `<parameter authoringApp="PremierePro">` +
+        `<parameterid>${id}</parameterid><name>${name}</name>${rango}` +
+        `<value>${value}</value></parameter>`;
+}
+
+function puntoXml(id, name, punto) {
+    return `<parameter authoringApp="PremierePro">` +
+        `<parameterid>${id}</parameterid><name>${name}</name>` +
+        `<value><horiz>${punto.horiz}</horiz><vert>${punto.vert}</vert></value>` +
+        '</parameter>';
+}
+
+/**
+ * El encuadre de un clip: escala, posición y recorte, en un filtro Basic Motion.
+ *
+ * **Es el único efecto que sobrevive al viaje**, y eso no es una suposición: el
+ * editor armó el recuadro a mano en Premiere con Recorte redondeado, Sombra
+ * paralela y Transform, exportó esa secuencia a FCP7 XML y en el archivo quedó un
+ * solo `<filter>`, el de Basic Motion. Los otros tres los descarta el exportador
+ * de Premiere. Por eso el recuadro llega con la forma y el lugar puestos pero con
+ * las esquinas rectas y sin sombra: eso se aplica a mano una vez y se copia a los
+ * demás clips con pegar atributos.
+ *
+ * Las coordenadas van normalizadas contra el cuadro, con el origen en el centro:
+ * `horiz = (x − ancho/2) / ancho`. Se comprobó contra ese mismo archivo, donde un
+ * punto de anclaje que el panel de Premiere muestra en 1534,7 / 1064,3 quedó
+ * escrito como 0,299342 / 0,48538 — que es exactamente ese punto dividido por
+ * 1920 y 1080.
+ */
+function encuadreXml(encuadre) {
+    if (!encuadre) return '';
+    return '<filter><effect>' +
+        '<name>Basic Motion</name><effectid>basic</effectid>' +
+        '<effectcategory>motion</effectcategory><effecttype>motion</effecttype>' +
+        '<mediatype>video</mediatype><pproBypass>false</pproBypass>' +
+        paramXml('scale', 'Scale', encuadre.escala, 0, 1000) +
+        paramXml('rotation', 'Rotation', 0, -8640, 8640) +
+        puntoXml('center', 'Center', encuadre.centro) +
+        puntoXml('centerOffset', 'Anchor Point', encuadre.anclaje) +
+        paramXml('antiflicker', 'Anti-flicker Filter', 0, '0.0', '1.0') +
+        paramXml('leftcrop', 'Left', encuadre.recorte.izq, '0.0', '100.0') +
+        paramXml('topcrop', 'Top', encuadre.recorte.arriba, '0.0', '100.0') +
+        paramXml('rightcrop', 'Right', encuadre.recorte.der, '0.0', '100.0') +
+        paramXml('bottomcrop', 'Bottom', encuadre.recorte.abajo, '0.0', '100.0') +
+        '</effect></filter>';
+}
+
 function clipItemXml(params) {
     const { id, registry, source, startFrame, endFrame, inFrame, outFrame, enabled, fps, kind } = params;
     const entry = registry.register(source);
@@ -202,6 +258,8 @@ function clipItemXml(params) {
         ? `<labels><label2>${xmlSafe(source.label)}</label2></labels>`
         : '';
 
+    // El filtro va después del `<file>`, que es donde lo pone Premiere en el
+    // archivo que exporta él mismo.
     return `        <clipitem id="${id}" frameBlend="FALSE">` +
         `<masterclipid>${entry.masterclip}</masterclipid>` +
         `<name>${xmlSafe(source.name || '')}</name>` +
@@ -209,7 +267,7 @@ function clipItemXml(params) {
         `<duration>${sourceDuration}</duration>${rateXml(fps)}` +
         `<start>${startFrame}</start><end>${endFrame}</end>` +
         `<in>${inFrame}</in><out>${outFrame}</out>` +
-        `${label}${fileXml}${sourceTrack}</clipitem>\n`;
+        `${label}${fileXml}${encuadreXml(params.encuadre)}${sourceTrack}</clipitem>\n`;
 }
 
 /**
@@ -318,6 +376,7 @@ function sequenceXml(params) {
         inFrame: toFrames(clip.sourceInSec || 0, fps),
         outFrame: toFrames((clip.sourceInSec || 0) + (clip.endSec - clip.startSec), fps),
         enabled: clip.enabled,
+        encuadre: clip.encuadre,
         fps,
         kind
     })).join('');

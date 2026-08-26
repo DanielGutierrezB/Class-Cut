@@ -958,6 +958,44 @@ comentario sobre material que después quedó afuera no se pierde, pero tampoco
 viaja al XML final —un marcador suelto ahí confunde más de lo que ayuda—; vuelve
 a aparecer si el bloque se recupera.
 
+Y al XML **solo llega el bloque que tiene algo escrito**, abarcando su tramo de
+borde a borde. Antes iban todos: los mudos salían de un frame con el nombre de la
+vista, porque el marcador era la única forma de saltar de bloque en bloque. Eso
+dejó de tener sentido cuando el corte empezó a llegar con la vista ya elegida y
+encendida en su pista — la raya no decía nada que el clip no dijera, y llenaba la
+regla de marcas por las que nadie iba a pasar. En el curso son 170 marcadores que
+bajan a 69, y los límites de cada bloque los siguen diciendo los cortes.
+
+### El recuadro llega con su encuadre puesto
+
+En los bloques que van con el grabador de pantalla, la cámara del profesor viaja
+en una pista aparte para el recuadro. Llegaba a pantalla completa, así que había
+que escalarla y ubicarla a mano en cada bloque.
+
+Ahora llega encuadrada, y los números no están calculados: **están copiados del
+Premiere del editor**. Armó el recuadro como lo quiere, exportó esa secuencia a
+FCP7 XML y de ahí salieron la escala, el centro y el anclaje. Calcularlos habría
+sido adivinar dos veces —la geometría que le gusta y las unidades del formato— y
+el archivo que Premiere escribe es el archivo que Premiere lee.
+
+Ese mismo archivo contestó qué se puede y qué no. Su clip llevaba Basic Motion,
+Recorte redondeado, Sombra paralela y Transform, y **en el XML quedó un solo
+`<filter>`**: los otros tres los descarta el exportador de Premiere. Así que por
+acá viajan la escala, la posición y el recorte, y nada más. Las esquinas
+redondeadas y la sombra se aplican a mano en un bloque y se copian al resto con
+pegar atributos.
+
+También confirmó las unidades, que es donde la documentación que circula se
+contradice: un punto de anclaje que el panel de Premiere muestra en 1534,7 /
+1064,3 quedó escrito como `0,299342 / 0,48538`, o sea el punto dividido por el
+ancho y el alto del cuadro, con el origen en el centro.
+
+El recorte es lo único que no vino de ahí. En su secuencia la forma casi cuadrada
+la hacía el Recorte redondeado, que no viaja, así que el recuadro habría llegado
+16:9 y mucho más ancho de lo que él ve. Basic Motion trae los suyos, y con 18 %
+por lado quedan 1229 × 1080 — la misma proporción 1,14 que se mide en su monitor.
+Simétrico a propósito: desparejo movería el centro de lo que se ve.
+
 ### Guardar deja al día toda la carpeta, no solo la clase abierta
 
 Los comentarios se guardan al instante, pero al XML llegan solo al exportar, y

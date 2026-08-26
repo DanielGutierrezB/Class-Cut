@@ -195,6 +195,34 @@ function markersFromAlign(alignResult, parsed, guardadas) {
 const VISTA_DEL_PROFESOR = 'PV';
 
 /**
+ * Dónde va el recuadro del profesor sobre el grabador de pantalla.
+ *
+ * Los números no están calculados: **están copiados del Premiere del editor**. Él
+ * armó el recuadro como lo quiere, exportó esa secuencia a FCP7 XML y de ahí
+ * salieron la escala, el centro y el anclaje, tal cual. Calcularlos habría sido
+ * adivinar dos veces —la geometría que le gusta y las unidades del formato— y no
+ * hay por qué: el archivo que Premiere escribe es el archivo que Premiere lee.
+ *
+ * El recorte es el único que no vino de ahí, y tiene su motivo. En su secuencia
+ * la forma casi cuadrada la hacía el efecto Recorte redondeado, que **el
+ * exportador de Premiere descarta**: en el XML los cuatro recortes de Basic
+ * Motion quedaron en cero y el recuadro habría llegado 16:9, mucho más ancho de
+ * lo que él ve. Basic Motion trae los suyos y esos sí viajan, así que se
+ * reproduce ahí: 18 % por lado deja 1229 × 1080, la misma proporción 1,14 que se
+ * mide en su monitor. Simétrico a propósito, para que el centro no se mueva.
+ *
+ * Lo que no llega de ninguna manera son las esquinas redondeadas y la sombra: no
+ * existen como parámetro en el formato. Se aplican a mano en un bloque y se pegan
+ * atributos en el resto.
+ */
+const ENCUADRE_DEL_RECUADRO = {
+    escala: 26,
+    centro: { horiz: 0.0986844, vert: -0.0818712 },
+    anclaje: { horiz: 0.299342, vert: 0.48538 },
+    recorte: { izq: 18, der: 18, arriba: 0, abajo: 0 }
+};
+
+/**
  * La clase ya cortada: cada bloque uno detrás de otro, con su vista.
  *
  * Las pistas quedan por papel y no por casualidad del orden del material:
@@ -232,7 +260,8 @@ function cutTracks(cls, plan, guardadas) {
             startSec: segment.timelineStartSec,
             endSec: segment.timelineEndSec,
             sourceInSec: segment.sourceStartSec,
-            enabled: true
+            enabled: true,
+            encuadre: ENCUADRE_DEL_RECUADRO
         })));
     }
 
@@ -244,33 +273,31 @@ function cutTracks(cls, plan, guardadas) {
         enabled: Boolean(audio.isLiveMix)
     })));
 
-    // Un marcador por bloque, TODOS, porque en Premiere los marcadores no son
-    // solo para leer: son cómo se recorre la secuencia. Los límites de cada
-    // bloque ya los dicen los cortes entre clips, pero saltar de bloque en bloque
-    // se hace de marcador en marcador, y para eso no puede faltar ninguno.
+    // Solo los bloques que tienen algo escrito llevan marcador, y abarcan el
+    // bloque de borde a borde: así se lee de un vistazo a qué tramo se refiere
+    // la nota sin buscarla con zoom.
     //
-    // De ahí las dos formas, que dependen de si alguien escribió algo:
-    //
-    // - Con texto —la nota del CD o la que corrigió el editor— el marcador abarca
-    //   el bloque de borde a borde: así se lee de un vistazo a qué tramo se
-    //   refiere sin buscarlo con zoom.
-    // - Sin texto va corto y sin comentario, solo con el nombre de la vista: está
-    //   para saltar, y no tiene nada que decir. Sin `endSec` el formato lo escribe
-    //   con `out` en -1, que es su manera de decir "sin duración" y en la línea de
-    //   tiempo es la raya de un frame.
+    // Antes iban TODOS, porque en Premiere el marcador no es solo para leer sino
+    // cómo se recorre la secuencia, y los que no tenían nota que decir iban de un
+    // frame con el nombre de la vista. Eso dejó de tener sentido cuando el corte
+    // empezó a llegar con la vista ya elegida y encendida en su pista: la raya de
+    // un frame no aportaba nada que el clip no dijera, y llenaba la regla de
+    // marcas por las que nadie iba a pasar. Los límites de cada bloque los siguen
+    // diciendo los cortes entre clips.
     //
     // Y el cue NO cuenta como texto: es el arranque del transcript, no algo que
-    // alguien haya escrito. Un bloque sin nota queda corto aunque tenga cue.
+    // alguien haya escrito. Un bloque sin nota no lleva marcador aunque tenga cue.
     //
-    // El color es el que eligió el CD, en las dos formas, y viaja tal cual.
+    // El color es el que eligió el CD y viaja tal cual.
     const markers = [];
     for (const segment of kept) {
         const texto = notas.notaDeBloque(guardadas, segment.blockIndex, segment.note || '');
+        if (!texto) continue;
         markers.push({
             name: segment.view,
             comment: texto,
             startSec: segment.timelineStartSec,
-            endSec: texto ? segment.timelineEndSec : null,
+            endSec: segment.timelineEndSec,
             color: markerColor(segment)
         });
     }
@@ -387,5 +414,6 @@ function fmt(seconds) {
 
 module.exports = {
     exportClass, fullTracks, cutTracks,
-    markersFromParsed, markersFromAlign, markerColor, videoSource
+    markersFromParsed, markersFromAlign, markerColor, videoSource,
+    ENCUADRE_DEL_RECUADRO
 };
