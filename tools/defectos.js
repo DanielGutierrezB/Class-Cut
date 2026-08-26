@@ -14,6 +14,7 @@
 
 const edges = require('../engine/speech-edges');
 const repeticiones = require('../engine/repeticiones');
+const retoma = require('../engine/retoma');
 // Reconocer la claqueta lo hace el motor, que la busca en el audio para
 // sincronizar: con una copia acá, la medición podía dejar de ver justo la que el
 // piso está impidiendo que entre.
@@ -24,7 +25,7 @@ const clap = require('../engine/clap-detect');
 // acá, la medición podía dejar de ver justo lo que el arreglo estaba quitando.
 const CONECTOR_HUERFANO = edges.CONECTOR_HUERFANO;
 
-const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'conector', 'mitadPalabra', 'repetido'];
+const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'conector', 'mitadPalabra', 'repetido', 'retoma'];
 
 /**
  * ¿El corte se metió dentro del sonido?
@@ -123,6 +124,21 @@ function revisarBloque(words, block, anterior) {
             const cabeza = dentro.slice(0, 5).map(edges.textOf).join(' ');
             fallas.push(['repetido', `el anterior ya decía «${cabeza}…»`]);
         }
+    }
+
+    // Retoma: las dos tomas de lo mismo quedaron DENTRO de este bloque.
+    //
+    // Es la otra mitad del defecto de arriba y hacía falta contarla aparte,
+    // porque la de arriba mira el bloque anterior y por eso no puede ver nada
+    // cuando el CD marcó el IN antes del primer intento y el OUT después del
+    // segundo. Sin esta línea, el bloque 3 de la clase 1 —41,2 s con la misma
+    // explicación dos veces— medía cero defectos, y una vara que no ve el
+    // defecto no sirve para decidir si el arreglo sirvió.
+    const dentroDelBloque = retoma.buscarEnBloque(words, block, {});
+    if (dentroDelBloque) {
+        fallas.push(['retoma',
+            `${dentroDelBloque.seVaSec}s de más: la toma se rehace tras la cuenta de ` +
+            `${dentroDelBloque.cuentaSec}s`]);
     }
 
     return fallas;

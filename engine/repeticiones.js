@@ -208,6 +208,12 @@ function buscar(words, blocks, options) {
 /**
  * Recorta de verdad: mueve el OUT del bloque y lo deja medido como cualquier
  * otro borde, con su colchón de aire y sin entrar en la palabra vecina.
+ *
+ * `decidedBy` entra por parámetro porque la limpieza de acá abajo —las vueltas
+ * que destapan el "Pausa. Listo. 3, 2," de delante del punto de corte— también
+ * la necesita `retoma.js`, y lo único que cambia entre los dos es quién queda
+ * firmando el borde. Copiar el bucle para cambiar una cadena habría sido tener
+ * dos limpiezas que se separan.
  */
 function recortar(block, timeSec, params) {
     const { words, wav, options } = params;
@@ -245,7 +251,8 @@ function recortar(block, timeSec, params) {
     }
 
     return borde.aplicar({
-        block, kind: 'OUT', timeSec: limpio, words, wav, options, decidedBy: 'repetido'
+        block, kind: 'OUT', timeSec: limpio, words, wav, options,
+        decidedBy: params.decidedBy || 'repetido', reason: params.reason
     });
 }
 

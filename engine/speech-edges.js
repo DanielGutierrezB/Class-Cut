@@ -125,6 +125,33 @@ function esConteo(word, vecina) {
 }
 
 /**
+ * TODOS los conteos de toma de una lista de palabras, no solo el de la cabeza.
+ *
+ * Hace falta entero porque un conteo también aparece en el MEDIO de un bloque, y
+ * ahí significa otra cosa: que el CD marcó el IN antes de una toma que el
+ * profesor rehízo, y que las dos quedaron adentro del mismo bloque. Eso lo busca
+ * `retoma.js`, y para encontrarlo no sirve mirar solo las primeras palabras.
+ *
+ * Los tramos son maximales: "3, 2, 1" es uno y no tres, porque lo que interesa
+ * es dónde termina la cuenta y arranca la clase.
+ *
+ * @returns {Array<{desde:number, hasta:number}>} índices, en orden
+ */
+function conteosEn(lista) {
+    const tramos = [];
+    let i = 0;
+    while (i + 1 < lista.length) {
+        if (esConteo(lista[i], lista[i + 1]) && esConteo(lista[i + 1], lista[i])) {
+            let fin = i + 1;
+            while (fin + 1 < lista.length && esConteo(lista[fin + 1], lista[fin])) fin++;
+            tramos.push({ desde: i, hasta: fin });
+            i = fin + 1;
+        } else i++;
+    }
+    return tramos;
+}
+
+/**
  * ¿Dónde termina el conteo de toma que abre esta lista de palabras?
  *
  * Vive acá y no en cada sitio que lo necesita porque son tres: el recorte lo
@@ -135,9 +162,14 @@ function esConteo(word, vecina) {
  * @returns {number} índice de la última palabra del conteo, o -1 si no hay
  */
 function finDeConteo(lista) {
+    // Solo los que empiezan lo bastante cerca del arranque como para ser el
+    // conteo de ESTA toma, y sin pasar del tope: un conteo que sigue más allá de
+    // la octava palabra ya no es la cuenta, es la clase hablando de números.
+    const tope = MIRAR_CONTEO - 1;
     let fin = -1;
-    for (let i = 0; i + 1 < Math.min(lista.length, MIRAR_CONTEO); i++) {
-        if (esConteo(lista[i], lista[i + 1]) && esConteo(lista[i + 1], lista[i])) fin = i + 1;
+    for (const tramo of conteosEn(lista)) {
+        if (tramo.desde + 1 > tope) break;
+        fin = Math.max(fin, Math.min(tramo.hasta, tope));
     }
     return fin;
 }
@@ -172,6 +204,15 @@ function wordLimits(words, timeSec, kind) {
         // Nada de lo que ya terminó antes del corte entra al bloque.
         let previousEnd = null;
         for (const word of list) {
+            // Y "antes" pide que ARRANQUE antes, no solo que termine a tiempo.
+            // Whisper entrega palabras de duración cero, y una de esas justo en
+            // el corte cumplía la segunda condición sin cumplir la primera: se
+            // contaba como palabra anterior y el suelo quedaba pegado al corte,
+            // así que el colchón de aire no tenía dónde caber. Abriendo el
+            // bloque 3 de la clase 1 en su segunda toma —«En» dura 0 s y arranca
+            // exactamente en 263.04— el corte salía con 0,4 frames de aire en vez
+            // de los diez que caben en los 0,66 s de silencio que hay delante.
+            if (word.start >= timeSec - 0.01) break;
             if (word.end <= timeSec + 0.01) previousEnd = word.end;
             else break;
         }
@@ -490,6 +531,7 @@ module.exports = {
     spoken,
     textOf,
     esConteo,
+    conteosEn,
     finDeConteo,
     abreConConteo,
     STRONG_CHATTER,

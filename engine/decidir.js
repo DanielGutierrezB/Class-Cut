@@ -21,6 +21,7 @@ const align = require('./align');
 const speech = require('./speech-edges');
 const cutRefine = require('./cut-refine');
 const repeticiones = require('./repeticiones');
+const retoma = require('./retoma');
 const coherence = require('./coherence');
 const repasar = require('./repasar');
 
@@ -98,6 +99,27 @@ async function decidirCortes(params) {
     // ya se iba a arreglar. Y antes de leer, porque si no la lectura reporta como
     // problema pendiente algo que se puede quitar sin preguntarle a nadie.
     notify('despegar', {});
+
+    // Las retomas internas van PRIMERO, antes de las que cruzan el borde entre
+    // dos bloques. El detector de repeticiones compara la cola de un bloque
+    // contra la CABEZA del siguiente, y cuando ese siguiente arranca con una
+    // toma que el profesor rehizo, esa cabeza es material que no va a existir:
+    // se estaría midiendo el empalme contra la versión mala. Abriendo primero el
+    // bloque en su toma buena, lo que compara después es lo que de verdad va a
+    // sonar.
+    try {
+        const retomas = retoma.quitarRetomas({ alignResult, words, wav, options });
+        for (const h of retomas.hallazgos.filter(x => x.accion === 'no se pudo')) {
+            warnings.push({
+                code: 'retoma',
+                message: `Bloque ${h.bloque + 1}: la explicación está dos veces adentro ` +
+                    `(el profesor la rehace en ${h.tomaSec}s) y no se pudo arreglar solo.`
+            });
+        }
+    } catch (err) {
+        warnings.push({ code: 'retoma_fallo', message: `No se pudieron quitar las retomas: ${err.message}` });
+    }
+
     try {
         const quitadas = repeticiones.quitarRepeticiones({ alignResult, words, wav, options });
         for (const h of quitadas.hallazgos.filter(x => x.accion === 'no se pudo')) {

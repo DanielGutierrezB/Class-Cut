@@ -42,10 +42,11 @@ function opt(options, key) {
  *   wav        {file, info} del Live-Mix, o null para no medir
  *   options    { fps, padFrames }
  *   decidedBy  quién lo decidió, para poder explicarlo después
+ *   reason     y por qué, en una línea que el visor muestra al lado del bloque
  * @returns {number|null} dónde quedó, o null si el bloque no tiene ese borde
  */
 function aplicar(params) {
-    const { block, kind, timeSec, words, wav, options, decidedBy } = params;
+    const { block, kind, timeSec, words, wav, options, decidedBy, reason } = params;
     const edge = kind === 'IN' ? block.in : block.out;
     if (!edge) return null;
 
@@ -93,6 +94,10 @@ function aplicar(params) {
     edge.alignedSec = Math.round(aplicado * 1000) / 1000;
     edge.shiftSec = Math.round((edge.alignedSec - edge.originalSec) * 1000) / 1000;
     if (decidedBy) edge.decidedBy = decidedBy;
+    // El motivo viaja con el borde porque es lo que el visor muestra al lado del
+    // bloque: un IN que se abrió 29 s después del marcador sin decir por qué se
+    // lee como un error de la herramienta.
+    if (reason) edge.reason = reason;
     if (audio) edge.audio = audio;
 
     if (kind === 'IN') block.startSec = edge.alignedSec;
@@ -116,6 +121,7 @@ function recordar(block, kind) {
         alignedSec: edge ? edge.alignedSec : null,
         shiftSec: edge ? edge.shiftSec : null,
         decidedBy: edge ? edge.decidedBy : null,
+        reason: edge ? edge.reason : null,
         audio: edge ? edge.audio : null,
         startSec: block.startSec,
         endSec: block.endSec
@@ -129,6 +135,7 @@ function deshacer(memoria) {
         edge.alignedSec = memoria.alignedSec;
         edge.shiftSec = memoria.shiftSec;
         if (memoria.decidedBy == null) delete edge.decidedBy; else edge.decidedBy = memoria.decidedBy;
+        if (memoria.reason == null) delete edge.reason; else edge.reason = memoria.reason;
         if (memoria.audio == null) delete edge.audio; else edge.audio = memoria.audio;
     }
     block.startSec = memoria.startSec;

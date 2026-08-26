@@ -33,6 +33,11 @@ const baseline = {
     conector: 7,
     mitadPalabra: 2,
     repetido: 2,
+    // La vara de la retoma interna no es la de "antes de Cortes con criterio":
+    // cuando se agregó el defecto ya no había con qué comparar hacia atrás, así
+    // que es lo que había en el curso el día que se empezó a ver — 4 bloques de
+    // 172, en las clases 1, 4, 7 y 11, con 137,8 s dichos dos veces.
+    retoma: 4,
     total: 174
 };
 
@@ -106,11 +111,13 @@ console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.
 console.log(`  arranca con conector huérfano    ${fmt(cuenta.conector, baseline.conector)}`);
 console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}`);
 console.log(`  repite el bloque anterior        ${fmt(cuenta.repetido, baseline.repetido)}`);
+console.log(`  la retoma quedó adentro          ${fmt(cuenta.retoma, baseline.retoma)}`);
 
 const objetivos = [
     ['0 bloques terminando en chatter', cuenta.chatter === 0],
     ['0 cortes a mitad de palabra', cuenta.mitadPalabra === 0],
-    ['finales a mitad de frase en una decena', cuenta.colgando <= 15]
+    ['finales a mitad de frase en una decena', cuenta.colgando <= 15],
+    ['0 retomas dentro de un bloque', cuenta.retoma === 0]
 ];
 console.log('\nobjetivos del plan:');
 for (const [texto, ok] of objetivos) console.log(`  ${ok ? '✓' : '✗'} ${texto}`);
