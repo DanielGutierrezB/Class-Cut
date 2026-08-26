@@ -425,11 +425,23 @@ empeora:
 Que `colgando` no suba es el dato que más costó: arreglar el arranque de un bloque
 y romperle el final a otro habría sido un empate disfrazado de mejora.
 
-El renglón de "mitad de palabra" de esta tabla es de cuando ese defecto se contaba
-con `airFrames`, o sea que dice cuánto se equivocaba el transcript y no dónde quedó
-el corte: **no es comparable con los números de hoy**. Contado como lo oye el
-editor, el curso entero tiene 1 corte encima de alguien hablando sobre 170 bloques.
-Los otros renglones no dependen de eso y siguen valiendo.
+Dos renglones de esta tabla son de cuando se contaban mal y **no son comparables
+con los números de hoy**. "Mitad de palabra" salía de `airFrames`, que dice cuánto
+se equivocaba el transcript y no dónde quedó el corte; contado como lo oye el
+editor, el curso entero tiene 0 cortes encima de alguien hablando sobre 170
+bloques. Y "conector huérfano" salía de preguntar por el hueco hasta el bloque
+anterior, que es material grabado y no clase; con la pregunta correcta el curso
+tiene 0. Los otros renglones no dependen de eso y siguen valiendo.
+
+Y hay algo peor que un renglón no comparable, que se descubrió midiendo esto de
+nuevo: **el arreglo del conector casi nunca quita el conector**. El corte no puede
+pasar del final que el transcript le da a la palabra de antes
+(`speech-edges.wordLimits`), y en el reloj del DTW ese final cae ANTES del sonido,
+así que el borde se queda de este lado. Cortando el Live-Mix por el borde nuevo y
+transcribiendo ese pedazo, en **11 de los 15** el bloque sigue abriendo con su
+conector: «Y la sexta herramienta no es…», «Pero antes de abrir la terminal…»,
+«También nos está dando…». Solo 4 lo pierden de verdad, y el daño de la clase 13
+fue uno de esos 4.
 
 El diagnóstico de por qué un arreglo no se aplicó se mira con:
 
@@ -455,6 +467,101 @@ antes: "Y en cuarto lugar, tenemos…" abre perfecto cuando el bloque de antes
 viene pegado, porque el "en tercero" está ahí y se lee de corrido. Esa es la
 guarda — la misma que ya usaba [tools/defectos.js](tools/defectos.js) para
 contarlos.
+
+#### La mitad de la lista de conectores no podía coincidir
+
+La lista trae cinco conectores **de dos palabras** —«sin embargo», «es decir», «o
+sea», «por eso», «así que»— y la expresión que la usa se probaba contra **una
+sola**. Esa mitad de la regla no podía dispararse nunca, y no se notaba porque
+ninguna de sus palabras sueltas es un conector: preguntando de a una, ni "sin" ni
+"o" ni "sea" ni "así" ni "que" están en la lista, así que la regla contestaba que
+no y todo seguía andando.
+
+Arreglado —la regla mira las dos primeras palabras del bloque, y compara las dos
+contra la nota del CD—, sobre el curso aparecen **3 bloques más**: «Sin embargo,
+acá tenemos una situación» y «Sin embargo, acá pasa una situación» en la clase 1,
+y «Así que vamos directamente, le damos speckit-implement» en la 12. Los tres los
+abrió así el CD, palabra por palabra, y en los tres el bloque anterior cierra su
+frase y suena justo antes. O sea lo mismo que ya se había medido con los otros
+doce: **el renglón sigue en 0 y no se movió ningún corte**. Lo que cambia es que
+ahora la regla puede ver un «Sin embargo» que un corte sí haya dejado huérfano;
+hasta acá no podía.
+
+Comparar las dos palabras y no solo la primera importa: con «Sin» solo, una nota
+del CD que abriera con «Sin duda» daría el conector por pedido.
+
+#### Abrir partiendo una frase, contado con la onda
+
+Este defecto es nuevo y nunca se había mirado caso por caso. Decía 7 sobre el
+curso entregado. Escuchándolos —cortando el Live-Mix por los bordes del plan y
+transcribiendo **ese** pedazo, que es lo único que no se puede discutir— **5 de
+los 7 tenían la palabra adentro**:
+
+| bloque | la cuenta decía que perdía | lo que de verdad suena |
+|---|---|---|
+| clase 1 · 14 | «y» | «**Y** justo ese es el problema por el que el Bitcoin no escala…» |
+| clase 2 · 1 | «Un» | «**Un** PROM sirve para crear demos…» |
+| clase 2 · 15 | «Ahora» | «**Ahora** vamos a hacer el ejercicio leyéndolo en conjunto…» |
+| clase 10 · 5 | «Y» | «**Y** si damos clic en este link…» |
+| clase 3 · 13 | «que luego,» | «En este punto vamos a parar…», que es una frase entera |
+
+Las cuatro primeras son la misma cosa. El bloque abre en el **ataque** de la
+primera palabra de la toma, y esa palabra figura en el transcript durando 10 ms y
+terminando un pelo antes del corte, así que `wordsInside` la deja afuera por su
+margen de 20 ms. Las distancias son 3, 10, 17 y 30 milisegundos — **menos de un
+frame**, y el reloj de Whisper no tiene resolución para eso: el 8,3% de sus
+palabras figura durando cero. La vara estaba comparando dos relojes distintos, que
+es la misma trampa de `airFrames` con otra cara.
+
+Así que la pregunta se partió en dos. La primera sigue siendo del transcript: la
+palabra que quedó del otro lado, ¿cerraba una frase? La segunda va a la onda, con
+el mapa de voz de [engine/voz.js](engine/voz.js): entre donde el reloj pone esa
+palabra y el corte, **¿sonó alguien?** Si no sonó nadie, la palabra no se perdió.
+
+No sirve `audio-onset.voiceAt` para esto aunque conteste algo parecido: saca el
+umbral de una ventana de ±2,3 s, y en habla continua esa ventana es toda voz, así
+que el umbral local se le sube y contesta que no. Con el profesor diciendo
+«…escribiendo test unitarios» encima del corte del bloque 2 de la clase 11,
+`voiceAt` da false en 132,5 · 133,0 · 133,4 · 133,6 y 133,7. El mapa de voz saca el
+umbral de la clase entera y ve el tramo completo: 132,06–133,74.
+
+**Quedan 2, y son exactamente los 2 bloques del curso con el transcript roto.**
+Esta cuenta es lo único que los señala:
+
+- **clase 11, bloque 2** suena «con Cypress. Sin embargo, con sistemas
+  agénticos…» y le faltan seis segundos de su propia frase. El profesor había
+  dicho «Tradicionalmente, para evaluar un sistema como estos, deberíamos
+  dedicarle horas escribiendo test unitarios con Cypress»; hubo dos tomas y el
+  transcript guardado se comió la segunda entera, así que la nota del CD
+  —«Tradicionalmente, para evaluar un sistem»— no tuvo dónde anclar.
+- **clase 3, bloque 13** abre bien, y esta cuenta lo marca por la palabra suelta
+  de una toma abandonada que tiene delante. Pero el bloque igual está mal: adentro
+  trae la toma **dos veces**, con el «Ok. Ok. 3, 2, 1.» en el medio. `retoma` no
+  lo ve porque el transcript también perdió ese tramo. La cuenta acierta por la
+  razón equivocada.
+
+Los dos son de la transcripción, no del corte, así que **no se movió ningún corte
+por esto**. Y hay un tercero que esta cuenta ya **no** ve, anotado para que no se
+busque: el bloque 4 de la clase 13 suena «no me refiero al código…» sin la «Y» que
+el CD había escrito delante. El profesor hizo una pausa de 0,64 s después de esa
+«Y», así que en la onda es un tramo aparte y entre él y el corte no suena nadie —
+indistinguible de una toma que empieza ahí. Lo que lo delata es la nota del CD, no
+esto.
+
+Cambiar este criterio sin correr el guardián es peligroso, y también está medido:
+una primera versión preguntaba "¿el corte cae encima de alguien hablando?" y sobre
+el curso daba lo correcto (7 → 1), pero dejaba pasar la variante que se traga el
+conector, porque `audio-onset` pone el corte **siempre** del lado del silencio.
+Por eso hay una prueba que se corre:
+
+```bash
+node tools/variante-conector.js "/ruta/al/curso"
+```
+
+Arma la variante sobre los planes entregados y en memoria, con la misma
+maquinaria que usaría el repaso, y saca la tabla entera de las dos. Hoy: 15 IN
+movidos, `abriendo` de 2 a 6 y el total de 8 a 12. Y coincide 15 de 15 con lo que
+se oye al cortar el audio por el borde nuevo.
 
 ### El criterio se elige en Ajustes
 

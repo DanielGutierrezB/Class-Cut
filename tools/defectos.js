@@ -87,9 +87,10 @@ function midioElSonido(edge) {
  * @param {Array} words palabras del transcript de la clase
  * @param {object} block bloque del alineado
  * @param {object|null} anterior el bloque de antes, para ver repeticiones
+ * @param {object|null} voz mapa de voz de la clase (`engine/voz.js`)
  * @returns {Array<[string,string]>} pares [tipo, explicación]
  */
-function revisarBloque(words, block, anterior) {
+function revisarBloque(words, block, anterior, voz) {
     const dentro = edges.wordsInside(words, block.startSec, block.endSec);
     const fallas = [];
 
@@ -126,10 +127,16 @@ function revisarBloque(words, block, anterior) {
         }
         // Y que tampoco ABRA partiendo una frase, que es el mismo defecto del
         // otro lado del bloque y era el punto ciego de esta vara: sin esta línea,
-        // correr un IN detrás del conector con el que abría mejoraba el total de
-        // 18 a 7 dejando once bloques abriendo en «la sexta herramienta no es…».
-        // El criterio, con los números, está en `speech-edges.abreAMitad`.
-        if (edges.abreAMitad(words, block.startSec, block.endSec)) {
+        // correr un IN detrás del conector con el que abría mejoraba el total
+        // dejando bloques abriendo en «la sexta herramienta no es…».
+        //
+        // Pide el mapa de voz porque la segunda mitad de la pregunta —si el
+        // corte de verdad se llevó esa palabra— no la puede contestar el
+        // transcript: sus duraciones de palabra fallan por más de lo que acá se
+        // está midiendo. Sin el mapa esto contestaba 7 sobre el curso y la
+        // respuesta es 1. El criterio y los siete casos, en
+        // `speech-edges.abreAMitad`.
+        if (edges.abreAMitad(words, block.startSec, block.endSec, voz)) {
             fallas.push(['abriendo', `${dentro.slice(0, 4).map(edges.textOf).join(' ')}…`]);
         }
         // Huérfano solo si el CD no abrió el bloque así. El criterio y los
@@ -141,13 +148,20 @@ function revisarBloque(words, block, anterior) {
         // sobreviven uno tras otro, así que el anterior suena siempre justo
         // antes. Sobre el curso con la alineación acústica informaba 12 bloques
         // "arrancando con un conector huérfano" y los 12 los había escrito así el
-        // director; con la pregunta correcta son 0. El renglón subía de 7 a 12
+        // director (hoy son 15, con los de dos palabras que la lista no podía
+        // ver); con la pregunta correcta son 0. El renglón subía de 7 a 12
         // por lo mismo que bajaban los otros: sobre los mismos cortes, el reloj
         // crudo veía 9 y el del DTW ve 12, porque con los tiempos viejos la cola
         // del conteo caía adentro del bloque y la primera palabra que esta cuenta
         // miraba era el "1." y no el conector. Los tres que aparecían no eran
         // cortes nuevos: eran los mismos cortes, contados sin el conteo encima.
-        if (edges.conectorSinPedir(primera, block.cueIn)) {
+        //
+        // Se le pasan las DOS primeras palabras y no la primera: cinco de los
+        // conectores de la lista son de dos («sin embargo», «o sea», «así
+        // que»…) y con una sola no podían coincidir nunca. Sobre el curso son 3
+        // bloques más de los que la regla podía ver, y los 3 los abrió así el
+        // CD — el renglón sigue en 0.
+        if (edges.conectorSinPedir(dentro.slice(0, 2), block.cueIn)) {
             fallas.push(['conector', `«${dentro.slice(0, 4).map(edges.textOf).join(' ')}…»`]);
         }
     }
@@ -195,7 +209,7 @@ function revisarBloque(words, block, anterior) {
 }
 
 /** Los defectos de una clase entera, contados por tipo. */
-function contarClase(words, blocks) {
+function contarClase(words, blocks, voz) {
     const cuenta = Object.fromEntries(TIPOS.map(t => [t, 0]));
     const ejemplos = [];
     let anterior = null;
@@ -210,13 +224,17 @@ function contarClase(words, blocks) {
         for (const edge of [block.in, block.out]) {
             if (edge && !midioElSonido(edge)) sinMedir++;
         }
-        for (const [tipo, texto] of revisarBloque(words, block, anterior)) {
+        for (const [tipo, texto] of revisarBloque(words, block, anterior, voz)) {
             cuenta[tipo]++;
             ejemplos.push({ bloque: block.index + 1, tipo, texto });
         }
         anterior = block;
     }
-    return { cuenta, ejemplos, total, sinMedir };
+    // Sin mapa de voz, "abre partiendo una frase" no se pudo medir en esta
+    // clase y da cero. Es el mismo cuidado que `sinMedir`: un cero que sale de
+    // no haber mirado se lee igual que un cero que sale de no haber defectos, y
+    // son cosas opuestas.
+    return { cuenta, ejemplos, total, sinMedir, sinVoz: (voz && voz.tramos) ? 0 : total };
 }
 
 module.exports = {

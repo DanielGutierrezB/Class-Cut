@@ -37,8 +37,10 @@
  * **Lo que dio, con las trece clases transcriptas de nuevo y las entradas
  * congeladas.** Los totales de acá abajo son de ANTES de que se arreglara el
  * conector huérfano y se agregara "abre partiendo una frase"
- * (`speech-edges.conectorSinPedir` y `abreAMitad`), así que no se comparan con una
- * corrida de hoy: la vara tiene un defecto más y cuenta otro distinto. Lo que sigue
+ * (`speech-edges.conectorSinPedir` y `abreAMitad`), y de antes de que ese último
+ * dejara de contestarse con el reloj del transcript —sobre el curso decía 7 y son
+ * 2—, así que no se comparan con una corrida de hoy: la vara tiene un defecto más
+ * y cuenta otros dos distinto. Lo que sigue
  * valiendo es el orden entre los tres relojes, que es lo que estas cifras
  * decidieron. Midiendo cada plan con el reloj con el que se decidió: 24 defectos
  * de borde con `crudo`, 26 con `onda`, 21 con `dtw`. Y la vara que no depende del
@@ -212,13 +214,15 @@ const volcarEn = arg('volcar');
         // única lectura coherente: preguntarle a un plan hecho con un reloj qué
         // dice el otro mezcla dos cosas. Las otras van al lado para poder separar
         // lo que mejoró el corte de lo que mejoró la medición.
-        const medido = defectos.contarClase(paraDecidir, salida.alignResult.blocks);
+        // Con el mapa de voz, que ya está calculado unas líneas arriba: "abre
+        // partiendo una frase" lo necesita y sin él da cero por no haber mirado.
+        const medido = defectos.contarClase(paraDecidir, salida.alignResult.blocks, mapa);
         const porReloj = {};
         for (const r of RELOJES) {
             if (!relojes[r]) continue;
             porReloj[r] = r === relojPedido
                 ? medido.cuenta
-                : defectos.contarClase(relojes[r], salida.alignResult.blocks).cuenta;
+                : defectos.contarClase(relojes[r], salida.alignResult.blocks, mapa).cuenta;
             for (const tipo of defectos.TIPOS) cortes[r][tipo] += porReloj[r][tipo];
         }
         if (detalle) {

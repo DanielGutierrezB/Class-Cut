@@ -43,6 +43,7 @@ const workspace = require('../engine/workspace');
 const estadoClase = require('../engine/estado-clase');
 const onset = require('../engine/vendor/audio-onset');
 const speech = require('../engine/speech-edges');
+const voz = require('../engine/voz');
 const ia = require('../engine/ia');
 const defectos = require('./defectos');
 
@@ -154,8 +155,11 @@ async function unaClase(scan, cls, cliente, modelo) {
         review: decided.review,
         // Con las palabras que el motor USÓ para decidir y no con las del
         // transcript: los defectos se cuentan mirando qué palabras caen dentro de
-        // cada bloque, así que medir con otro reloj mide otra cosa.
-        cuenta: defectos.contarClase(decided.palabras, decided.alignResult.blocks)
+        // cada bloque, así que medir con otro reloj mide otra cosa. Y con el mapa
+        // de voz, que el motor ya dejó en el Backup: "abre partiendo una frase"
+        // lo necesita y sin él da cero por no haber mirado.
+        cuenta: defectos.contarClase(decided.palabras, decided.alignResult.blocks,
+            voz.asegurar({ root: scan.root, sequenceName: cls.sequenceName, wavPath: cls.liveMixPath }))
     };
 }
 

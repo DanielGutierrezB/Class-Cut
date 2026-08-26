@@ -36,7 +36,8 @@ const baseline = {
     // había acá lo contó la primera versión de la regla, que preguntaba por el
     // hueco hasta el bloque anterior —material grabado— cuando lo que decide es
     // si el CD abrió el bloque ahí. Esa versión informaba 12 sobre el curso con la
-    // alineación acústica y los 12 los había escrito así el director; con la
+    // alineación acústica y los 12 los había escrito así el director (con los
+    // conectores de dos palabras que la lista no podía ver son 15, y también); con la
     // pregunta correcta son 0. El 7 y el 12 miden los dos la misma cosa
     // equivocada, así que comparar contra el 7 diría que se arreglaron siete
     // cortes y no se movió ninguno. Los planes viejos ya no están para volver a
@@ -44,8 +45,19 @@ const baseline = {
     conector: 0,
     // "Abre partiendo una frase" tampoco tiene vara hacia atrás: se agregó
     // mirando estos 170 bloques, cuando ya no había planes viejos con los que
-     // contarlo. Son 7, y el que importa es el bloque 4 de la clase 13.
-    abriendo: 7,
+    // contarlo.
+    //
+    // El 7 que había acá lo contó la primera versión, que preguntaba sobre el
+    // transcript si la palabra del otro lado del corte cerraba frase. Cinco de
+    // esos 7 estaban ADENTRO del bloque: se los oye cortando el Live-Mix por los
+    // bordes del plan («Y justo ese es el problema…», «Un PROM sirve para crear
+    // demos…», «Ahora vamos a hacer el ejercicio…», «Y si damos clic en este
+    // link…»). El reloj los ponía 3, 10, 17 y 30 ms antes del corte —menos de un
+    // frame— con duraciones de 10 ms, y `wordsInside` los dejaba afuera por su
+    // margen de 20. Con la pregunta contestada por la onda son 2, y no se movió
+    // ningún corte: comparar contra el 7 diría que se arreglaron cinco. El
+    // detalle está en `speech-edges.abreAMitad`.
+    abriendo: 2,
     mitadPalabra: 2,
     repetido: 2,
     // La vara de la retoma interna no es la de "antes de Cortes con criterio":
@@ -86,11 +98,16 @@ function clases() {
             if (!fs.existsSync(transcriptPath)) return null;
             const align = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
             const words = JSON.parse(fs.readFileSync(transcriptPath, 'utf8')).words || [];
+            // El mapa de voz sale del Backup, donde el motor ya lo dejó. Hace
+            // falta para "abre partiendo una frase": esa cuenta no se la puede
+            // contestar el transcript (ver `speech-edges.abreAMitad`).
+            const vozPath = path.join(dir, `${name}_voz.json`);
             return {
                 name,
                 align,
                 reloj: align.reloj || 'crudo',
-                words: reloj.paraDecidir(words, align.reloj === 'dtw' ? 'auto' : 'crudo').palabras
+                words: reloj.paraDecidir(words, align.reloj === 'dtw' ? 'auto' : 'crudo').palabras,
+                voz: fs.existsSync(vozPath) ? JSON.parse(fs.readFileSync(vozPath, 'utf8')) : null
             };
         })
         .filter(Boolean);
@@ -111,6 +128,9 @@ let total = 0;
 // antes de que el motor la escribiera informa "0 cortes a mitad de palabra" y se
 // lee como un curso limpio cuando lo que pasa es que nadie miró.
 let sinMedir = 0;
+// Y los bloques de clases sin mapa de voz, por lo mismo: sin él "abre partiendo
+// una frase" da cero porque nadie miró, no porque no haya.
+let sinVoz = 0;
 
 for (const cls of clases()) {
     let anterior = null;
@@ -125,7 +145,8 @@ for (const cls of clases()) {
         for (const edge of [block.in, block.out]) {
             if (edge && !defectos.midioElSonido(edge)) sinMedir++;
         }
-        for (const [tipo, texto] of defectos.revisarBloque(cls.words, block, anterior)) {
+        if (!cls.voz) sinVoz++;
+        for (const [tipo, texto] of defectos.revisarBloque(cls.words, block, anterior, cls.voz)) {
             cuenta[tipo]++;
             ejemplos[tipo].push(`  clase ${cls.name.slice(0, 2)} bloque ${block.index + 1}: ${texto}`);
         }
@@ -142,7 +163,8 @@ console.log(`  la claqueta quedó dentro         ${fmt(cuenta.claqueta, baseline
 console.log(`  termina con habla del director   ${fmt(cuenta.chatter, baseline.chatter)}`);
 console.log(`  abre con el conteo de la toma    ${fmt(cuenta.conteo, baseline.conteo || 0)}`);
 console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.colgando)}`);
-console.log(`  abre partiendo una frase         ${fmt(cuenta.abriendo, baseline.abriendo)}`);
+console.log(`  abre partiendo una frase         ${fmt(cuenta.abriendo, baseline.abriendo)}` +
+    (sinVoz ? `   ⚠ ${sinVoz} bloques sin mapa de voz: no se pudo medir` : ''));
 console.log(`  arranca con conector huérfano    ${fmt(cuenta.conector, baseline.conector)}`);
 console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}` +
     (sinMedir ? `   ⚠ ${sinMedir} bordes sin la medición: reprocesá para poder contarlo` : ''));

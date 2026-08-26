@@ -81,10 +81,16 @@ function elAnterior(blocks, block) {
     return i <= 0 ? null : vivos[i - 1];
 }
 
-/** ¿Este bloque abre con un conector que se apoya en algo que ya no está? */
+/**
+ * ¿Este bloque abre con un conector que se apoya en algo que ya no está?
+ *
+ * Con las DOS primeras palabras, que es lo que pide la lista: cinco de sus
+ * entradas son de dos («sin embargo», «o sea», «así que»…) y con una sola no
+ * podían coincidir nunca.
+ */
 function abreEnFalso(words, block) {
     const dentro = speech.wordsInside(words, block.startSec, block.endSec);
-    return Boolean(dentro.length) && speech.esConector(dentro[0]);
+    return Boolean(dentro.length) && speech.esConector(dentro.slice(0, 2));
 }
 
 /** ¿Este bloque termina a mitad de frase? El criterio vive en `speech-edges`. */
@@ -109,11 +115,21 @@ function quitarElConector(block, ctx) {
     // relectura de la misma corrida volvió a quejarse del mismo bloque, ahora
     // como empalme: "arranca con 'no me refiero al código' pero en el bloque
     // anterior nadie mencionó el código". El arreglo cambió un conector que se
-    // leía por un arranque a mitad de frase, que se lee peor. Medido sobre los 12
-    // conectores del curso, hacerlo en todos lleva los bloques que abren
-    // partiendo una frase de 7 a 18.
+    // leía por un arranque a mitad de frase, que se lee peor. Hacerlo en los 15
+    // del curso lleva el total de defectos de borde de 8 a 12
+    // (`tools/variante-conector.js`).
+    //
+    // **Y una cosa que conviene saber antes de confiar en este arreglo: casi
+    // nunca quita el conector.** El corte no puede pasar del final que el
+    // transcript le da a la palabra de antes (`speech-edges.wordLimits`), y en
+    // el reloj del DTW ese final cae ANTES del sonido, así que el borde se queda
+    // de este lado. Cortando el Live-Mix por el borde nuevo y transcribiendo ese
+    // pedazo, en 11 de los 15 el bloque sigue abriendo con su conector: «Y la
+    // sexta herramienta no es…», «Pero antes de abrir la terminal…», «También
+    // nos está dando…». Solo 4 lo pierden de verdad. O sea que este arreglo es,
+    // en la onda, casi un no-op — y el daño de la clase 13 fue uno de los 4.
     const dentro = speech.wordsInside(words, block.startSec, block.endSec);
-    if (!speech.conectorSinPedir(dentro[0], block.cueIn)) return null;
+    if (!speech.conectorSinPedir(dentro.slice(0, 2), block.cueIn)) return null;
 
     // Un conector tampoco sobra si su antecedente viene pegado delante. Es una
     // segunda razón para no tocarlo, independiente de la de arriba: el CD pudo no
@@ -121,8 +137,15 @@ function quitarElConector(block, ctx) {
     const previo = elAnterior(blocks || [], block);
     if (previo && block.startSec - previo.endSec < opt(options, 'pegadoAlAnteriorSec')) return null;
 
+    // De a uno o de a dos, según lo que sea el conector: correr el IN una sola
+    // palabra sobre un «Así que» deja el bloque abriendo en «que vamos
+    // directamente», que es peor que el conector.
     let i = 0;
-    while (i < dentro.length && i < opt(options, 'palabrasDeConector') && speech.esConector(dentro[i])) i++;
+    while (i < dentro.length && i < opt(options, 'palabrasDeConector')) {
+        const largo = speech.largoDeConector(dentro.slice(i, i + 2));
+        if (!largo || i + largo > opt(options, 'palabrasDeConector')) break;
+        i += largo;
+    }
     if (!i || i >= dentro.length) return null;
 
     const destino = dentro[i].start;

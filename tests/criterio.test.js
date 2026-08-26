@@ -85,17 +85,48 @@ module.exports = function (t) {
         t.eq(speech.conectorSinPedir({ text: 'Pero' }, null), true);
     });
 
+    t.test('los conectores de dos palabras existen', () => {
+        // La lista los traía escritos desde el principio y la expresión se
+        // probaba contra UNA palabra, así que esa mitad no podía coincidir
+        // nunca. Ninguna de sus palabras sueltas es un conector, que es
+        // justamente por lo que no se notaba.
+        t.eq(speech.esConector([{ text: 'Sin' }]), false, '"sin" solo no es nada');
+        t.eq(speech.esConector([{ text: 'Sin' }, { text: 'embargo,' }]), true);
+        t.eq(speech.largoDeConector([{ text: 'Así' }, { text: 'que' }]), 2);
+        t.eq(speech.largoDeConector([{ text: 'O' }, { text: 'sea,' }]), 2);
+        t.eq(speech.largoDeConector([{ text: 'Y' }, { text: 'entonces' }]), 1,
+            'la de una palabra sigue midiendo una');
+        t.eq(speech.largoDeConector([{ text: 'Ahora' }, { text: 'sí' }]), 0);
+    });
+
+    t.test('el conector de dos que el CD pidió tampoco es un defecto', () => {
+        // Los 3 que aparecieron al arreglarlo son este caso, igual que los 12
+        // de una palabra: clase 1 bloques 9 y 11, y clase 12 bloque 17.
+        const sinEmbargo = [{ text: 'Sin' }, { text: 'embargo,' }];
+        t.eq(speech.conectorSinPedir(sinEmbargo, 'Sin embargo, acá tenemos una situación'), false);
+        t.eq(speech.conectorSinPedir([{ text: 'Así' }, { text: 'que' }],
+            'Así, que vamos directamente le damos spe'), false, 'la coma del CD no cuenta');
+        // Y se comparan las DOS: con la primera sola, cualquier cue que
+        // empezara con "Sin" daría el conector por pedido.
+        t.eq(speech.conectorSinPedir(sinEmbargo, 'Sin duda es la parte más difícil'), true);
+    });
+
     t.group('speech-edges · abrir partiendo una frase');
+
+    /** Un mapa de voz de juguete: los tramos donde suena alguien. */
+    const suena = tramos => ({ tramos });
+    // Habla de corrido: cualquier corte cae encima de alguien hablando.
+    const deCorrido = suena([[0, 60]]);
 
     t.test('abrir a mitad de frase se ve', () => {
         const words = say('Ahora vamos a hacer el ejercicio completo.', 0);
         // El corte cae pasado "Ahora": lo que abre es "vamos a hacer…".
-        t.eq(speech.abreAMitad(words, 0.28, 3), true);
+        t.eq(speech.abreAMitad(words, 0.28, 3, deCorrido), true);
     });
 
     t.test('abrir donde la frase arranca no es un defecto', () => {
         const words = say('Cerramos la idea anterior.', 0).concat(say('Ahora vamos a hacer el ejercicio.', 3));
-        t.eq(speech.abreAMitad(words, 2.9, 6), false);
+        t.eq(speech.abreAMitad(words, 2.9, 6, deCorrido), false);
     });
 
     t.test('el conteo de la toma no cuenta como frase partida', () => {
@@ -107,12 +138,37 @@ module.exports = function (t) {
             { text: 'dos,', start: 0.4, end: 0.7 },
             { text: 'uno,', start: 0.8, end: 1.1 }
         ].concat(say('que si lo piensas bien es lo mismo.', 2));
-        t.eq(speech.abreAMitad(words, 1.9, 5), false);
+        t.eq(speech.abreAMitad(words, 1.9, 5, deCorrido), false);
     });
 
     t.test('el primer bloque de la clase no abre partiendo nada', () => {
         const words = say('vamos a empezar por el principio.', 0);
-        t.eq(speech.abreAMitad(words, 0, 3), false, 'no hay nada delante');
+        t.eq(speech.abreAMitad(words, 0, 3, deCorrido), false, 'no hay nada delante');
+    });
+
+    t.test('la palabra que en la onda no está no se perdió', () => {
+        // Los 4 casos del curso que esta cuenta informaba de más: el bloque abre
+        // en el ATAQUE de la primera palabra de la toma, y el transcript pone
+        // esa palabra unos milisegundos antes con duración casi cero, así que
+        // `wordsInside` la deja afuera por su margen. En la onda, entre donde el
+        // reloj la pone y el corte no hay nada.
+        const words = say('Ahora vamos a hacer el ejercicio completo.', 0);
+        // "Ahora" figura en 0–0.255 y el corte cae en 0.28.
+        t.eq(speech.abreAMitad(words, 0.28, 3, suena([[0.3, 3]])), false,
+            'el sonido arranca después del corte: no se fue nada');
+        t.eq(speech.abreAMitad(words, 0.28, 3, suena([[0.26, 3]])), false,
+            'rozar el ataque no es llevárselo: el corte se escribe en frames');
+        t.eq(speech.abreAMitad(words, 0.28, 3, deCorrido), true,
+            'con la palabra sonando del otro lado, sí se la llevó');
+    });
+
+    t.test('sin mapa de voz no se afirma que abre partiendo una frase', () => {
+        // Y quien mide tiene que contarlos aparte (`defectos.contarClase`
+        // devuelve `sinVoz`): un cero de "no miré" se lee igual que un cero de
+        // "no hay", y son cosas opuestas.
+        const words = say('Ahora vamos a hacer el ejercicio completo.', 0);
+        t.eq(speech.abreAMitad(words, 0.28, 3, null), false);
+        t.eq(speech.suenaEntre(null, 0, 0.28), null, 'y se puede preguntar si se pudo medir');
     });
 
     t.group('speech-edges · límites de palabra');

@@ -116,7 +116,7 @@ function localFindings(script) {
 
         // Un conector solo es huérfano si NO estaba en la nota. Lo medido acá
         // —de 25 bloques que abren con conector, 24 los escribió así el CD— es lo
-        // mismo que después midió la vara de los cortes (12 de 12), así que la
+        // mismo que después midió la vara de los cortes (15 de 15), así que la
         // pregunta se hace en un solo sitio: `speech-edges.conectorSinPedir`.
         //
         // Acá vivía una lista propia de conectores, y las dos listas no decían lo
@@ -125,13 +125,18 @@ function localFindings(script) {
         // faltaban "también", "sin embargo" y "por eso", que sí se apoyan en lo de
         // antes. Con dos listas, el modelo podía avisar de un arranque que el
         // recorte consideraba bueno y callarse en uno que consideraba malo.
-        const opener = block.text.split(/\s+/)[0];
-        if (i > 0 && speech.conectorSinPedir(opener, block.cueIn)) {
+        //
+        // Y se le pasan DOS palabras porque cinco conectores de la lista son de
+        // dos ("sin embargo", "o sea", "así que"…): con una sola, esa mitad de
+        // la lista no podía coincidir nunca y el modelo no oía hablar de ella.
+        const apertura = block.text.split(/\s+/).slice(0, 2);
+        const largo = speech.largoDeConector(apertura);
+        if (i > 0 && speech.conectorSinPedir(apertura, block.cueIn)) {
             findings.push({
                 bloque: block.n,
                 tipo: 'conector',
                 gravedad: 'baja',
-                detalle: `Arranca con "${opener}", que se apoya en algo dicho antes, y la nota del CD no abría así.`,
+                detalle: `Arranca con "${apertura.slice(0, largo).join(' ')}", que se apoya en algo dicho antes, y la nota del CD no abría así.`,
                 fuente: 'regla'
             });
         }

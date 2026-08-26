@@ -51,12 +51,7 @@ const SENTENCE_END = /[.!?…]["»)]*$/;
 // falso. Ojo con ampliar la lista: "ahora", "luego", "después" y "bueno"
 // apuntan hacia adelante y abren perfecto ("Ahora quiero mostrarte un caso
 // concreto"), así que meterlos cuenta como defecto lo que está bien.
-const CONECTOR_HUERFANO = /^(entonces|pero|porque|además|ademas|también|tambien|igual|y|sin embargo|es decir|o sea|por eso|así que|asi que)[.,;:!?¡¿…"»]*$/i;
-
-/** ¿Esta palabra es uno de esos conectores que se apoyan en lo de antes? */
-function esConector(word) {
-    return CONECTOR_HUERFANO.test(textOf(word).trim());
-}
+const CONECTOR_HUERFANO = /^(entonces|pero|porque|además|ademas|también|tambien|igual|y|sin embargo|es decir|o sea|por eso|así que|asi que)$/i;
 
 /** Una palabra sin la puntuación que la rodea, para poder compararla con otra. */
 function pelada(word) {
@@ -64,6 +59,41 @@ function pelada(word) {
         .replace(/^[¡¿"«(]+/, '')
         .replace(/[.,;:!?¡¿…"»)]+$/, '')
         .toLowerCase();
+}
+
+/**
+ * ¿Con cuántas palabras de conector abre esto? 0 si no abre con ninguno.
+ *
+ * Hay que contarlas y no contestar sí o no porque cinco entradas de la lista
+ * —«sin embargo», «es decir», «o sea», «por eso», «así que»— son DE DOS
+ * PALABRAS, y la expresión se probaba contra UNA sola. Esa mitad de la regla no
+ * podía coincidir nunca: ninguna de sus palabras sueltas —"sin", "o", "sea",
+ * "así", "que"— está en la lista, así que preguntando de a una no aparecían.
+ * Vivió así desde que se escribió y no lo notó nadie, que es lo que pasa con el
+ * código que no puede correr.
+ *
+ * **Lo que apareció al arreglarlo, sobre los 170 bloques del curso**: 3 bloques
+ * más, y los 3 los abrió así el CD —«Sin embargo, acá tenemos una situación» y
+ * «Sin embargo, acá pasa una situación» en la clase 1, «Así que vamos
+ * directamente» en la 12—, con el bloque anterior cerrando su frase y sonando
+ * justo antes. O sea lo mismo que ya se había medido con los otros doce: el
+ * renglón sigue en 0. Lo que cambia es que ahora la regla puede ver un «Sin
+ * embargo» que el corte SÍ haya dejado huérfano; hasta acá no podía.
+ *
+ * @param {Array|object|string} palabras las primeras del bloque (o una sola)
+ */
+function largoDeConector(palabras) {
+    const lista = Array.isArray(palabras) ? palabras : [palabras];
+    const primera = pelada(lista[0]);
+    if (!primera) return 0;
+    // Las de dos se prueban primero: son las que de a una no se ven.
+    if (lista.length > 1 && CONECTOR_HUERFANO.test(`${primera} ${pelada(lista[1])}`)) return 2;
+    return CONECTOR_HUERFANO.test(primera) ? 1 : 0;
+}
+
+/** ¿Esto abre con uno de esos conectores que se apoyan en lo de antes? */
+function esConector(palabras) {
+    return largoDeConector(palabras) > 0;
 }
 
 /**
@@ -75,12 +105,18 @@ function pelada(word) {
  * marcó el arranque del bloque. Si el conector es la primera palabra de esa
  * frase, el bloque abre ahí porque el director lo quiso.
  *
- * **Los números, sobre los 170 bloques del curso.** Los 12 bloques que abren con
- * un conector lo traen en la orden del CD: 12 de 12, palabra por palabra —«Y en
+ * **Los números, sobre los 170 bloques del curso.** Los 15 bloques que abren con
+ * un conector lo traen en la orden del CD: 15 de 15, palabra por palabra —«Y en
  * 4º tenemos los no objetivos», «Pero antes de abrir la terminal», «También nos
  * está dando una información m»—. Es la misma cosa que `coherence.js` ya había
  * medido por su lado (24 de 25) y la razón por la que la lectura del modelo no
  * avisa de ninguno: es la forma de hablar del profesor, no un corte mal puesto.
+ *
+ * Eran 12 hasta que `largoDeConector` empezó a mirar las dos primeras palabras y
+ * aparecieron los 3 de dos —«Sin embargo, acá tenemos una situación», «Sin
+ * embargo, acá pasa una situación», «Así que vamos directamente»—. Los 3 salieron
+ * iguales a los 12: pedidos por el CD, con el bloque anterior cerrando su frase
+ * justo antes. El renglón siguió en 0 y no se movió ningún corte.
  *
  * **Por qué NO sirve preguntar por el hueco hasta el bloque anterior**, que es lo
  * que hacía `tools/defectos.js` («si entre los dos se tiró material, el
@@ -88,35 +124,47 @@ function pelada(word) {
  * ve ese hueco: `cutplan.js` pega los bloques que sobreviven uno tras otro en la
  * línea de tiempo, así que el bloque anterior suena SIEMPRE justo antes, con
  * hueco cero. Un hueco grande en la grabación no significa "se tiró contenido":
- * en los 12 casos significa que el profesor paró y el director contó. Mirando qué
+ * en los 15 casos significa que el profesor paró y el director contó. Mirando qué
  * hay adentro de esos huecos —de 4,8 s a 299,1 s— no hay nada más que la pausa,
  * el chatter y las tomas abortadas de LA MISMA frase: en la clase 3 la frase «Y la
  * sexta herramienta no es una herramienta como tal» aparece tres veces en el
  * hueco antes de la toma que quedó. El antecedente nunca se perdió.
  *
  * **Y por qué el defecto no se arregla moviendo el corte**, medido con la tabla
- * entera sobre las entradas congeladas y con la onda de verdad:
+ * entera sobre las entradas congeladas y con la onda de verdad
+ * (`tools/variante-conector.js`):
  *
- *   - Correr el IN detrás del conector baja `conector` de 12 a 1 y el total de 18
- *     a 7, y aun así deja la clase PEOR: los bloques abren en «la sexta
- *     herramienta no es…», «por muy bien que hayamos…», «si quieres comenzar a
- *     desarrollar…». Los bloques que abren a mitad de frase pasan de 16 a 25. La
- *     vara mejora porque no tiene con qué ver eso —cuenta si el bloque TERMINA a
- *     mitad de frase, nunca si ABRE así—, así que ese 18 → 7 es la vara jugando
- *     contra sí misma. Es la razón por la que este defecto se cuenta como se
- *     cuenta acá y no como "abre con un conector, punto".
+ *   - Correr el IN detrás del conector deja la clase PEOR: el total de defectos
+ *     de borde va de 8 a 12 y los bloques que abren partiendo una frase de 2 a 6,
+ *     abriendo en «por muy bien que hayamos…», «le damos speckit-implement…»,
+ *     «tenemos la fuente de la verdad…». Ninguna cuenta veía eso hasta que existió
+ *     `abreAMitad` —todas miraban el final del bloque—, y es la razón por la que
+ *     este defecto se cuenta como se cuenta acá y no como "abre con un conector,
+ *     punto".
+ *   - Y encima casi no hace lo que dice: en 11 de los 15 el conector se sigue
+ *     oyendo, porque `wordLimits` no deja que el corte pase del final que el
+ *     transcript le da a la palabra de antes y en el reloj del DTW ese final cae
+ *     antes del sonido. Está medido en `repasar.quitarElConector`.
  *   - Abrir el IN más atrás para tragarse el antecedente es imposible: lo que hay
- *     delante del conector es el conteo de la toma en los 12 casos. Medido, se
+ *     delante del conector es el conteo de la toma en los 15 casos. Medido, se
  *     lleva el conteo adentro en 11 bloques y el habla del director en 10, y el
  *     total va de 18 a 29.
  *
- * @param {object|string} primera la palabra con la que abre el bloque
+ * @param {Array|object|string} primeras las palabras con las que abre el bloque
  * @param {string} cueIn la frase con la que el CD marcó el IN
  */
-function conectorSinPedir(primera, cueIn) {
-    if (!esConector(primera)) return false;
-    const pedido = String(cueIn || '').trim().split(/\s+/)[0] || '';
-    return pelada(pedido) !== pelada(primera);
+function conectorSinPedir(primeras, cueIn) {
+    const largo = largoDeConector(primeras);
+    if (!largo) return false;
+    const lista = Array.isArray(primeras) ? primeras : [primeras];
+    const pedido = String(cueIn || '').trim().split(/\s+/);
+    // Se comparan TODAS las palabras del conector, no la primera. Con «Sin
+    // embargo» mirar solo el «Sin» daría por pedido un cue que abriera con «Sin
+    // duda», que no es lo mismo ni se apoya en lo de antes.
+    for (let i = 0; i < largo; i++) {
+        if (pelada(pedido[i] || '') !== pelada(lista[i])) return true;
+    }
+    return false;
 }
 
 const DEFAULTS = {
@@ -554,29 +602,116 @@ function quedaColgando(words, startSec, endSec) {
 }
 
 /**
+ * ¿Suena alguien dentro de este tramo? Con el mapa de voz de `engine/voz.js`.
+ *
+ * Se pregunta a la onda y no al transcript porque los tiempos de palabra de
+ * Whisper no aguantan que se los mire de cerca —el 8,3% del curso figura
+ * durando CERO— y acá se están mirando decenas de milisegundos.
+ *
+ * Un frame es el piso de lo que cuenta. El corte se escribe en frames, así que
+ * rozar el borde de un tramo de voz no es llevárselo: es la misma cuenta que ya
+ * hace `audio-onset.insideVoice` con su frame de margen.
+ *
+ * Y no sirve `audio-onset.voiceAt` para esto aunque conteste algo parecido: ese
+ * saca el umbral de una ventana de ±2,3 s alrededor del corte, y en un tramo de
+ * habla continua esa ventana es toda voz, así que el umbral local se le sube y
+ * contesta que no. Medido en el bloque 2 de la clase 11, con el profesor
+ * diciendo «…escribiendo test unitarios» encima del corte, `voiceAt` da false en
+ * 132,5 · 133,0 · 133,4 · 133,6 y 133,7. El mapa de voz saca el umbral de la
+ * clase entera y ve el tramo entero: 132,06–133,74.
+ *
+ * @param {object|null} voz mapa de voz de la clase
+ * @param {number} desdeSec
+ * @param {number} hastaSec
+ * @param {number} [fps] para el piso de un frame; 30 si no se dice
+ * @returns {boolean|null} null cuando no hay mapa y no se puede afirmar nada
+ */
+function suenaEntre(voz, desdeSec, hastaSec, fps) {
+    const tramos = voz && voz.tramos;
+    if (!tramos || !tramos.length) return null;
+    const minimo = 1 / (fps || 30);
+    let suma = 0;
+    for (const [desde, hasta] of tramos) {
+        if (hasta <= desdeSec) continue;
+        if (desde >= hastaSec) break;
+        // Sin dejar que un tramo aporte negativo: `desdeSec` puede caer DESPUÉS
+        // de `hastaSec` —la palabra de antes arranca pasado el corte, que es
+        // justo uno de los casos que esto existe para ver— y un solapamiento
+        // negativo taparía el de un tramo posterior.
+        suma += Math.max(0, Math.min(hasta, hastaSec) - Math.max(desde, desdeSec));
+        if (suma > minimo) return true;
+    }
+    return false;
+}
+
+/**
  * ¿Y ABRE partiendo una frase por la mitad?
  *
- * Es la otra mitad de lo de arriba y faltaba, que no es lo mismo que no hacer
- * falta: era el punto ciego por el que la vara se podía mejorar empeorando la
- * clase. Medido sobre el curso, correr los 12 IN detrás de su conector baja
- * `conector` de 12 a 1 y el total de defectos de 18 a 7 —el mejor número de todas
- * las variantes— dejando bloques que abren en «la sexta herramienta no es…», «por
- * muy bien que hayamos…», «si quieres comenzar a desarrollar…». Ninguna cuenta lo
- * veía, porque todas miraban el final. Con esto, esa variante se delata: los
- * bloques que abren partiendo una frase pasan de 7 a 18.
+ * Es la otra mitad de "queda colgando" y faltaba, que no es lo mismo que no
+ * hacer falta: era el punto ciego por el que la vara se podía mejorar empeorando
+ * la clase. Correr los IN detrás del conector con el que abren deja `conector`
+ * en cero, y ninguna otra cuenta ve lo que rompe, porque todas miran el final
+ * del bloque. Esta lo ve, y se prueba con `tools/variante-conector.js`: sobre
+ * los planes entregados, mover los 15 lleva el total de 8 a 12.
  *
- * **El conteo de la toma no cuenta como frase partida.** El motor lo tira a
- * propósito, así que la palabra que queda del otro lado del corte es muchas veces
- * un «1» sin punto, y sin descontarlo esto informaba 16 bloques en un curso que
- * tiene 7: nueve de esos eran cortes buenos abriendo justo después de la cuenta.
+ * **La pregunta son DOS, y la segunda no la puede contestar el transcript.**
  *
- * Los 7 que quedan son de verdad, y uno es el bloque 4 de la clase 13 —«no me
- * refiero al código», con la «Y» que el CD había escrito del otro lado del
- * corte—, que es el único daño que este proyecto se hizo a sí mismo con el
- * arreglo automático del conector. Que esta cuenta lo vea es justamente para lo
- * que está.
+ * La primera sí: la palabra que quedó del otro lado del corte, ¿cerraba una
+ * frase? Si cerraba, el bloque abre por donde tiene que abrir. (Y el conteo de la
+ * toma no cuenta: el motor lo tira a propósito, así que del otro lado queda muchas
+ * veces un «1» sin punto. Descontarlo se llevó nueve de los dieciséis que esta
+ * cuenta informaba al escribirse: eran cortes buenos abriendo justo tras la cuenta.)
+ *
+ * La segunda es si el corte de verdad se llevó esa palabra, y ahí el transcript
+ * no llega. Sobre el curso entregado esta cuenta daba 7 bloques; escuchándolos
+ * —cortando el Live-Mix por los bordes del plan y transcribiendo ESE pedazo, que
+ * es lo único que no se puede discutir— **5 de los 7 tenían la palabra adentro**:
+ *
+ *   - clase 1 bloque 14 suena «Y justo ese es el problema…», con la «y» que el
+ *     transcript pone en 2288,06–2288,07 y el corte en 2288,10. En la onda no
+ *     hay nada entre 2287,74 y 2288,14: esa «y» no está donde el reloj la pone.
+ *   - clase 2 bloque 1 suena «Un PROM sirve para crear demos…» (corte 45,267,
+ *     ataque del sonido 45,26).
+ *   - clase 2 bloque 15 suena «Ahora vamos a hacer el ejercicio…» (corte
+ *     2430,533, la palabra arranca en 2430,54: el corte está ANTES).
+ *   - clase 10 bloque 5 suena «Y si damos clic en este link…» (corte 856,10,
+ *     sonido desde 856,16).
+ *   - clase 3 bloque 13 abre en «En este punto vamos a parar», que es una frase
+ *     entera; lo que el transcript tiene delante es un «que luego,» de una toma
+ *     que el profesor abandonó 2,1 s antes.
+ *
+ * Las cuatro primeras son la misma cosa: el bloque abre en el ataque de la
+ * primera palabra de la toma, y esa palabra figura en el transcript con 10 ms de
+ * duración terminando un pelo antes del corte, así que `wordsInside` la deja
+ * afuera por su margen de 20 ms. Las distancias son 3, 10, 17 y 30 ms — menos de
+ * un frame— y el reloj no tiene resolución para eso. Por eso la segunda pregunta
+ * va a la onda.
+ *
+ * **Los 2 que quedan son los 2 bloques del curso con el transcript roto**, y
+ * esta cuenta es lo único que los señala:
+ *
+ *   - clase 11 bloque 2 suena «con Cypress. Sin embargo, con sistemas
+ *     agénticos…» y le faltan seis segundos de su propia frase: el profesor
+ *     había dicho «Tradicionalmente, para evaluar un sistema como estos,
+ *     deberíamos dedicarle horas escribiendo test unitarios con Cypress». Hubo
+ *     dos tomas y el transcript guardado se comió la segunda entera, así que la
+ *     nota del CD no tuvo dónde anclar y el corte quedó a mitad de la frase.
+ *   - clase 3 bloque 13 abre bien —«En este punto vamos a parar…»— y esta cuenta
+ *     lo marca por la palabra suelta de una toma abandonada que tiene delante.
+ *     Pero el bloque igual está mal: adentro trae la toma DOS VECES con el «Ok.
+ *     Ok. 3, 2, 1.» en el medio, y `retoma` no lo puede ver porque el transcript
+ *     también perdió ese tramo. La cuenta acierta por la razón equivocada.
+ *
+ * **Y uno que esta cuenta ya no ve, anotado para que no se busque**: clase 13
+ * bloque 4 suena «no me refiero al código…», sin la «Y» que el CD había escrito
+ * delante. El profesor hizo una pausa de 0,64 s después de esa «Y», así que en
+ * la onda es un tramo aparte y entre él y el corte no suena nadie —
+ * indistinguible de una toma que empieza ahí. Lo que lo delata es la nota del
+ * CD, que abre con «Y», no esto.
+ *
+ * @param {object|null} voz mapa de voz de la clase; sin él no se puede afirmar
  */
-function abreAMitad(words, startSec, endSec) {
+function abreAMitad(words, startSec, endSec, voz) {
     const lista = spoken(words);
     const dentro = wordsInside(words, startSec, endSec);
     if (!dentro.length) return false;
@@ -591,7 +726,15 @@ function abreAMitad(words, startSec, endSec) {
     // adelante, el bloque 8 de la clase 6 contaba como frase partida cuando lo que
     // tiene del otro lado es el final de «Tres, dos, uno,».
     const pausa = idx > 1 ? previa.start - lista[idx - 2].end : 999;
-    return !isChatter(previa, pausa, null, lista[idx - 2]);
+    if (isChatter(previa, pausa, null, lista[idx - 2])) return false;
+    // Y la segunda mitad: que esa palabra se haya ido de verdad, o sea que haya
+    // sonado alguien entre donde el transcript la pone y el corte.
+    //
+    // Sin mapa de voz no se afirma. Quien mide tiene que contar aparte los
+    // bloques que se quedaron sin medir, como ya hace con los bordes sin la
+    // medición de onda: contestar que sí con el reloj es lo que daba 7 en un
+    // curso que tiene 2.
+    return suenaEntre(voz, previa.start, startSec) === true;
 }
 
 /**
@@ -660,6 +803,7 @@ module.exports = {
     isChatter,
     isHardChatter,
     esConector,
+    largoDeConector,
     conectorSinPedir,
     CONECTOR_HUERFANO,
     endsSentence,
@@ -673,6 +817,7 @@ module.exports = {
     textInside,
     quedaColgando,
     abreAMitad,
+    suenaEntre,
     spoken,
     textOf,
     esConteo,
