@@ -17,6 +17,7 @@ const FILES = [
     'estado-clase.test.js',
     'transcribe.test.js',
     'align.test.js',
+    'aire.test.js',
     'claqueta.test.js',
     'export.test.js',
     'criterio.test.js',

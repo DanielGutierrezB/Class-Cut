@@ -57,32 +57,47 @@
  * la traducción entre el tiempo de la grabación y el del corte —eso `letra.js`
  * ya lo hace bien—, era que los tiempos están mal en el reloj de la grabación.
  *
- * **Por qué esto no decide los cortes.** La pregunta se hizo y se midió: si el
- * motor sabe dónde suena de verdad cada palabra, ¿corta mejor? Se corrió el
- * curso entero por duplicado con `tools/medir-repaso.js --retimeo` —mismo
- * transcript, mismo criterio, lo único distinto el reloj— y la respuesta fue que
- * no. Con la vara medida sobre los tiempos corregidos, que es la única lectura
- * honesta de los dos planes, los defectos de borde van de 30 a 32 sobre 172
- * bloques: 4 bloques mejoran y 9 empeoran.
+ * **Por qué esto todavía no decide los cortes.** La pregunta se hizo y se midió:
+ * si el motor sabe dónde suena de verdad cada palabra, ¿corta mejor? Se corrió
+ * el curso entero por duplicado con `tools/medir-repaso.js --retimeo` —mismo
+ * transcript, mismo criterio, lo único distinto el reloj—.
  *
- * Y mejora justo donde se esperaba —el conteo de toma que se colaba baja de 1 a
- * 0, el chatter de 3 a 2, los finales colgando de 9 a 8, y 13 IN se corren más
- * tarde con una mediana de 3,2 s, hasta 27,8 s— pero lo paga en el peor defecto
- * que hay: los cortes que entran en el sonido pasan de 3 a 8.
+ * La primera lectura dijo que no, y estaba mal leída. Decía que los cortes que
+ * entran en el sonido pasaban de 3 a 8, y sobre eso se decidió dejar el reparto
+ * fuera del motor. Pero ese defecto se contaba con `airFrames`, que mide la
+ * distancia entre el borde del sonido y el tiempo que traía el TRANSCRIPT — no
+ * el corte que sale, que es el borde MENOS el colchón y por eso queda siempre
+ * del lado del silencio. O sea que el número que se miraba era cuánto se
+ * equivocaba Whisper, y el reparto está justamente para corregir eso: cuanto
+ * mejor quedaban los tiempos, peor se veía la métrica.
  *
- * El motivo de eso no es el reparto, es una interacción con
- * `speech-edges.wordLimits`. Los límites con los que `borde.aplicar` encierra la
- * búsqueda de onda salen de la palabra vecina, y mientras la palabra rota ocupa
- * un tramo enorme de reloj, ese tramo hace de barandilla sin querer. Al
- * corregirla, la barandilla desaparece: en el bloque 4 de la clase 2, "anterior"
- * pasa de ocupar 793,53-801,02 a 800,63-801,02, el límite de abajo se afloja de
- * 793,53 a 774,40, y la medición de onda se va a buscar más lejos y se agarra de
- * un ruido en 798,18 en vez del "¿Te" de 798,86. El corte queda 0,4 s adentro.
+ * Con la vara arreglada (`tools/defectos.js`, `audio-onset.insideVoice`) y las
+ * dos corridas rehechas sobre entradas congeladas, el reparto GANA: los defectos
+ * de borde van de 28 a 23 sobre 172 bloques, 9 bloques mejoran y 4 empeoran, y
+ * los cortes encima de alguien hablando bajan de 3 a 1 en vez de subir a 8. Y
+ * mejora donde se esperaba: 14 IN se corren más tarde con una mediana de 2,9 s
+ * (hasta 27,8 s), que son los bloques que abrían sobre una toma abortada; los 30
+ * que se corren más temprano lo hacen 0,23 s de mediana, o sea nada.
  *
- * O sea que el defecto que quedó por arreglar no está acá: está en que los
- * límites de la búsqueda de onda se apoyan en una duración de palabra en la que
- * este mismo archivo demuestra que no se puede confiar. Hasta que eso se
- * resuelva, el reparto se queda sirviendo el panel.
+ * Y la barandilla que se sospechaba no existe. Se creía que la palabra rota, por
+ * ocupar un tramo enorme de reloj, dejaba sin querer un límite cerca del corte
+ * en `speech-edges.wordLimits`, y que al corregirla ese límite se aflojaba
+ * diecinueve segundos. Medido: `audio-onset` busca en ±2 s, así que los dos
+ * límites del caso —793,53 con el reloj crudo y 774,40 con el corregido— están
+ * los dos fuera de la ventana y ninguno pudo cambiar nada.
+ *
+ * Lo que de verdad pasa en ese bloque 4 de la clase 2 es lo contrario de lo que
+ * se pensaba: el profesor rehace la toma. Con el reloj crudo, las seis palabras
+ * de la segunda toma figuran repartidas sobre 26 s de silencio, el ajuste a
+ * frase abre el bloque en 770,7 y adentro quedan la toma abortada
+ * («¿Recuerdas en la clase anterior que cuando hicimos una modificación,») y
+ * veinticinco segundos de nada. Con el reparto, el bloque abre en 798,5, encima
+ * del «¿Te» de la toma buena. El reloj corregido gana ese bloque por paliza y la
+ * vara vieja lo contaba como el defecto que hundía la variante.
+ *
+ * Sigue fuera del motor por una sola razón, y es de calendario: whisper.cpp
+ * tiene una alineación por DTW que va a mover estos mismos tiempos otra vez, y
+ * el cableado se decide una vez con todo sobre la mesa.
  *
  * Sin estado y sin audio: acá entra un mapa de voz ya medido, así que esto se
  * prueba solo (`tests/retimeo.test.js`).

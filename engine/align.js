@@ -28,7 +28,9 @@ const speech = require('./speech-edges');
 
 // 2: los bordes pasan por el ajuste a frase y el recorte del habla del director,
 // y el audio mide el frame con los límites de la palabra vecina.
-const ALIGN_VERSION = 2;
+// 3: cada borde dice si el corte cae encima de alguien hablando, y los que la
+// onda no pudo medir lo dicen en vez de quedarse sin medición.
+const ALIGN_VERSION = 3;
 
 const DEFAULTS = {
     fps: 30,
@@ -285,7 +287,9 @@ function applySnap(edge, words, options) {
  * Los límites de palabra son lo que impide que el colchón de aire se lleve
  * puesta la palabra vecina: sin ellos, un OUT colocado justo después de la
  * última frase se comía el "Pausa" que el profesor le dice al editor, y en el
- * corte se oía "Pau—".
+ * corte se oía "Pau—". Se probó sacarlos y reemplazarlos por el mapa de voz, que
+ * no depende de las duraciones de Whisper; el resultado y el porqué están en
+ * `speech-edges.wordLimits`.
  */
 function refineWithAudio(edge, params) {
     const { words, wav, blockLimits, options } = params;
@@ -308,11 +312,26 @@ function refineWithAudio(edge, params) {
         edge.audio = {
             appliedSec: round(measured.applyTime),
             airFrames: measured.airFrames == null ? null : measured.airFrames,
+            dentroDelSonido: measured.insideVoice == null ? null : measured.insideVoice,
             code: measured.code || null,
             message: measured.message || null
         };
         edge.timeSec = measured.applyTime;
+        return edge;
     }
+
+    // La onda no pudo afirmar nada y el corte se queda con el tiempo del
+    // transcript. Eso se dice, igual que en `borde.aplicar`: un borde sin
+    // `audio` no se distingue de uno que no se midió nunca, y la medición de
+    // defectos lo lee como "acá no hay problema" cuando es el sitio donde el
+    // corte tiene más chance de caer encima de una palabra.
+    edge.audio = {
+        appliedSec: round(edge.timeSec),
+        airFrames: null,
+        dentroDelSonido: onset.voiceAt(wav, edge.timeSec, { fps }),
+        code: 'sin-medida',
+        message: 'La onda no encontró un borde de sonido acá: el corte va con el tiempo del transcript.'
+    };
     return edge;
 }
 

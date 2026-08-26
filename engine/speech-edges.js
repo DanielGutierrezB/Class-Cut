@@ -193,6 +193,42 @@ function isHardChatter(word, vecina) {
  * come. En el bloque 7 de la clase 01 el corte caía en 920.13 y "Pausa." iba de
  * 919.70 a 920.70.
  *
+ * **Por qué sigue saliendo del transcript y no de la onda.** La pregunta se hizo
+ * y se midió, porque estos límites se apoyan en duraciones de palabra de Whisper
+ * y de esas no se puede confiar (4.940 palabras del curso, el 10,9%, duran algo
+ * imposible). Se probaron cuatro formas de acotar sin ellas, sobre el alineado de
+ * las trece clases y con los dos relojes. Ninguna sirve:
+ *
+ *   - Sin límite: los defectos de borde pasan de 54 a 110, y el habla del
+ *     director metida en el corte de 1 a 60. Es el "Pau—" volviendo entero.
+ *   - Con el mapa de voz (`voz.js`) en lugar del transcript, o sea "la búsqueda
+ *     no cruza un tramo de sonido": 54 → 90, chatter 1 → 40.
+ *   - Con el mapa de voz APRETANDO el de palabra, en vez de reemplazarlo: igual
+ *     con el reloj crudo (54) y peor con el corregido (57 → 60).
+ *   - Usando el final de palabra solo cuando `retimeo` no la marcó como rota:
+ *     igual con el crudo, mucho peor con el corregido.
+ *
+ * El motivo es de fondo y conviene tenerlo escrito: lo que este límite protege es
+ * la frontera entre DOS PALABRAS que suenan pegadas, y esa frontera vive dentro
+ * de un único tramo de sonido. El mapa de voz sabe cuándo hay alguien hablando,
+ * no cuándo dejó de decir "producto" y empezó a decir "pausa" — así que no puede
+ * poner este límite ni con más resolución.
+ *
+ * Y protege por los DOS canales, medido soltando uno a la vez: acotando solo la
+ * búsqueda del borde de sonido, el chatter salta de 1 a 37 (el colchón de diez
+ * frames se estira sobre la palabra vecina); acotando solo el colchón, salta a
+ * 32 (la búsqueda se agarra del "Pausa" y el corte se va hasta su final).
+ *
+ * **Lo que NO es un problema, aunque lo parezca.** El piso de un IN cae a veces
+ * lejísimo —hasta 28,9 s con el reloj crudo, 31,0 s con el corregido— porque
+ * delante del corte hay un silencio largo de verdad y la última palabra que
+ * terminó está al otro lado. Eso no afloja nada: `audio-onset` busca en ±2 s
+ * (`searchSec`) y descarta cualquier borde a más de `maxShiftSec`, así que un
+ * piso a 25 s hace exactamente lo mismo que uno a 3. En el bloque 4 de la clase
+ * 2 —el caso que se sospechaba— los dos pisos (793,53 con el reloj crudo y
+ * 774,40 con el corregido) están los dos fuera de esa ventana: ninguno pudo
+ * cambiar nada. Lo que cambió ahí fue el corte propuesto, de 771,04 a 798,86.
+ *
  * @param {string} kind "IN" | "OUT"
  * @returns {{minTime: number|null, maxTime: number|null}}
  */

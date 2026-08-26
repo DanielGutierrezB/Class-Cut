@@ -68,6 +68,10 @@ function aplicar(params) {
             audio = {
                 appliedSec: Math.round(medido.applyTime * 1000) / 1000,
                 airFrames: medido.airFrames == null ? null : medido.airFrames,
+                // `airFrames` mide contra el tiempo que traía el transcript, no
+                // contra el corte que sale: esto es lo otro, y es lo que la
+                // medición de defectos necesita para hablar de "mitad de palabra".
+                dentroDelSonido: medido.insideVoice == null ? null : medido.insideVoice,
                 code: medido.code || null,
                 message: medido.message || null
             };
@@ -84,6 +88,12 @@ function aplicar(params) {
             audio = {
                 appliedSec: Math.round(timeSec * 1000) / 1000,
                 airFrames: null,
+                // Sin borde que medir no hay aire que informar, pero sí se puede
+                // preguntar lo único que importa: si el corte cae encima de
+                // alguien hablando. Es justo acá donde es más probable —el tiempo
+                // sale del transcript sin corregir— y donde antes no había nada
+                // que lo dijera.
+                dentroDelSonido: onset.voiceAt(wav, timeSec, { fps: opt(options, 'fps') }),
                 code: 'sin-medida',
                 message: 'La onda no encontró un borde de sonido acá: el corte va con el tiempo del transcript.'
             };

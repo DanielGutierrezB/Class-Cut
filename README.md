@@ -109,6 +109,25 @@ palabra da que sí siempre. Si el corte se metió en el sonido lo sabe la medici
 de onda ([engine/vendor/audio-onset.js](engine/vendor/audio-onset.js)), que es la
 que mira el audio de verdad.
 
+Y un aviso sobre el aviso, que costó una decisión de producto. Ese defecto se
+contaba con `airFrames`, que es un número bien calculado leído para otra cosa:
+mide la distancia entre el borde del sonido y el tiempo que traía el
+**transcript**, no el corte que sale. El corte que sale es ese borde menos el
+colchón de aire, así que queda siempre del lado del silencio — un `airFrames`
+negativo dice "el transcript proponía cortar adentro del sonido y la onda lo
+corrigió". En los dos bordes del curso que figuraban en negativo, el corte
+aplicado tenía 5,4 y 7,8 frames de aire.
+
+Contarlo así tenía un efecto perverso: cuanto mejor quedaban los tiempos del
+transcript, peor se veía la métrica, porque mide justamente cuánto se equivocaba.
+Y por eso los tiempos corregidos contra la onda ([engine/retimeo.js](engine/retimeo.js))
+se quedaron fuera del motor: parecían llevar los cortes a mitad de palabra de 3 a
+8. Rehecha la cuenta, la misma comparación va de 3 a 1 y el total de defectos de
+borde de 28 a 23. Ahora la pregunta es la del editor —en el frame donde cae el
+corte, ¿hay alguien hablando?— y la contesta el motor al colocar el borde, con el
+mismo umbral con el que lo eligió. Las tablas de más abajo que traen ese renglón
+son de antes del arreglo: hay que volver a sacarlas.
+
 Las reglas que definen "corte malo" viven en un solo archivo
 ([tools/defectos.js](tools/defectos.js)) y las comparten el medidor y el banco.
 Con una copia en cada uno, un banco podía declarar una mejora que la medición

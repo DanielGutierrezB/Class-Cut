@@ -288,9 +288,70 @@
     }
 
     /**
+     * ¿Hay voz sonando en este instante de una ventana ya medida?
+     *
+     * Existe porque `airFrames` no contesta esta pregunta y se venía leyendo como
+     * si la contestara. `airFrames` mide la distancia entre el borde del sonido y
+     * el tiempo que traía el TRANSCRIPT; el corte que se aplica es otro, porque
+     * `evaluate` le resta el colchón. Así que un `airFrames` negativo dice "el
+     * transcript ponía el corte adentro del sonido", no "el corte quedó adentro":
+     * medido sobre los dos bordes del curso que estaban en negativo, el corte
+     * aplicado tenía 5,4 y 7,8 frames de aire.
+     *
+     * Esto sí es la pregunta del editor: en el frame donde va a caer el corte,
+     * ¿se oye alguien? Se contesta con el mismo umbral local y los mismos tramos
+     * de voz con los que se eligió el borde, así que no puede discrepar de la
+     * decisión que se acaba de tomar.
+     *
+     * @returns {boolean|null} null cuando la ventana no alcanza a ese instante
+     */
+    function insideVoice(probeData, threshold, at, opts) {
+        if (!probeData || !probeData.env || threshold == null || at == null) return null;
+        var env = probeData.env, hopSec = probeData.hopSec;
+        var idx = (at - probeData.windowStart) / hopSec;
+        if (!(idx >= 0 && idx <= env.length)) return null;
+        var minRun = Math.max(1, Math.round(opt(opts, "voiceMs") / (hopSec * 1000)));
+        var runs = voiceRuns(env, threshold, minRun);
+        // Un frame de margen a cada lado: el corte se escribe en frames, así que
+        // pegarse al borde del sonido no es meterse dentro de él.
+        var margin = (1 / frameRate(opts)) / hopSec;
+        for (var i = 0; i < runs.length; i++) {
+            if (idx > runs[i].from + margin && idx < runs[i].to - margin) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Lo mismo, para un tiempo suelto y sin haber medido nada antes.
+     *
+     * Hace falta para el caso peor: cuando `measure` no puede afirmar nada y el
+     * corte sale con el tiempo del transcript sin corregir. Ahí es donde es más
+     * probable que caiga encima de una palabra, y es justo donde hasta ahora no
+     * había ninguna medición que lo dijera.
+     *
+     * @returns {boolean|null}
+     */
+    function voiceAt(wav, timeSec, opts) {
+        var probeData = probe(wav, timeSec - 1.5, 3.0, opts);
+        if (!probeData || !probeData.env || probeData.env.length < 10) return null;
+        var st = stats(probeData.env, opts);
+        // Sin contraste no se afirma nada: o está todo callado o está todo
+        // sonando, y en los dos casos el umbral sería una invención.
+        if (!(st.peak > st.floor * 3)) return null;
+        return insideVoice(probeData, st.threshold, timeSec, opts);
+    }
+
+    /**
      * Aire real del corte y a dónde debería irse. El corte se alinea a frame
      * SIEMPRE hacia el silencio (el IN al frame anterior, el OUT al siguiente):
      * redondear hacia el sonido es justo el error que se oye.
+     *
+     * `airFrames` mide contra `markerTime`, o sea contra el tiempo que traía el
+     * transcript: es cuánto se equivocaba la propuesta, no cuánto aire le queda
+     * al corte que sale de acá. El corte que sale siempre está del lado del
+     * silencio, porque es `edge.time` menos el colchón. Para saber si de verdad
+     * cae encima de alguien hablando está `insideVoice`.
+     *
      * @returns {{airFrames, applyTime, code, message}}
      */
     function evaluate(edge, markerTime, kind, opts) {
@@ -458,7 +519,7 @@
      * Mide un borde contra el audio: ventana alrededor del corte, borde del sonido
      * y veredicto. null cuando el audio no puede afirmar nada — entonces manda lo
      * que dijo el transcript.
-     * @returns {{edge, airFrames, applyTime, code, message}|null}
+     * @returns {{edge, airFrames, applyTime, insideVoice, code, message}|null}
      */
     function measure(wav, markerTime, kind, opts) {
         var search = opt(opts, "searchSec");
@@ -468,6 +529,9 @@
         if (!edge) return null;
         var res = evaluate(edge, markerTime, kind, opts);
         res.edge = edge;
+        // Con la ventana y el umbral ya en la mano, preguntar si el corte cae
+        // encima de alguien hablando no cuesta otra lectura del WAV.
+        res.insideVoice = insideVoice(probeData, edge.threshold, res.applyTime, opts);
         return res;
     }
 
@@ -872,6 +936,8 @@
         voiceRuns: voiceRuns,
         refine: refine,
         evaluate: evaluate,
+        insideVoice: insideVoice,
+        voiceAt: voiceAt,
         wavInfo: wavInfo,
         probe: probe,
         measure: measure,

@@ -10,6 +10,15 @@
  *
  * Nada de acá le pregunta a ningún modelo: son reglas sobre el texto y sobre la
  * medición de onda que el motor ya guardó en cada borde.
+ *
+ * **Lo que esta vara todavía no ve**, y conviene saberlo antes de usar el total
+ * para decidir algo: un bloque que abre sobre una toma abortada y arrastra
+ * silencio no dispara nada. El bloque 4 de la clase 2 decidido con el reloj
+ * crudo abre en 770,7 —28 s antes del marcador del CD—, se lleva adentro
+ * «¿Recuerdas en la clase anterior que cuando hicimos una modificación,» de un
+ * intento que el profesor rehizo, y de sus primeros treinta segundos solo suenan
+ * nueve. Cero defectos. `retoma` no lo agarra porque entre las dos tomas no hay
+ * conteo, y ninguna regla mira cuánto silencio quedó adentro.
  */
 
 const edges = require('../engine/speech-edges');
@@ -36,17 +45,44 @@ const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'conector', 'mitadPa
  * que con ese reloj cualquier corte cae "dentro" de una palabra y la métrica
  * daría 63% siempre, midiendo nada.
  *
- * Lo que sí sabe dónde está el sonido es la medición de onda que el motor ya
- * guardó en cada borde: `airFrames` es el aire entre el corte y el audio. Si es
- * negativo, el corte entró en el sonido.
+ * Y tampoco se mide con `airFrames`, que es lo que hacía esto antes y era una
+ * lectura equivocada de un número bien calculado. `airFrames` mide contra el
+ * tiempo que traía el TRANSCRIPT, y el corte que se aplica es otro: `evaluate`
+ * le resta el colchón al borde del sonido, así que el corte sale siempre del
+ * lado del silencio. Un `airFrames` negativo dice "la propuesta del transcript
+ * caía adentro del sonido y la onda la corrigió" — que es una medida de lo mal
+ * que estaba el transcript, no de cómo quedó el corte. En los dos bordes del
+ * curso que figuraban en negativo (clase 4 bloque 5 con -4,0 y clase 6 bloque 2
+ * con -1,2), el corte aplicado tenía 5,4 y 7,8 frames de aire.
+ *
+ * Confundir las dos cosas no era gratis: con `airFrames`, decidir los cortes
+ * sobre los tiempos corregidos contra la onda pasaba de 3 defectos de este tipo
+ * a 8, y ese salto fue el que dejó el re-timeo fuera del motor. Contado como se
+ * cuenta acá ahora, la misma comparación va de 3 a 1: el reparto MEJORA justo el
+ * defecto por el que se lo había descartado. Es lo que tenía que pasar — la
+ * métrica vieja medía cuánto se equivocaba el transcript, y el reparto está para
+ * eso.
+ *
+ * Lo que se mira es lo que oye el editor: en el frame donde cae el corte, ¿hay
+ * alguien hablando? Lo contesta el motor al colocar el borde, con el mismo
+ * umbral con el que lo eligió (`audio-onset.insideVoice`).
  */
 function entraEnElSonido(edge) {
-    const air = edge && edge.audio && edge.audio.airFrames;
-    if (typeof air !== 'number') return false;
-    // Un frame entero, no una fracción: por debajo de eso no hay nada que
-    // arreglar —el corte no puede caer entre dos frames— y lo que se estaría
-    // contando es el ruido del detector. Con medio frame salían 28; con uno, 9.
-    return air <= -1;
+    const audio = edge && edge.audio;
+    return Boolean(audio && audio.dentroDelSonido === true);
+}
+
+/**
+ * ¿Este borde trae la medición con la que se cuenta "mitad de palabra"?
+ *
+ * Se cuenta aparte porque un plan viejo —o uno de una clase sin Live-Mix— no la
+ * trae, y sin decirlo un cero se lee como "no hay cortes a mitad de palabra"
+ * cuando lo que pasa es que nadie miró. Es el mismo cuidado que con las clases
+ * cuya lectura del guion se cayó.
+ */
+function midioElSonido(edge) {
+    const audio = edge && edge.audio;
+    return Boolean(audio && typeof audio.dentroDelSonido === 'boolean');
 }
 
 /**
@@ -105,7 +141,7 @@ function revisarBloque(words, block, anterior) {
     for (const edge of [block.in, block.out]) {
         if (entraEnElSonido(edge)) {
             fallas.push(['mitadPalabra',
-                `${edge.kind} en ${edge.timeSec.toFixed(2)}s, ${edge.audio.airFrames.toFixed(1)} frames de aire`]);
+                `${edge.kind} en ${edge.timeSec.toFixed(2)}s, encima de alguien hablando`]);
         }
     }
 
@@ -150,19 +186,25 @@ function contarClase(words, blocks) {
     const ejemplos = [];
     let anterior = null;
     let total = 0;
+    let sinMedir = 0;
 
     // Solo lo que sale en la clase. Un bloque apagado —una arrancada en falso que
     // se descartó— sigue en el plan con su marca, pero medir sus defectos es
     // contar como problema justo lo que ya se resolvió sacándolo.
     for (const block of (blocks || []).filter(b => b.enabled !== false)) {
         total++;
+        for (const edge of [block.in, block.out]) {
+            if (edge && !midioElSonido(edge)) sinMedir++;
+        }
         for (const [tipo, texto] of revisarBloque(words, block, anterior)) {
             cuenta[tipo]++;
             ejemplos.push({ bloque: block.index + 1, tipo, texto });
         }
         anterior = block;
     }
-    return { cuenta, ejemplos, total };
+    return { cuenta, ejemplos, total, sinMedir };
 }
 
-module.exports = { revisarBloque, contarClase, entraEnElSonido, TIPOS, CONECTOR_HUERFANO };
+module.exports = {
+    revisarBloque, contarClase, entraEnElSonido, midioElSonido, TIPOS, CONECTOR_HUERFANO
+};

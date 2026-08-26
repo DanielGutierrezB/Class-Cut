@@ -26,10 +26,18 @@
  * Con `--retimeo` el motor decide sobre las palabras corregidas contra la onda
  * (`engine/retimeo.js`) en vez de sobre las que guardó Whisper. Es el A/B que
  * decide si esa corrección —que hoy solo endereza el panel del visor— también
- * mejora los cortes. Corrido sobre el curso entero dio que no (30 → 32 defectos
- * de borde, 4 bloques mejor y 9 peor); el porqué está en la cabecera de
- * `engine/retimeo.js`. La bandera queda porque el resultado hay que poder
- * volver a sacarlo cuando se toque lo que lo explica.
+ * mejora los cortes. La primera corrida dio que no y estaba mal contada: el
+ * defecto que hundía la variante se medía con `airFrames`, que no dice dónde
+ * quedó el corte sino cuánto se equivocaba el transcript. Con la vara arreglada
+ * el resultado hay que volver a sacarlo, y para eso está la bandera; el
+ * historial está en la cabecera de `engine/retimeo.js`.
+ *
+ * Ojo con medir mientras otro reprocesa el curso: los transcripts son la entrada
+ * del A/B y si alguien rehace uno a mitad de camino los dos brazos dejan de
+ * comparar lo mismo. Ya pasó, con la clase 1 rehecha con DTW entre un brazo y el
+ * otro. Para una comparación que valga, conviene medir sobre una copia congelada
+ * (carpetas de verdad y enlaces DUROS al material, que el escaneo pregunta
+ * `isFile()` y un enlace simbólico contesta que no).
  *
  * Cada plan se mide con los DOS relojes y `tools/comparar-bordes.js` pone las
  * cuatro celdas una al lado de la otra: los defectos se cuentan mirando qué

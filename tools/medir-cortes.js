@@ -80,6 +80,10 @@ function fmt(actual, antes) {
 const cuenta = Object.fromEntries(defectos.TIPOS.map(t => [t, 0]));
 const ejemplos = Object.fromEntries(defectos.TIPOS.map(t => [t, []]));
 let total = 0;
+// Los bordes que no traen la medición de sonido. Sin este número, un plan de
+// antes de que el motor la escribiera informa "0 cortes a mitad de palabra" y se
+// lee como un curso limpio cuando lo que pasa es que nadie miró.
+let sinMedir = 0;
 
 for (const cls of clases()) {
     let anterior = null;
@@ -91,6 +95,9 @@ for (const cls of clases()) {
     // y esta tabla 2, y el de más estaba en un bloque que no se exporta.
     for (const block of (cls.align.blocks || []).filter(b => b.enabled !== false)) {
         total++;
+        for (const edge of [block.in, block.out]) {
+            if (edge && !defectos.midioElSonido(edge)) sinMedir++;
+        }
         for (const [tipo, texto] of defectos.revisarBloque(cls.words, block, anterior)) {
             cuenta[tipo]++;
             ejemplos[tipo].push(`  clase ${cls.name.slice(0, 2)} bloque ${block.index + 1}: ${texto}`);
@@ -109,7 +116,8 @@ console.log(`  termina con habla del director   ${fmt(cuenta.chatter, baseline.c
 console.log(`  abre con el conteo de la toma    ${fmt(cuenta.conteo, baseline.conteo || 0)}`);
 console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.colgando)}`);
 console.log(`  arranca con conector huérfano    ${fmt(cuenta.conector, baseline.conector)}`);
-console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}`);
+console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}` +
+    (sinMedir ? `   ⚠ ${sinMedir} bordes sin la medición: reprocesá para poder contarlo` : ''));
 console.log(`  repite el bloque anterior        ${fmt(cuenta.repetido, baseline.repetido)}`);
 console.log(`  la retoma quedó adentro          ${fmt(cuenta.retoma, baseline.retoma)}`);
 
