@@ -56,6 +56,17 @@ module.exports = t => {
         t.eq(speech.textInside(words, blocks[1].startSec, blocks[1].endSec).split(/\s+/)[0], 'el');
     });
 
+    t.test('el conector que el CD pidió no se quita', () => {
+        // El caso que rompió el bloque 4 de la clase 13: el CD marcó el arranque
+        // en «Y no me refiero al código» y el repaso le quitó la «Y», dejándolo
+        // abriendo a mitad de frase. Un arranque que el director escribió no es un
+        // defecto del corte, así que acá no hay nada que arreglar.
+        const { words, blocks } = claseQueAbreEnFalso();
+        blocks[1].cueIn = 'Entonces el segundo componente es';
+        t.eq(repasar.quitarElConector(blocks[1], { words, wav: null, options: opciones, blocks }), null);
+        t.eq(blocks[1].startSec, 20, 'no se movió');
+    });
+
     t.test('si el bloque de antes viene pegado, el conector no está huérfano', () => {
         // "Y el segundo componente…" se lee de corrido cuando lo de antes sigue
         // ahí: el antecedente no se tiró, está justo delante.

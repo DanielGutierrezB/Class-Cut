@@ -29,12 +29,8 @@ const retoma = require('../engine/retoma');
 // piso está impidiendo que entre.
 const clap = require('../engine/clap-detect');
 
-// La lista de conectores vive en el motor, porque además de medirlos hay que
-// quitarlos: `engine/repasar.js` los usa para arreglar el arranque. Con una copia
-// acá, la medición podía dejar de ver justo lo que el arreglo estaba quitando.
-const CONECTOR_HUERFANO = edges.CONECTOR_HUERFANO;
-
-const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'conector', 'mitadPalabra', 'repetido', 'retoma'];
+const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'abriendo', 'conector',
+    'mitadPalabra', 'repetido', 'retoma'];
 
 /**
  * ¿El corte se metió dentro del sonido?
@@ -128,12 +124,30 @@ function revisarBloque(words, block, anterior) {
         if (!edges.endsSentence(ultima)) {
             fallas.push(['colgando', `…${dentro.slice(-4).map(edges.textOf).join(' ')}`]);
         }
-        // Huérfano solo si de verdad perdió su antecedente. "Y en cuarto,
-        // tenemos…" abre bien cuando el bloque anterior sigue pegado delante:
-        // el "en tercero" está ahí y se lee de corrido. Se cuenta cuando entre
-        // los dos bloques se tiró material.
-        const pegadoAlAnterior = anterior && block.startSec - anterior.endSec < 2;
-        if (!pegadoAlAnterior && CONECTOR_HUERFANO.test(edges.textOf(primera))) {
+        // Y que tampoco ABRA partiendo una frase, que es el mismo defecto del
+        // otro lado del bloque y era el punto ciego de esta vara: sin esta línea,
+        // correr un IN detrás del conector con el que abría mejoraba el total de
+        // 18 a 7 dejando once bloques abriendo en «la sexta herramienta no es…».
+        // El criterio, con los números, está en `speech-edges.abreAMitad`.
+        if (edges.abreAMitad(words, block.startSec, block.endSec)) {
+            fallas.push(['abriendo', `${dentro.slice(0, 4).map(edges.textOf).join(' ')}…`]);
+        }
+        // Huérfano solo si el CD no abrió el bloque así. El criterio y los
+        // números están en `speech-edges.conectorSinPedir`.
+        //
+        // Acá vivía otra pregunta —"¿se tiró material entre los dos bloques?",
+        // contestada con el hueco hasta el anterior— y estaba midiendo el
+        // material grabado en vez de la clase: `cutplan.js` pega los bloques que
+        // sobreviven uno tras otro, así que el anterior suena siempre justo
+        // antes. Sobre el curso con la alineación acústica informaba 12 bloques
+        // "arrancando con un conector huérfano" y los 12 los había escrito así el
+        // director; con la pregunta correcta son 0. El renglón subía de 7 a 12
+        // por lo mismo que bajaban los otros: sobre los mismos cortes, el reloj
+        // crudo veía 9 y el del DTW ve 12, porque con los tiempos viejos la cola
+        // del conteo caía adentro del bloque y la primera palabra que esta cuenta
+        // miraba era el "1." y no el conector. Los tres que aparecían no eran
+        // cortes nuevos: eran los mismos cortes, contados sin el conteo encima.
+        if (edges.conectorSinPedir(primera, block.cueIn)) {
             fallas.push(['conector', `«${dentro.slice(0, 4).map(edges.textOf).join(' ')}…»`]);
         }
     }
@@ -206,5 +220,5 @@ function contarClase(words, blocks) {
 }
 
 module.exports = {
-    revisarBloque, contarClase, entraEnElSonido, midioElSonido, TIPOS, CONECTOR_HUERFANO
+    revisarBloque, contarClase, entraEnElSonido, midioElSonido, TIPOS
 };

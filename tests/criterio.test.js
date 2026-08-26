@@ -48,6 +48,73 @@ module.exports = function (t) {
         t.eq(speech.isChatter({ text: 'constitución' }, 3), false);
     });
 
+    t.group('speech-edges · el conector que el CD pidió');
+
+    t.test('el conector que abre la orden del CD no es un defecto', () => {
+        // Los 12 del curso son este caso: el director marcó el bloque en el
+        // conector, así que el bloque abre ahí porque él lo quiso.
+        t.eq(speech.conectorSinPedir({ text: 'Y' }, 'Y en 4º tenemos los no objetivos'), false);
+        t.eq(speech.conectorSinPedir({ text: 'Pero' }, 'Pero antes de abrir la terminal, quiero'), false);
+        t.eq(speech.conectorSinPedir({ text: 'También' }, 'También nos está dando una información m'), false);
+    });
+
+    t.test('el que el CD no pidió sí lo es', () => {
+        // Acá el corte se fue solo hasta un conector: eso es lo que esta cuenta
+        // existe para ver.
+        t.eq(speech.conectorSinPedir({ text: 'Entonces' }, 'lo que vamos a hacer es'), true);
+    });
+
+    t.test('la puntuación y las mayúsculas no cambian la respuesta', () => {
+        // El CD escribe "Y," y Whisper transcribe "y": es la misma palabra, y
+        // comparándolas crudas el bloque 9 de la clase 4 contaba como defecto.
+        t.eq(speech.conectorSinPedir({ text: 'y' }, 'Y, finalmente, el 6º componente'), false);
+        t.eq(speech.conectorSinPedir({ text: 'Entonces,' }, 'Entonces, lo que vamos a hacer'), false);
+    });
+
+    t.test('una palabra que no es conector nunca es un defecto', () => {
+        // Aunque el CD haya marcado el bloque en otra parte: lo que se cuenta es
+        // el arranque que se apoya en algo de antes, no el desacuerdo con la nota.
+        t.eq(speech.conectorSinPedir({ text: 'Ahora' }, 'la fuente de la verdad'), false);
+        t.eq(speech.conectorSinPedir({ text: 'Luego' }, 'la fuente de la verdad'), false,
+            '"luego" apunta hacia adelante y abre bien');
+    });
+
+    t.test('sin orden del CD, el conector se cuenta', () => {
+        // Una clase sin notas no puede justificar ningún arranque.
+        t.eq(speech.conectorSinPedir({ text: 'Pero' }, ''), true);
+        t.eq(speech.conectorSinPedir({ text: 'Pero' }, null), true);
+    });
+
+    t.group('speech-edges · abrir partiendo una frase');
+
+    t.test('abrir a mitad de frase se ve', () => {
+        const words = say('Ahora vamos a hacer el ejercicio completo.', 0);
+        // El corte cae pasado "Ahora": lo que abre es "vamos a hacer…".
+        t.eq(speech.abreAMitad(words, 0.28, 3), true);
+    });
+
+    t.test('abrir donde la frase arranca no es un defecto', () => {
+        const words = say('Cerramos la idea anterior.', 0).concat(say('Ahora vamos a hacer el ejercicio.', 3));
+        t.eq(speech.abreAMitad(words, 2.9, 6), false);
+    });
+
+    t.test('el conteo de la toma no cuenta como frase partida', () => {
+        // El motor tira la cuenta a propósito, así que del otro lado del corte
+        // queda un "uno," sin punto. Eso no es una frase partida: es un corte
+        // bueno. Sin descontarlo, el curso informaba 16 de estos y tiene 7.
+        const words = [
+            { text: 'Tres,', start: 0, end: 0.3 },
+            { text: 'dos,', start: 0.4, end: 0.7 },
+            { text: 'uno,', start: 0.8, end: 1.1 }
+        ].concat(say('que si lo piensas bien es lo mismo.', 2));
+        t.eq(speech.abreAMitad(words, 1.9, 5), false);
+    });
+
+    t.test('el primer bloque de la clase no abre partiendo nada', () => {
+        const words = say('vamos a empezar por el principio.', 0);
+        t.eq(speech.abreAMitad(words, 0, 3), false, 'no hay nada delante');
+    });
+
     t.group('speech-edges · límites de palabra');
 
     t.test('el OUT no puede llegar a la palabra siguiente', () => {

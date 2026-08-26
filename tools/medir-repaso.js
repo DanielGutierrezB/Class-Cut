@@ -35,7 +35,12 @@
  *     (`engine/reloj.js`). Pide un transcript que la traiga.
  *
  * **Lo que dio, con las trece clases transcriptas de nuevo y las entradas
- * congeladas.** Midiendo cada plan con el reloj con el que se decidió: 24 defectos
+ * congeladas.** Los totales de acá abajo son de ANTES de que se arreglara el
+ * conector huérfano y se agregara "abre partiendo una frase"
+ * (`speech-edges.conectorSinPedir` y `abreAMitad`), así que no se comparan con una
+ * corrida de hoy: la vara tiene un defecto más y cuenta otro distinto. Lo que sigue
+ * valiendo es el orden entre los tres relojes, que es lo que estas cifras
+ * decidieron. Midiendo cada plan con el reloj con el que se decidió: 24 defectos
  * de borde con `crudo`, 26 con `onda`, 21 con `dtw`. Y la vara que no depende del
  * reloj —cortes encima de alguien hablando, que lo dice la medición de onda al
  * colocar el borde— da 4, 6 y 1. Ganó el DTW y está cableado en `engine/reloj.js`.

@@ -26,7 +26,14 @@
  *
  * **Que con este se corte mejor está medido, no supuesto.** Las trece clases
  * transcriptas de nuevo, entradas congeladas, mismo criterio y misma semilla, lo
- * único distinto el reloj (`tools/medir-repaso.js --reloj`). Cada plan medido con el
+ * único distinto el reloj (`tools/medir-repaso.js --reloj`). Los totales que
+ * siguen son de antes de arreglar el conector huérfano, así que no se comparan
+ * con una corrida de hoy; el orden entre los relojes no cambia. (De paso: el
+ * renglón del conector es el único que había SUBIDO al cablear este reloj, 7 → 12,
+ * y no era del reloj sino de la vara. Sobre los mismos cortes, el crudo veía 9 y
+ * este ve 12, porque con los tiempos viejos la cola del conteo caía adentro del
+ * bloque y tapaba la primera palabra. Con la pregunta correcta son 0 y este reloj
+ * no empeoró nada — `speech-edges.conectorSinPedir`.) Cada plan medido con el
  * reloj con el que se decidió, que es la única lectura coherente de un plan: 24
  * defectos de borde con el crudo, 26 con el reparto sobre la onda, 21 con este. Y
  * los cortes que caen encima de alguien hablando —la única vara que no depende del

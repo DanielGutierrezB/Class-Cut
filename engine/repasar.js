@@ -101,14 +101,26 @@ function quitarElConector(block, ctx) {
     const { words, wav, options, blocks } = ctx;
     if (!block.in || !abreEnFalso(words, block)) return null;
 
-    // Un conector solo sobra si perdió su antecedente. "Y en cuarto lugar,
-    // tenemos…" abre perfecto cuando el bloque de antes viene pegado: el "en
-    // tercero" está ahí y se lee de corrido. Lo que lo deja huérfano es que
-    // entre los dos se haya tirado material.
+    // Y no se quita el que el CD pidió. El criterio y los números están en
+    // `speech-edges.conectorSinPedir`; acá importa porque esto ya rompió un
+    // bloque entregado. El modelo avisó del 4 de la clase 13 —«Y no me refiero al
+    // código»— y esto le quitó la «Y», dejándolo abriendo en «no me refiero al
+    // código», que es justo lo que el CD había escrito con la «Y» delante. La
+    // relectura de la misma corrida volvió a quejarse del mismo bloque, ahora
+    // como empalme: "arranca con 'no me refiero al código' pero en el bloque
+    // anterior nadie mencionó el código". El arreglo cambió un conector que se
+    // leía por un arranque a mitad de frase, que se lee peor. Medido sobre los 12
+    // conectores del curso, hacerlo en todos lleva los bloques que abren
+    // partiendo una frase de 7 a 18.
+    const dentro = speech.wordsInside(words, block.startSec, block.endSec);
+    if (!speech.conectorSinPedir(dentro[0], block.cueIn)) return null;
+
+    // Un conector tampoco sobra si su antecedente viene pegado delante. Es una
+    // segunda razón para no tocarlo, independiente de la de arriba: el CD pudo no
+    // haber escrito nada y el bloque anterior estar ahí igual.
     const previo = elAnterior(blocks || [], block);
     if (previo && block.startSec - previo.endSec < opt(options, 'pegadoAlAnteriorSec')) return null;
 
-    const dentro = speech.wordsInside(words, block.startSec, block.endSec);
     let i = 0;
     while (i < dentro.length && i < opt(options, 'palabrasDeConector') && speech.esConector(dentro[i])) i++;
     if (!i || i >= dentro.length) return null;

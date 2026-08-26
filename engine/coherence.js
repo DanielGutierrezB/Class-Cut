@@ -94,7 +94,6 @@ function buildScript(blocks, words) {
  */
 function localFindings(script) {
     const findings = [];
-    const CONNECTOR = /^(y|entonces|pero|porque|además|luego|después|así|eso|esto|ahí|igual|o sea)\b/i;
 
     for (let i = 0; i < script.blocks.length; i++) {
         const block = script.blocks[i];
@@ -115,12 +114,19 @@ function localFindings(script) {
             continue;
         }
 
-        // Un conector solo es huérfano si NO estaba en la nota. Medido en el
-        // curso: de 25 bloques que abren con "Y", "Luego" o "Después", 24 los
-        // escribió así el CD — es su forma de hablar, no un corte mal puesto.
+        // Un conector solo es huérfano si NO estaba en la nota. Lo medido acá
+        // —de 25 bloques que abren con conector, 24 los escribió así el CD— es lo
+        // mismo que después midió la vara de los cortes (12 de 12), así que la
+        // pregunta se hace en un solo sitio: `speech-edges.conectorSinPedir`.
+        //
+        // Acá vivía una lista propia de conectores, y las dos listas no decían lo
+        // mismo: esta traía "luego", "después" y "así", que apuntan hacia ADELANTE
+        // y abren un bloque perfecto ("Luego vamos a ver un caso concreto"), y le
+        // faltaban "también", "sin embargo" y "por eso", que sí se apoyan en lo de
+        // antes. Con dos listas, el modelo podía avisar de un arranque que el
+        // recorte consideraba bueno y callarse en uno que consideraba malo.
         const opener = block.text.split(/\s+/)[0];
-        const intentional = CONNECTOR.test(block.cueIn || '');
-        if (i > 0 && CONNECTOR.test(block.text) && !intentional) {
+        if (i > 0 && speech.conectorSinPedir(opener, block.cueIn)) {
             findings.push({
                 bloque: block.n,
                 tipo: 'conector',

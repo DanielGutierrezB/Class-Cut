@@ -3,10 +3,11 @@
  * medir-cortes.js — Los defectos de los cortes, contados sobre el curso entero.
  *
  * Es la vara del plan "Cortes con criterio": antes de tocar nada, el curso tenía
- * 66 bloques terminando con habla del director, 103 con una frase colgando, 7
- * arrancando con un conector huérfano, 2 cortados a mitad de palabra y 2
- * repitiendo el bloque anterior. Esto vuelve a medir lo mismo para poder decir
- * si el trabajo sirvió, en vez de mirar un XML y confiar.
+ * 66 bloques terminando con habla del director, 103 con una frase colgando, 2
+ * cortados a mitad de palabra y 2 repitiendo el bloque anterior. Esto vuelve a
+ * medir lo mismo para poder decir si el trabajo sirvió, en vez de mirar un XML y
+ * confiar. (El conector huérfano no tiene vara hacia atrás: la razón está abajo,
+ * en `baseline`.)
  *
  * Mide sobre los artefactos del Backup, no reprocesando: lo que se juzga es lo
  * que quedó en el disco, que es lo que el editor va a importar.
@@ -31,7 +32,20 @@ const baseline = {
     claqueta: 0,
     chatter: 66,
     colgando: 103,
-    conector: 7,
+    // El conector huérfano no tiene vara hacia atrás, y es a propósito. El 7 que
+    // había acá lo contó la primera versión de la regla, que preguntaba por el
+    // hueco hasta el bloque anterior —material grabado— cuando lo que decide es
+    // si el CD abrió el bloque ahí. Esa versión informaba 12 sobre el curso con la
+    // alineación acústica y los 12 los había escrito así el director; con la
+    // pregunta correcta son 0. El 7 y el 12 miden los dos la misma cosa
+    // equivocada, así que comparar contra el 7 diría que se arreglaron siete
+    // cortes y no se movió ninguno. Los planes viejos ya no están para volver a
+    // contarlos bien. El detalle está en `speech-edges.conectorSinPedir`.
+    conector: 0,
+    // "Abre partiendo una frase" tampoco tiene vara hacia atrás: se agregó
+    // mirando estos 170 bloques, cuando ya no había planes viejos con los que
+     // contarlo. Son 7, y el que importa es el bloque 4 de la clase 13.
+    abriendo: 7,
     mitadPalabra: 2,
     repetido: 2,
     // La vara de la retoma interna no es la de "antes de Cortes con criterio":
@@ -128,6 +142,7 @@ console.log(`  la claqueta quedó dentro         ${fmt(cuenta.claqueta, baseline
 console.log(`  termina con habla del director   ${fmt(cuenta.chatter, baseline.chatter)}`);
 console.log(`  abre con el conteo de la toma    ${fmt(cuenta.conteo, baseline.conteo || 0)}`);
 console.log(`  frase colgando al final          ${fmt(cuenta.colgando, baseline.colgando)}`);
+console.log(`  abre partiendo una frase         ${fmt(cuenta.abriendo, baseline.abriendo)}`);
 console.log(`  arranca con conector huérfano    ${fmt(cuenta.conector, baseline.conector)}`);
 console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, baseline.mitadPalabra)}` +
     (sinMedir ? `   ⚠ ${sinMedir} bordes sin la medición: reprocesá para poder contarlo` : ''));

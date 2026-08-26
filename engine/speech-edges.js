@@ -58,6 +58,67 @@ function esConector(word) {
     return CONECTOR_HUERFANO.test(textOf(word).trim());
 }
 
+/** Una palabra sin la puntuación que la rodea, para poder compararla con otra. */
+function pelada(word) {
+    return textOf(word).trim()
+        .replace(/^[¡¿"«(]+/, '')
+        .replace(/[.,;:!?¡¿…"»)]+$/, '')
+        .toLowerCase();
+}
+
+/**
+ * ¿Este bloque abre con un conector que el CD NO pidió?
+ *
+ * Esta es la pregunta, y no "¿abre con un conector?". Lo de arriba dice si la
+ * palabra se apoya en algo de antes; lo que decide si eso es un DEFECTO es si el
+ * corte lo causó, y para eso hay una señal directa: la frase con la que el CD
+ * marcó el arranque del bloque. Si el conector es la primera palabra de esa
+ * frase, el bloque abre ahí porque el director lo quiso.
+ *
+ * **Los números, sobre los 170 bloques del curso.** Los 12 bloques que abren con
+ * un conector lo traen en la orden del CD: 12 de 12, palabra por palabra —«Y en
+ * 4º tenemos los no objetivos», «Pero antes de abrir la terminal», «También nos
+ * está dando una información m»—. Es la misma cosa que `coherence.js` ya había
+ * medido por su lado (24 de 25) y la razón por la que la lectura del modelo no
+ * avisa de ninguno: es la forma de hablar del profesor, no un corte mal puesto.
+ *
+ * **Por qué NO sirve preguntar por el hueco hasta el bloque anterior**, que es lo
+ * que hacía `tools/defectos.js` («si entre los dos se tiró material, el
+ * antecedente se perdió»). Mide el hueco en el material GRABADO, y el alumno no
+ * ve ese hueco: `cutplan.js` pega los bloques que sobreviven uno tras otro en la
+ * línea de tiempo, así que el bloque anterior suena SIEMPRE justo antes, con
+ * hueco cero. Un hueco grande en la grabación no significa "se tiró contenido":
+ * en los 12 casos significa que el profesor paró y el director contó. Mirando qué
+ * hay adentro de esos huecos —de 4,8 s a 299,1 s— no hay nada más que la pausa,
+ * el chatter y las tomas abortadas de LA MISMA frase: en la clase 3 la frase «Y la
+ * sexta herramienta no es una herramienta como tal» aparece tres veces en el
+ * hueco antes de la toma que quedó. El antecedente nunca se perdió.
+ *
+ * **Y por qué el defecto no se arregla moviendo el corte**, medido con la tabla
+ * entera sobre las entradas congeladas y con la onda de verdad:
+ *
+ *   - Correr el IN detrás del conector baja `conector` de 12 a 1 y el total de 18
+ *     a 7, y aun así deja la clase PEOR: los bloques abren en «la sexta
+ *     herramienta no es…», «por muy bien que hayamos…», «si quieres comenzar a
+ *     desarrollar…». Los bloques que abren a mitad de frase pasan de 16 a 25. La
+ *     vara mejora porque no tiene con qué ver eso —cuenta si el bloque TERMINA a
+ *     mitad de frase, nunca si ABRE así—, así que ese 18 → 7 es la vara jugando
+ *     contra sí misma. Es la razón por la que este defecto se cuenta como se
+ *     cuenta acá y no como "abre con un conector, punto".
+ *   - Abrir el IN más atrás para tragarse el antecedente es imposible: lo que hay
+ *     delante del conector es el conteo de la toma en los 12 casos. Medido, se
+ *     lleva el conteo adentro en 11 bloques y el habla del director en 10, y el
+ *     total va de 18 a 29.
+ *
+ * @param {object|string} primera la palabra con la que abre el bloque
+ * @param {string} cueIn la frase con la que el CD marcó el IN
+ */
+function conectorSinPedir(primera, cueIn) {
+    if (!esConector(primera)) return false;
+    const pedido = String(cueIn || '').trim().split(/\s+/)[0] || '';
+    return pelada(pedido) !== pelada(primera);
+}
+
 const DEFAULTS = {
     weakPauseSec: 0.35,   // silencio a partir del cual una palabra suelta es un aparte
     maxShiftSec: 4,       // cuánto puede moverse un borde para cerrar la frase
@@ -72,6 +133,11 @@ function opt(options, key) {
 
 function textOf(word) {
     if (!word) return '';
+    // Una palabra suelta también vale. `coherence.js` trabaja sobre el texto del
+    // guion y no sobre las palabras del transcript, así que pregunta por la
+    // primera palabra como string: sin esto le contestaba '' y ningún conector
+    // era un conector.
+    if (typeof word === 'string') return word;
     const value = word.text != null ? word.text : word.word;
     return value == null ? '' : String(value);
 }
@@ -488,6 +554,47 @@ function quedaColgando(words, startSec, endSec) {
 }
 
 /**
+ * ¿Y ABRE partiendo una frase por la mitad?
+ *
+ * Es la otra mitad de lo de arriba y faltaba, que no es lo mismo que no hacer
+ * falta: era el punto ciego por el que la vara se podía mejorar empeorando la
+ * clase. Medido sobre el curso, correr los 12 IN detrás de su conector baja
+ * `conector` de 12 a 1 y el total de defectos de 18 a 7 —el mejor número de todas
+ * las variantes— dejando bloques que abren en «la sexta herramienta no es…», «por
+ * muy bien que hayamos…», «si quieres comenzar a desarrollar…». Ninguna cuenta lo
+ * veía, porque todas miraban el final. Con esto, esa variante se delata: los
+ * bloques que abren partiendo una frase pasan de 7 a 18.
+ *
+ * **El conteo de la toma no cuenta como frase partida.** El motor lo tira a
+ * propósito, así que la palabra que queda del otro lado del corte es muchas veces
+ * un «1» sin punto, y sin descontarlo esto informaba 16 bloques en un curso que
+ * tiene 7: nueve de esos eran cortes buenos abriendo justo después de la cuenta.
+ *
+ * Los 7 que quedan son de verdad, y uno es el bloque 4 de la clase 13 —«no me
+ * refiero al código», con la «Y» que el CD había escrito del otro lado del
+ * corte—, que es el único daño que este proyecto se hizo a sí mismo con el
+ * arreglo automático del conector. Que esta cuenta lo vea es justamente para lo
+ * que está.
+ */
+function abreAMitad(words, startSec, endSec) {
+    const lista = spoken(words);
+    const dentro = wordsInside(words, startSec, endSec);
+    if (!dentro.length) return false;
+    const idx = lista.indexOf(dentro[0]);
+    if (idx <= 0) return false;
+    const previa = lista[idx - 1];
+    if (endsSentence(previa)) return false;
+    // La vecina que se le pasa es la de ATRÁS, y en este sitio no es lo mismo que
+    // la de adelante: un conteo termina siempre justo antes del IN, así que la
+    // única palabra que puede delatar al «uno,» del final de la cuenta es el
+    // «dos,» que tiene detrás — la de adelante ya es la clase. Mirando hacia
+    // adelante, el bloque 8 de la clase 6 contaba como frase partida cuando lo que
+    // tiene del otro lado es el final de «Tres, dos, uno,».
+    const pausa = idx > 1 ? previa.start - lista[idx - 2].end : 999;
+    return !isChatter(previa, pausa, null, lista[idx - 2]);
+}
+
+/**
  * Por debajo de esto, el transcript no sirve para decidir cortes.
  *
  * El número sale de medir las trece clases del curso: las sanas van de 9,3 % a
@@ -553,6 +660,7 @@ module.exports = {
     isChatter,
     isHardChatter,
     esConector,
+    conectorSinPedir,
     CONECTOR_HUERFANO,
     endsSentence,
     densidadDeCierres,
@@ -564,6 +672,7 @@ module.exports = {
     wordsInside,
     textInside,
     quedaColgando,
+    abreAMitad,
     spoken,
     textOf,
     esConteo,
