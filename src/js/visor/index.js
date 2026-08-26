@@ -11,7 +11,8 @@ import { state, clases } from '../estado.js';
 import { marcarPaso, PASOS } from '../pasos.js';
 import { rev, actual, alRedibujar, cambio } from './estado.js';
 import { renderOverview, renderZoom } from './onda.js';
-import { setEdge, renderEdges, renderDecided, renderTranscript, playEdge } from './bordes.js';
+import { setEdge, renderEdges, renderDecided, renderTranscript } from './bordes.js';
+import { escucharBorde, pausar as pausarEscucha, renderEscucha, wireEscucha } from './escucha.js';
 import { renderScript, wireGuion } from './guion.js';
 import { abrirReproductor, cerrarReproductor, refrescarBloques, wireReproductor } from './reproductor.js';
 import { ajustarDivision, wireDivision } from './division.js';
@@ -50,6 +51,9 @@ export async function openReview(id) {
     // Cambiar de clase con el reproductor abierto: lo de la clase anterior se
     // suelta antes de cargar nada, o queda un video de 15 GB sonando sin dueño.
     cerrarReproductor();
+    // Y lo mismo con el tramo que se estaba escuchando: el Live-Mix de la clase
+    // anterior no puede seguir sonando mientras carga la nueva.
+    pausarEscucha();
 
     showView('review');
     marcarPaso(PASOS.revisar, true);
@@ -179,6 +183,9 @@ function renderReview() {
     renderReviewList();
     renderOverview();
     renderZoom();
+    // Después del zoom: la aguja se ubica sobre la ventana que el zoom acaba de
+    // dibujar, y mover un borde corre esa ventana.
+    renderEscucha();
     renderEdges();
     renderDecided();
     renderTranscript();
@@ -226,6 +233,7 @@ function renderReviewList() {
 function setReviewTab(tab) {
     // Salir de la pestaña no puede dejar una clase sonando por detrás.
     if (rev.tab === 'clase' && tab !== 'clase') cerrarReproductor();
+    if (rev.tab === 'cortes' && tab !== 'cortes') pausarEscucha();
 
     if (rev.tab !== tab) anotar('visor.pestaña', { de: rev.tab, a: tab });
     rev.tab = tab;
@@ -364,6 +372,7 @@ export function wireReview(callbacks) {
     // pantalla de la última corrida, que después de revisar ya no dice nada.
     $('rev-back').onclick = () => {
         cerrarReproductor();
+        pausarEscucha();
         if (callbacks && callbacks.alVolver) callbacks.alVolver();
     };
     $('rev-save').onclick = saveReviewChanges;
@@ -415,9 +424,10 @@ export function wireReview(callbacks) {
         });
     }
     for (const button of document.querySelectorAll('.btn-play')) {
-        button.onclick = () => playEdge(button.dataset.play);
+        button.onclick = () => escucharBorde(button.dataset.play);
     }
 
+    wireEscucha();
     wireGuion(setReviewTab);
     wireReproductor();
     wireLetra();

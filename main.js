@@ -11,7 +11,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { execFile } = require('child_process');
 
 const scanner = require('./engine/course-scan');
 const carpetasLib = require('./engine/carpetas');
@@ -566,6 +565,13 @@ ipcMain.handle('load-review', (event, { id, buckets }) => {
         mediaPermitida.clear();
         const urls = permitirMedia(data.cameras.map(c => c.path));
         data.cameras = data.cameras.map((c, i) => ({ index: c.index, name: c.name, url: urls[i] }));
+        // Y el Live-Mix por la misma puerta: la pestaña de cortes lo escucha con
+        // un `<audio>` apuntado acá. Antes se sacaba un pedacito con ffmpeg a un
+        // WAV temporal y viajaba como data URL, que sirve para oír un instante y
+        // no para recorrer el tramo: cada escucha era un proceso, un archivo y
+        // medio segundo de espera. Servido por rangos, buscar dentro de una hora
+        // de clase no lee más que el pedazo que suena.
+        if (data.liveMixPath) data.liveMixUrl = permitirMedia([data.liveMixPath])[0];
     }
     return data;
 });
@@ -647,38 +653,10 @@ ipcMain.handle('save-notas', (event, { id, bloques, comentarios }) => {
     }
 });
 
-/**
- * Un pedacito de audio para escuchar un borde antes de aceptarlo. Se extrae con
- * ffmpeg a mono 22 kHz: alcanza de sobra para oír dónde entra la voz y pesa lo
- * que se puede mandar a la ventana sin pensarlo.
- */
-ipcMain.handle('audition', async (event, { path: wavPath, startSec, durationSec }) => {
-    const tool = paths.ffmpeg();
-    if (!tool.path) return { ok: false, error: 'Falta ffmpeg (mirá Diagnóstico).' };
-
-    const out = path.join(app.getPath('temp'), `classcut-audition-${Date.now()}.wav`);
-    const args = [
-        '-v', 'error', '-y',
-        '-ss', String(Math.max(0, startSec)),
-        '-t', String(Math.max(0.2, Math.min(30, durationSec))),
-        '-i', wavPath,
-        '-ar', '22050', '-ac', '1', '-c:a', 'pcm_s16le',
-        out
-    ];
-
-    return new Promise(resolve => {
-        execFile(tool.path, args, { timeout: 20000 }, err => {
-            if (err) return resolve({ ok: false, error: err.message });
-            try {
-                const data = fs.readFileSync(out);
-                fs.unlinkSync(out);
-                resolve({ ok: true, dataUrl: `data:audio/wav;base64,${data.toString('base64')}` });
-            } catch (e) {
-                resolve({ ok: false, error: e.message });
-            }
-        });
-    });
-});
+// Acá vivía `audition`, que extraía con ffmpeg un pedacito de WAV a un temporal
+// para oír un borde. Lo reemplazó el transporte de la pestaña de cortes
+// (`src/js/visor/escucha.js`): un `<audio>` apuntado al Live-Mix entero por
+// `clase://`, sin proceso ni archivo por cada escucha.
 
 /**
  * Procesa las clases marcadas, de las carpetas que sean. Se vuelve a escanear y

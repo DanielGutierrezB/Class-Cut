@@ -120,7 +120,14 @@ export function renderOverview() {
     };
 }
 
-function zoomWindow() {
+/**
+ * El tramo ampliado: el bloque más un margen a cada lado.
+ *
+ * Exportada porque el transporte de audio (`escucha.js`) escucha exactamente
+ * esta ventana. Si cada uno calculara la suya, la aguja se dibujaría corrida
+ * respecto de la onda en cuanto una de las dos cuentas cambiara.
+ */
+export function zoomWindow() {
     const segment = actual();
     if (!segment) return null;
     const from = Math.max(0, segment.sourceStartSec - ZOOM_MARGIN_SEC);
@@ -161,8 +168,9 @@ export function renderZoom() {
         ctx.stroke();
     }
 
-    $('rev-zoom-label').textContent =
-        `${fmtClock(ventana.from)} – ${fmtClock(ventana.to)} · clic para mover la entrada, con Alt la salida`;
+    $('rev-zoom-label').textContent = `${fmtClock(ventana.from)} – ${fmtClock(ventana.to)}`
+        + ' · clic en la onda para mover la entrada, con Alt la salida'
+        + ' · clic en la tira de abajo para mover la aguja';
 
     canvas.onclick = event => {
         const rect = canvas.getBoundingClientRect();

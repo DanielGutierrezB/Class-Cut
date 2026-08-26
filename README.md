@@ -21,9 +21,11 @@ dijo, calcula los cortes y escribe el XML. Nada del material original se toca.
    **Cortes con criterio**). Cada clase escribe su XML en el `The Cutter/` de SU
    carpeta, así que una corrida puede mezclar carpetas sin que se cruce nada.
 4. **Revisar cortes** — waveform, bloques y transcript para ajustar antes de
-   exportar; el **guion final**, que es la clase cortada leída de corrido con lo
-   que no cierra marcado en su bloque; y **ver la clase**, que la reproduce
-   montada (ver **El reproductor**).
+   exportar, con el tramo que se está editando reproducible para oír por dónde
+   pasa cada borde (ver **Escuchar el tramo que se está cortando**); el **guion
+   final**, que es la clase cortada leída de corrido con lo que no cierra marcado
+   en su bloque; y **ver la clase**, que la reproduce montada (ver **El
+   reproductor**).
 
 Los cuatro son sitios, no etapas: los del cabezal son botones y se entra y sale
 en cualquier orden. Abrir una carpeta con clases ya procesadas y darle a
@@ -576,6 +578,48 @@ No sirve, y conviene dejarlo escrito para que nadie lo reintente: como la voz
 lejana mide igual que el silencio, ese filtro borraba 833 palabras de una clase,
 entre ellas la claqueta, que es de donde cuelga todo el alineado.
 
+## Escuchar el tramo que se está cortando
+
+En la pestaña **Cortes** el trabajo es mover un borde, oír cómo quedó y corregir.
+Para eso hay transporte de verdad sobre el tramo ampliado: reproducir y pausar,
+una tira para llevar la aguja a cualquier parte del tramo y la aguja cruzando la
+onda mientras suena. La **barra espaciadora** reproduce y pausa, igual que en
+"Ver la clase".
+
+**Suena el tramo con el margen que se ve arriba**, no el bloque pelado: los
+cuatro segundos de cada lado son justo lo que quedó afuera, y para juzgar una
+entrada hay que oír el silencio (o la palabra) que la precede. Al llegar al final
+para y la aguja se queda ahí; volver a darle rebobina al principio. **Repetir**
+lo deja dando vueltas, que es la forma de mover un borde y escuchar el resultado
+sin volver a apretar nada.
+
+El **«▶ Escuchar»** de cada borde sigue estando, pero ahora es un atajo del mismo
+transporte: lleva la aguja a segundo y medio antes de ese borde y reproduce desde
+ahí. No se corta solo a los tres segundos y medio como antes, porque habiendo
+transporte, un audio que se apaga solo se lee como que algo falló.
+
+El sonido sale del **Live-Mix entero servido por `clase://`**, la misma puerta por
+la que el reproductor pide los MP4 de 15 GB (ver `engine/media-server.js`). Antes
+cada escucha era un ffmpeg extrayendo un WAV temporal que viajaba como data URL:
+un proceso y un archivo por clic, y ninguna forma de moverse dentro de lo
+extraído. Medido sobre el Live-Mix de la clase 1 del curso real (724 MB, 41:56):
+la ventana tiene la duración del archivo **34 ms** después de pedirlo y saltar al
+minuto 30 tarda **152 ms**, porque el protocolo contesta por rangos y del disco se
+lee solo el pedazo que suena.
+
+Sobre las **flechas**: no se toman a propósito. Acá tienen dos significados igual
+de evidentes —mover el borde o mover la aguja— y elegir uno en silencio es peor
+que no atender la tecla; los bordes se mueven con sus botones, que dicen cuánto
+mueven. Y el clic sobre la onda **no** mueve la aguja, sigue moviendo la entrada
+(con Alt, la salida): dos significados en el mismo píxel se cobran cada vez que
+le pegás al que no era, y ahí el costo es mover un borde sin querer. Para la
+aguja está la tira.
+
+Mover un borde mientras suena **no interrumpe**: la ventana se corre y la aguja
+se reubica sola. Lo que no hace es ponerse a sonar sola al mover un borde —los
+botones de ±1 cuadro se aprietan en ráfagas, y una escucha por pulsación es una
+máquina de tartamudear. Estando parado, la escucha se pide: es una tecla.
+
 ## El reproductor
 
 La pestaña **Ver la clase** reproduce el corte montado: los bloques uno detrás
@@ -777,7 +821,10 @@ rutas de una lista blanca y responde por rangos
 ([engine/media-server.js](engine/media-server.js)). No se usa `file://` porque
 habría que apagar `webSecurity`, y no se usa `net.fetch` sobre `file://` porque
 ignora el `Range` y devuelve el archivo entero: el video se queda negro esperando
-bytes que nunca llegan en el orden que pidió.
+bytes que nunca llegan en el orden que pidió. Por la misma puerta va el Live-Mix
+que se escucha en la pestaña de cortes, así que **`clase:` es la única fuente de
+medios que la política de la ventana declara**: el `data:` que estaba en
+`media-src` se fue con la extracción por ffmpeg y nada lo usa.
 
 > **Cuidado al escribir la interfaz.** La política de seguridad de la ventana es
 > `style-src 'self'`, sin `'unsafe-inline'`: un atributo `style="…"` escrito
@@ -1019,6 +1066,7 @@ src/js/                  ventana: un módulo por paso, sin frameworks
   visor/                 paso 4: onda, bordes, guion y reproductor
     pista.js             la clase cortada como una sola línea de tiempo
     reproductor.js       reproducirla saltando bloques y cambiando de cámara
+    escucha.js           recorrer con el oído el tramo que se está editando
     letra.js             el transcript repartido en bloques, palabra por palabra
     panel-letra.js       el panel que se alumbra y donde se comenta
     division.js          el reparto de espacio entre el video y el texto

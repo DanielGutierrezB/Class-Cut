@@ -13,7 +13,6 @@ export const rev = {
     segments: [],
     selected: 0,
     dirty: false,
-    audio: null,
     /**
      * En qué pestaña se entra.
      *

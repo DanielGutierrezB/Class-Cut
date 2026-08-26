@@ -27,6 +27,23 @@ export function showView(name) {
     }
 }
 
+/**
+ * ¿El editor está escribiendo?
+ *
+ * Los atajos de teclado del visor viven en el documento (para eso están: el foco
+ * lo tiene lo último que se tocó, no el reproductor), así que cada uno tiene que
+ * apartarse cuando el foco está en un campo de texto — la nota de un marcador y
+ * la caja de comentarios son campos donde la barra espaciadora es un espacio.
+ *
+ * Vive acá y no en el reproductor porque ahora hay dos pestañas que atienden la
+ * barra —"Ver la clase" y los cortes— y la regla tiene que ser una sola: con dos
+ * copias, arreglar una deja la otra comiéndose los espacios del editor.
+ */
+export function estaEscribiendo(donde) {
+    return Boolean(donde)
+        && (donde.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(donde.tagName));
+}
+
 let toastTimer = null;
 export function toast(message) {
     const el = $('toast');

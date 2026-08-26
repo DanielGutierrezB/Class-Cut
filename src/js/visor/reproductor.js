@@ -19,7 +19,7 @@
  * justamente se decidió sacar.
  */
 
-import { $, toast } from '../chrome.js';
+import { $, toast, estaEscribiendo } from '../chrome.js';
 import { esc, fmtClock } from '../formato.js';
 import { rev, cambio } from './estado.js';
 import { COLORES_DE_CAMARA, comentariosEn, construir, tramoEn, posicionDeBloque, seTermino, siguiente } from './pista.js';
@@ -439,14 +439,9 @@ export function cerrarReproductor() {
  * tocó: un botón, la nota de un bloque, nada. Pidiéndole al editor que haga clic
  * en el video antes de poder darle a la barra, el atajo no sirve para nada.
  *
- * Escribiendo no se dispara ninguno: la nota del marcador y la caja de
- * comentarios son campos de texto, y ahí la barra es un espacio.
+ * Escribiendo no se dispara ninguno: la regla de qué cuenta como escribir está
+ * en `chrome.js`, compartida con los atajos de la pestaña de cortes.
  */
-function estaEscribiendo(donde) {
-    return Boolean(donde)
-        && (donde.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(donde.tagName));
-}
-
 function teclas(evento) {
     if (rev.tab !== 'clase' || !estado.pista) return;
     if (evento.metaKey || evento.ctrlKey || evento.altKey) return;

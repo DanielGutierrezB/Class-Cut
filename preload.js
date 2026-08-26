@@ -42,7 +42,6 @@ contextBridge.exposeInMainWorld('cc', {
     pendientes: id => ipcRenderer.invoke('pendientes', id),
     saveNotas: payload => ipcRenderer.invoke('save-notas', payload),
     waveformWindow: payload => ipcRenderer.invoke('waveform-window', payload),
-    audition: payload => ipcRenderer.invoke('audition', payload),
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
 

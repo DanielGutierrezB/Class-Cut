@@ -831,6 +831,55 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .wave-zoom { height: 104px; }
 .wave-label { font-size: 11px; color: var(--text-mute); margin-top: 3px; }
 
+/* La onda ampliada, la tira y la aguja comparten caja porque comparten línea de
+   tiempo: la aguja se posiciona en porcentaje del ancho, que es exactamente
+   cómo `escucha.js` traduce un momento a un punto de la ventana. */
+.zoom-box { position: relative; }
+
+/* La tira es lo que se agarra para mover la aguja. Va aparte de la onda porque
+   sobre la onda el clic ya significa "mové la entrada" (con Alt, la salida), y
+   dos significados en el mismo píxel se cobran cada vez que le pegás al que no
+   era: ahí se mueve un borde sin querer. */
+.zoom-track {
+    position: relative;
+    height: 14px;
+    margin-top: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    overflow: hidden;
+    cursor: pointer;
+}
+/* Qué parte de lo que suena es el bloque: sin esto la tira es una barra gris y
+   no se ve que buena parte de lo que se escucha es el margen que quedó afuera. */
+.zoom-bloque { position: absolute; top: 0; bottom: 0; background: rgba(79, 156, 249, .38); }
+
+.zoom-head {
+    position: absolute;
+    top: 0;
+    /* Hasta abajo de la tira: una aguja que termina donde termina la onda deja
+       la tira sin decir dónde está la reproducción, que es para lo que está. */
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--text);
+    box-shadow: 0 0 6px rgba(0, 0, 0, .6);
+    pointer-events: none;
+}
+
+/* Envuelve porque la última de la fila es la explicación: angostando la ventana,
+   lo que baja de línea es el texto y no el botón. */
+.audicion { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+.audicion-play { min-width: 150px; }
+.audicion-time {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    min-width: 68px;
+}
+.audicion-loop { font-size: 12px; color: var(--text-dim); }
+.audicion-hint { font-size: 11px; }
+
 .edges { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 12px; }
 .edge { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; }
 .edge-head { display: flex; align-items: center; gap: 10px; }

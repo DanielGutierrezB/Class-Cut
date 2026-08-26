@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src data: clase:;">
+          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src clase:;">
     <title>Class Cut</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/visor.css">
@@ -232,9 +232,39 @@
                         <div class="wave-label">Clase completa · clic para ir a un bloque</div>
                     </div>
 
+                    <!-- La onda ampliada, la tira para mover la aguja y la
+                         aguja, en un mismo bloque posicionado: la aguja los
+                         cruza a los dos porque son la misma línea de tiempo. -->
                     <div class="wave-box">
-                        <canvas class="wave wave-zoom" id="rev-zoom"></canvas>
+                        <div class="zoom-box">
+                            <canvas class="wave wave-zoom" id="rev-zoom"></canvas>
+                            <div class="zoom-track" id="rev-zoom-track"
+                                 title="Clic o arrastrá para mover la aguja">
+                                <div class="zoom-bloque" id="rev-zoom-bloque"></div>
+                            </div>
+                            <div class="zoom-head" id="rev-zoom-head" hidden></div>
+                        </div>
                         <div class="wave-label" id="rev-zoom-label">—</div>
+                    </div>
+
+                    <div class="audicion">
+                        <!-- Sin `src`: lo pone `escucha.js` con la url `clase://`
+                             del Live-Mix de la clase abierta.
+                             `metadata` y no `auto`: el archivo se abre al abrir
+                             la clase, y la clase se abre en la pestaña del
+                             reproductor. Con `auto`, Chromium se pone a bufferear
+                             un WAV de 700 MB que a lo mejor nadie va a escuchar.
+                             Buscar antes de reproducir sale igual de rápido: el
+                             protocolo sirve por rangos. -->
+                        <audio id="rev-audio" preload="metadata"></audio>
+                        <button class="btn btn-primary audicion-play" id="rev-play"
+                                title="Barra espaciadora">Escuchar el tramo</button>
+                        <span class="audicion-time" id="rev-audio-time">—</span>
+                        <label class="toggle audicion-loop">
+                            <input type="checkbox" id="rev-loop">
+                            Repetir
+                        </label>
+                        <span class="cell-dim audicion-hint">Suena el bloque con el margen que se ve arriba</span>
                     </div>
 
                     <div class="edges">
@@ -242,7 +272,8 @@
                             <div class="edge-head">
                                 <span class="edge-name">Entrada</span>
                                 <span class="edge-time" id="in-time">—</span>
-                                <button class="btn btn-ghost btn-play" data-play="in">▶ Escuchar</button>
+                                <button class="btn btn-ghost btn-play" data-play="in"
+                                        title="Lleva la aguja segundo y medio antes de la entrada y reproduce">▶ Escuchar</button>
                             </div>
                             <div class="nudges" data-edge="in">
                                 <button class="btn btn-ghost" data-delta="-1">−1 s</button>
@@ -258,7 +289,8 @@
                             <div class="edge-head">
                                 <span class="edge-name">Salida</span>
                                 <span class="edge-time" id="out-time">—</span>
-                                <button class="btn btn-ghost btn-play" data-play="out">▶ Escuchar</button>
+                                <button class="btn btn-ghost btn-play" data-play="out"
+                                        title="Lleva la aguja segundo y medio antes de la salida y reproduce">▶ Escuchar</button>
                             </div>
                             <div class="nudges" data-edge="out">
                                 <button class="btn btn-ghost" data-delta="-1">−1 s</button>

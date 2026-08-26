@@ -1,7 +1,12 @@
 'use strict';
-/** Los bordes del bloque: moverlos, ver por qué quedaron ahí y escucharlos. */
+/**
+ * Los bordes del bloque: moverlos y ver por qué quedaron ahí.
+ *
+ * Escucharlos es de `escucha.js`: el «▶ Escuchar» de cada borde ya no extrae un
+ * pedacito con ffmpeg, lleva el transporte del tramo hasta ese borde.
+ */
 
-import { $, toast } from '../chrome.js';
+import { $ } from '../chrome.js';
 import { esc, fmtClock } from '../formato.js';
 import { rev, actual, cambio } from './estado.js';
 
@@ -97,22 +102,4 @@ export function renderTranscript() {
             </div>`;
         }).join('')
         : '<div class="cell-dim">No hay transcript para este tramo.</div>';
-}
-
-/** Escucha segundo y medio antes del borde: alcanza para saber si corta bien. */
-export async function playEdge(edge) {
-    const segment = actual();
-    if (!segment || !rev.data.liveMixPath) return;
-
-    const at = edge === 'in' ? segment.sourceStartSec : segment.sourceEndSec;
-    const result = await window.cc.audition({
-        path: rev.data.liveMixPath,
-        startSec: Math.max(0, at - 1.5),
-        durationSec: 3.5
-    });
-    if (!result.ok) { toast(result.error); return; }
-
-    if (rev.audio) rev.audio.pause();
-    rev.audio = new Audio(result.dataUrl);
-    rev.audio.play().catch(err => toast(`No se pudo reproducir: ${err.message}`));
 }
