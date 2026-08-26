@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const reloj = require('../engine/reloj');
 const defectos = require('./defectos');
 
 const root = process.argv[2];
@@ -50,7 +51,16 @@ function backupDir() {
     return dir;
 }
 
-/** Las clases del Backup, cada una con su alineado y su transcript. */
+/**
+ * Las clases del Backup, cada una con su alineado y sus palabras.
+ *
+ * Las palabras van con el reloj CON EL QUE SE DECIDIÓ el plan, que el plan trae
+ * anotado. Leerlas con el reloj crudo del transcript no es un detalle: los
+ * defectos se cuentan mirando qué palabras caen dentro de cada bloque, así que un
+ * plan del DTW leído con los tiempos de Whisper informaba 26 bloques terminando en
+ * habla del director donde no había ninguno. Un plan sin la anotación es de antes
+ * de que el reloj existiera y se lee con el crudo, que es con el que se hizo.
+ */
 function clases() {
     const dir = backupDir();
     return fs.readdirSync(dir)
@@ -60,10 +70,13 @@ function clases() {
             const name = file.replace(/_align\.json$/, '');
             const transcriptPath = path.join(dir, `${name}_transcript.json`);
             if (!fs.existsSync(transcriptPath)) return null;
+            const align = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+            const words = JSON.parse(fs.readFileSync(transcriptPath, 'utf8')).words || [];
             return {
                 name,
-                align: JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')),
-                words: JSON.parse(fs.readFileSync(transcriptPath, 'utf8')).words || []
+                align,
+                reloj: align.reloj || 'crudo',
+                words: reloj.paraDecidir(words, align.reloj === 'dtw' ? 'auto' : 'crudo').palabras
             };
         })
         .filter(Boolean);

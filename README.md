@@ -125,8 +125,36 @@ se quedaron fuera del motor: parecían llevar los cortes a mitad de palabra de 3
 8. Rehecha la cuenta, la misma comparación va de 3 a 1 y el total de defectos de
 borde de 28 a 23. Ahora la pregunta es la del editor —en el frame donde cae el
 corte, ¿hay alguien hablando?— y la contesta el motor al colocar el borde, con el
-mismo umbral con el que lo eligió. Las tablas de más abajo que traen ese renglón
-son de antes del arreglo: hay que volver a sacarlas.
+mismo umbral con el que lo eligió.
+
+### Con qué reloj se decide dónde cortar
+
+Los cortes se deciden con el reloj del DTW ([engine/reloj.js](engine/reloj.js)), el
+mismo con el que el panel alumbra. Cuál de los tres relojes convenía se midió: las
+trece clases transcriptas de nuevo, entradas congeladas, mismo criterio y misma
+semilla, y solo el reloj distinto ([tools/medir-repaso.js](tools/medir-repaso.js)
+`--reloj crudo|onda|dtw`). Midiendo cada plan con el reloj con el que se decidió,
+que es la única lectura coherente de un plan: **24 defectos de borde con el crudo,
+26 con el reparto sobre la onda, 21 con el DTW**. Y la vara que no depende del reloj
+con el que se mire —cortes que caen encima de alguien hablando, que lo dice la
+medición de onda al colocar el borde— da 4 con el crudo, 6 con la onda y 1 con el
+DTW.
+
+Dos cosas que costaron y conviene no volver a aprender:
+
+- **Comparar planes decididos con relojes distintos es una trampa fácil.** Los
+  defectos se cuentan mirando qué palabras caen dentro de cada bloque, así que
+  cambiar los tiempos cambia también la vara: cada plan parece el mejor cuando se lo
+  mide con el reloj con el que se hizo. Por eso `medir-repaso` mide cada plan con
+  los tres y el plan guardado dice con cuál se decidió — sin ese campo, la medición
+  oficial leía el plan del DTW con los tiempos de Whisper e informaba 26 bloques
+  terminando en habla del director donde no había ninguno.
+- **El DTW no tiene finales.** Da un instante por palabra. La primera versión
+  cerraba cada palabra donde arrancaba la siguiente, y eso convertía un final en el
+  arranque de otra cosa: `speech-edges.wordLimits` saca el piso del IN del final de
+  la palabra anterior, con ese piso pegado al sonido el colchón de aire no cabe, y
+  seis bloques quedaban cortados encima de la voz. Con los finales del transcript
+  —que es donde Whisper acierta— quedan en uno.
 
 Las reglas que definen "corte malo" viven en un solo archivo
 ([tools/defectos.js](tools/defectos.js)) y las comparten el medidor y el banco.
@@ -396,6 +424,12 @@ empeora:
 
 Que `colgando` no suba es el dato que más costó: arreglar el arranque de un bloque
 y romperle el final a otro habría sido un empate disfrazado de mejora.
+
+El renglón de "mitad de palabra" de esta tabla es de cuando ese defecto se contaba
+con `airFrames`, o sea que dice cuánto se equivocaba el transcript y no dónde quedó
+el corte: **no es comparable con los números de hoy**. Contado como lo oye el
+editor, el curso entero tiene 1 corte encima de alguien hablando sobre 170 bloques.
+Los otros renglones no dependen de eso y siguen valiendo.
 
 El diagnóstico de por qué un arreglo no se aplicó se mira con:
 
@@ -715,6 +749,48 @@ reproduciendo, porque un atajo que depende de dónde se hizo el último clic no 
 un atajo. El ancho se recuerda entre sesiones, y
 ninguno de los dos puede quedar en nada: al achicar la ventana el texto cede
 primero, pero sin pisar lo elegido, así que al agrandarla se recupera.
+
+### Con qué reloj se alumbra
+
+Los tiempos que Whisper le pone a cada palabra no sirven para esto. Corre con una
+palabra por segmento y los segmentos van pegados, así que el "final" de una palabra
+es el arranque de la siguiente y nadie midió nunca dónde para el sonido: en el curso
+hay 3.735 palabras de 45.182 durando cero —cinco seguidas en el mismo instante— y
+una cuenta de "3, 2, 1." que en el audio dura 1,4 s figura ocupando 8,7. Con eso el
+resaltado se clava tres segundos en una palabra y después salta doce de golpe.
+
+whisper.cpp sabe alinear cada palabra contra el espectrograma, y hasta hace poco esa
+alineación nunca corría: desde que *flash attention* viene prendida por defecto, la
+apaga sin decir nada. Con `-nfa` corre, y el instante que calcula va en un campo
+aparte que no toca los `start`/`end` del transcript, porque de esos viven los cortes.
+
+Los dos alineadores son buenos en lugares distintos, y está medido: en el arranque de
+cada tirada —donde hay silencio al lado y se puede medir un ataque limpio— la onda
+([engine/vendor/audio-onset.js](engine/vendor/audio-onset.js)) deja 20 ms de error y
+el DTW 60; adentro de la frase la onda no mide nada, reparte proporcionalmente lo que
+dijo el STT, y ahí el DTW parte el error al medio. Así que se injerta: el arranque de
+la tirada es de la onda, lo de adentro es del DTW.
+
+Y hay un detalle que costó el defecto entero: "la onda manda" vale mientras la onda
+haya medido algo. Cuando el director habla desde el fondo de la sala no hay ataque
+que medir y la palabra se queda con el tiempo crudo del STT, que llega a estar ocho
+segundos antes de que se oiga nada — son 628 de las 3.157 tiradas del curso (19,9%),
+y son siempre las órdenes al editor: "Ok.", "Sí,", "3,", "Listo.", "Claqueta". Ahora
+la onda deja anotado por palabra **si midió**, y donde no midió manda el DTW: en la
+clase 1 el panel pasa de 352 a 214 segundos clavado en la palabra que abre una
+tirada, y la frase con la que arranca el curso —"Cuando estés listo, dame el claqueta
+1", que Whisper pone en 0,65 y se dice en 8,56— se alumbra a 80 ms de donde suena en
+vez de a ocho segundos.
+
+Preguntarlo mal no alcanzaba, y conviene saberlo: "¿la onda encontró un borde?"
+contesta que **sí** en ese mismo arranque, porque el umbral con el que se busca un
+borde sale de la propia ventana y en una ventana de puro ruido de sala se apoya en el
+ruido (0,00041 contra picos de 0,00188). Lo que hay que preguntar es si en ese borde
+hay alguien hablando, sostenido y no en un pico, contra el nivel de habla de la clase.
+
+Las duraciones que salen de este reloj son ficticias —el final de cada palabra es el
+arranque de la siguiente— y el panel no las mira: alumbra la última palabra que
+arrancó. Nada que use duraciones de verdad se alimenta de acá.
 
 ### Dónde no se dice nada
 

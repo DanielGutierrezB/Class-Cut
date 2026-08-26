@@ -12,12 +12,12 @@
  * nada. Así que acá se cuenta cuántos bordes se movieron, en qué dirección y
  * cuántos bloques ganaron o perdieron defectos.
  *
- * **Las dos varas.** Los defectos se cuentan mirando qué palabras caen dentro de
- * cada bloque, así que cambiarle los tiempos a las palabras cambia también la
- * vara. Una variante podría "mejorar" nada más porque se la mide distinto. Por
- * eso `medir-repaso` vuelca las dos lecturas de cada plan y acá se muestran las
- * cuatro celdas: sin la columna del reloj común, la comparación se estaría
- * haciendo trampa sola.
+ * **Una vara por reloj.** Los defectos se cuentan mirando qué palabras caen dentro
+ * de cada bloque, así que cambiarle los tiempos a las palabras cambia también la
+ * vara. Una variante podría "mejorar" nada más porque se la mide distinto. Por eso
+ * `medir-repaso` vuelca la lectura de cada plan con TODOS los relojes y acá se
+ * muestra una columna por reloj: sin la columna del reloj común, la comparación se
+ * estaría haciendo trampa sola.
  *
  * **Los hallazgos de la lectura van aparte** y no sumados a los defectos de
  * borde. Son cosas distintas —uno lo mide una regla sobre el texto, el otro lo
@@ -51,15 +51,30 @@ if (!archivoA || !archivoB) {
 const A = JSON.parse(fs.readFileSync(archivoA, 'utf8'));
 const B = JSON.parse(fs.readFileSync(archivoB, 'utf8'));
 
-const nombre = corrida => (corrida.retimeo ? 'onda' : 'crudo');
+// Las corridas viejas traían `retimeo: true|false` en vez del nombre del reloj.
+const nombre = corrida => corrida.reloj || (corrida.retimeo ? 'onda' : 'crudo');
 
-/** Suma por tipo de defecto de todas las clases de una corrida. */
-function sumar(corrida, campo) {
+/** Suma por tipo de defecto de todas las clases de una corrida, con un reloj. */
+function sumar(corrida, reloj) {
     const total = Object.fromEntries(defectos.TIPOS.map(t => [t, 0]));
     for (const cls of corrida.clases) {
-        for (const tipo of defectos.TIPOS) total[tipo] += (cls[campo] || {})[tipo] || 0;
+        const tabla = (cls.defectosPorReloj || {})[reloj]
+            // Una corrida vieja solo tiene dos lecturas y no dice de qué reloj es
+            // cada una más que por el brazo.
+            || (reloj === nombre(corrida) ? cls.defectos : cls.defectosOtroReloj);
+        for (const tipo of defectos.TIPOS) total[tipo] += (tabla || {})[tipo] || 0;
     }
     return total;
+}
+
+/** Los relojes con los que las dos corridas midieron, para poner una columna a cada uno. */
+function relojesComunes() {
+    const hay = corrida => new Set(corrida.clases.flatMap(c => Object.keys(c.defectosPorReloj || {})));
+    const enA = hay(A);
+    const enB = hay(B);
+    const comunes = [...enA].filter(r => enB.has(r));
+    // Con corridas viejas no hay de dónde sacarlo: son las dos de siempre.
+    return comunes.length ? comunes : ['crudo', 'onda'];
 }
 
 function totalDe(tabla) {
@@ -73,13 +88,10 @@ function flecha(a, b) {
 
 // ─── Los defectos, en las cuatro celdas ────────────────────────────────────
 
-// Cada corrida se midió con el reloj con el que decidió (`defectos`) y con el
-// otro (`defectosOtroReloj`). Agrupándolos por reloj y no por corrida, cada
-// columna compara dos planes con la misma vara.
-const conCrudo = { A: sumar(A, A.retimeo ? 'defectosOtroReloj' : 'defectos'),
-    B: sumar(B, B.retimeo ? 'defectosOtroReloj' : 'defectos') };
-const conOnda = { A: sumar(A, A.retimeo ? 'defectos' : 'defectosOtroReloj'),
-    B: sumar(B, B.retimeo ? 'defectos' : 'defectosOtroReloj') };
+// Agrupando por reloj y no por corrida, cada columna compara dos planes con la
+// misma vara.
+const relojes = relojesComunes();
+const celdas = Object.fromEntries(relojes.map(r => [r, { A: sumar(A, r), B: sumar(B, r) }]));
 
 const bloquesA = A.clases.reduce((n, c) => n + c.bloques.filter(b => b.enabled).length, 0);
 const bloquesB = B.clases.reduce((n, c) => n + c.bloques.filter(b => b.enabled).length, 0);
@@ -88,19 +100,21 @@ console.log(`\nA: decidido con ${nombre(A)} · ${A.clases.length} clases · ${bl
 console.log(`B: decidido con ${nombre(B)} · ${B.clases.length} clases · ${bloquesB} bloques vivos`);
 console.log(`modelo: ${A.modelo}${A.modelo === B.modelo ? '' : ` / ${B.modelo}`}\n`);
 
-console.log(`  ${''.padEnd(14)}${'medido con el reloj crudo'.padStart(28)}${'medido con la onda'.padStart(24)}`);
-console.log(`  ${'defecto'.padEnd(14)}${'A'.padStart(8)}${'B'.padStart(8)}${''.padStart(12)}${'A'.padStart(8)}${'B'.padStart(8)}`);
+const fila = (etiqueta, dato) => `  ${etiqueta.padEnd(14)}` +
+    relojes.map(r => `${String(dato(r, 'A')).padStart(8)}${String(dato(r, 'B')).padStart(8)}` +
+        `  ${dato(r, 'flecha')}`.padEnd(6)).join('');
+
+console.log(`  ${''.padEnd(14)}${relojes.map(r => `medido con «${r}»`.padStart(22)).join('')}`);
+console.log(fila('defecto', (r, cual) => (cual === 'flecha' ? ' ' : cual)));
 for (const tipo of defectos.TIPOS) {
-    if (!conCrudo.A[tipo] && !conCrudo.B[tipo] && !conOnda.A[tipo] && !conOnda.B[tipo]) continue;
-    console.log(`  ${tipo.padEnd(14)}${String(conCrudo.A[tipo]).padStart(8)}${String(conCrudo.B[tipo]).padStart(8)}` +
-        `  ${flecha(conCrudo.A[tipo], conCrudo.B[tipo])}`.padEnd(12) +
-        `${String(conOnda.A[tipo]).padStart(8)}${String(conOnda.B[tipo]).padStart(8)}` +
-        `  ${flecha(conOnda.A[tipo], conOnda.B[tipo])}`);
+    if (!relojes.some(r => celdas[r].A[tipo] || celdas[r].B[tipo])) continue;
+    console.log(fila(tipo, (r, cual) => (cual === 'flecha'
+        ? flecha(celdas[r].A[tipo], celdas[r].B[tipo])
+        : celdas[r][cual][tipo])));
 }
-console.log(`  ${'TOTAL'.padEnd(14)}${String(totalDe(conCrudo.A)).padStart(8)}${String(totalDe(conCrudo.B)).padStart(8)}` +
-    `  ${flecha(totalDe(conCrudo.A), totalDe(conCrudo.B))}`.padEnd(12) +
-    `${String(totalDe(conOnda.A)).padStart(8)}${String(totalDe(conOnda.B)).padStart(8)}` +
-    `  ${flecha(totalDe(conOnda.A), totalDe(conOnda.B))}`);
+console.log(fila('TOTAL', (r, cual) => (cual === 'flecha'
+    ? flecha(totalDe(celdas[r].A), totalDe(celdas[r].B))
+    : totalDe(celdas[r][cual]))));
 
 // ─── Los bordes que se movieron ────────────────────────────────────────────
 

@@ -45,20 +45,29 @@ const speech = require('./speech-edges');
 //    puntuación viven los cortes: hay que rehacerlos.
 // 5: cada palabra puede traer además `dtw`, el instante que le puso la
 //    alineación contra el espectrograma.
-const TRANSCRIPT_VERSION = 5;
+// 6: y la palabra que abre cada tirada dice si su arranque lo MIDIÓ la onda
+//    (`onset`) o si quedó el tiempo crudo del STT porque no había ataque que
+//    medir. Los dos casos se veían iguales, y de eso vivía un defecto del panel.
+const TRANSCRIPT_VERSION = 6;
 
 /**
  * Qué versiones del Backup se dan por buenas sin volver a transcribir.
  *
- * La 4 entra, y a propósito. Todo lo que agrega la 5 es un campo NUEVO que solo
- * lee el reloj del panel; ni un corte, ni una repetición, ni un SRT cambian de
- * decisión por que esté o falte. Sacarla de la lista sería cobrarle al editor
- * cuarenta minutos de Whisper por clase —el curso entero de nuevo— nada más que
- * para poder abrir una clase que ya estaba lista. Un transcript de la 4 sigue
- * andando por el camino de siempre (`retimeo`), que es lo que hay hoy en todos
- * los Backup.
+ * La 4 y la 5 entran, y a propósito. Lo que agregan la 5 y la 6 son campos NUEVOS
+ * que solo lee el reloj del panel; ni un corte, ni una repetición, ni un SRT
+ * cambian de decisión por que estén o falten. Sacarlas de la lista sería cobrarle
+ * al editor cuarenta minutos de Whisper por clase —el curso entero de nuevo— nada
+ * más que para poder abrir una clase que ya estaba lista. Un transcript de la 4
+ * sigue andando por el camino de siempre (`retimeo`).
+ *
+ * Lo que se pierde abriendo una 5 conviene tenerlo dicho: sin la marca de la 6, el
+ * reloj del panel no puede saber qué arranques midió la onda, así que los da todos
+ * por no medidos y va entero por DTW. Eso empeora el borde de cada tirada de 20 a
+ * 60 ms —lo mismo que el DTW puro, que ya se midió— y no toca nada más. Es un
+ * precio chico, se paga solo en una clase transcripta la única noche que existió la
+ * versión 5, y se arregla transcribiéndola de nuevo si a alguien le molesta.
  */
-const VERSIONES_QUE_SIRVEN = new Set([4, TRANSCRIPT_VERSION]);
+const VERSIONES_QUE_SIRVEN = new Set([4, 5, TRANSCRIPT_VERSION]);
 
 /**
  * El nombre con el que whisper.cpp identifica la grilla de cabezas de atención
@@ -123,12 +132,14 @@ function checkTools() {
  * que hablan los módulos de análisis (`marker-anchor`, `audio-onset`), más `dtw`
  * cuando la alineación contra el espectrograma dejó algo.
  *
- * `dtw` va en un campo APARTE y no encima de `start`. De `start`/`end` viven los
- * cortes, y eso ya se midió: correr el motor con otros tiempos para las palabras
- * empeora los bordes (30 defectos contra 32 sobre 172 bloques) por cómo
- * `speech-edges.wordLimits` se apoya en la duración de la palabra vecina para
- * encerrar la búsqueda de onda. Mientras el DTW viva en su propio campo, esto no
- * puede mover un corte ni un frame.
+ * `dtw` va en un campo APARTE y no encima de `start`, y sigue así incluso ahora que
+ * los cortes se deciden con él (`engine/reloj.js`). El transcript guardado tiene
+ * que decir lo que MIDIÓ cada alineador y nada más: el instante del DTW, el
+ * `start`/`end` de la onda y la marca de dónde la onda pudo medir. El reloj que
+ * combina las tres cosas se arma al decidir y al servir el visor, que cuesta
+ * milisegundos, y así una mejora en la combinación no obliga a volver a pasar
+ * Whisper por las trece clases — que es exactamente el costo que se pagó la noche
+ * que la combinación cambió dos veces.
  */
 function wordsFromWhisperJson(data) {
     const out = [];

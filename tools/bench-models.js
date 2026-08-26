@@ -142,7 +142,7 @@ function compare(base, other) {
         for (const p of prepared) {
             // Exactamente lo que corre la app, no una copia: si esto se separa
             // del pipeline, el banco mide un producto que no existe.
-            const { alignResult, review } = await decidir.decidirCortes({
+            const { alignResult, review, palabras } = await decidir.decidirCortes({
                 cls: p.cls, words: p.words, wav: p.wav,
                 ai: ai.cliente({ url, model })
             });
@@ -160,7 +160,9 @@ function compare(base, other) {
                     if (!edge) continue;
                     detail.set(`${p.cls.classNumber}/${block.index}:${kind}`, {
                         at: kind === 'IN' ? block.startSec : block.endSec,
-                        words: p.words,
+                        // Las que usó el motor: el contexto que se imprime tiene que ser
+                        // el que el modelo vio, no el del transcript crudo.
+                        words: palabras,
                         kind,
                         reason: edge.refine ? edge.refine.reason : '',
                         decidedBy: edge.refine ? edge.refine.decidedBy : ''

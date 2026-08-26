@@ -585,9 +585,16 @@
      * hasta que una pasada no mueve nada (tope `alignPasses`): en las clases medidas
      * son dos pasadas, tres las que venían sin alinear.
      *
+     * Y queda anotado **por palabra** cuáles arranques salieron de la onda
+     * (`onset`), porque "no se movió" y "no se pudo medir" se ven iguales en los
+     * tiempos y no son lo mismo. Donde no se pudo medir, el tiempo que queda es el
+     * crudo del STT: no está corregido, está sin corregir. Quien después compare
+     * este reloj con otro —el DTW, hoy— necesita saber cuál de las dos cosas es
+     * cada arranque, y esa pregunta no se puede contestar mirando los números.
+     *
      * @param {{file, info}} wav
      * @param {Array} words words[] del STT (no se muta: se devuelve una copia)
-     * @returns {{words, stats}} stats = {runs, movedStarts, movedEnds,
+     * @returns {{words, stats}} stats = {runs, movedStarts, movedEnds, measuredStarts,
      *          medianStartShift, maxStartShift}, medido contra los tiempos de entrada
      */
     function alignWords(wav, words, opts) {
@@ -607,7 +614,7 @@
      * palabra que se movió en las dos.
      */
     function alignStats(before, after, opts) {
-        var st = { runs: 0, movedStarts: 0, movedEnds: 0,
+        var st = { runs: 0, movedStarts: 0, movedEnds: 0, measuredStarts: 0,
             medianStartShift: 0, maxStartShift: 0 };
         var frame = 1 / frameRate(opts);
         var runs = wordRuns(before, opt(opts, "alignMinGapSec"));
@@ -617,6 +624,12 @@
             var head = run[0], tail = run[run.length - 1];
             if (!after[head] || !after[tail]) continue;
             st.runs++;
+            // Cuántos arranques pudo medir la onda, que no es lo mismo que
+            // cuántos movió: la diferencia entre `runs` y esto es la cantidad de
+            // tramos que quedaron con el tiempo crudo del STT porque no había
+            // ataque que medir. En una clase con el director hablando de lejos son
+            // uno de cada ocho.
+            if (after[head].onset === true) st.measuredStarts++;
             var ds = after[head].start - before[head].start;
             var de = after[tail].end - before[tail].end;
             if (Math.abs(ds) >= frame) {
@@ -677,6 +690,17 @@
                 if (lvl != null && lvl < speech) inOpts.maxShiftSec = opt(opts, "alignWideShiftSec");
             }
             var on = edgeAt(wav, s0, "IN", inOpts);
+            // Si la onda midió el ataque de VERDAD hay que dejarlo dicho: un
+            // arranque que no se movió puede ser uno que la onda confirmó al
+            // milisegundo o uno que la onda nunca vio, y en los tiempos se ven
+            // iguales. Preguntar "¿`edgeAt` devolvió algo?" no alcanza —contesta que
+            // sí sobre el ruido de sala, ver `soundsLikeSpeech`—, así que se
+            // pregunta si en ese borde hay alguien hablando.
+            //
+            // La marca no cambia a dónde se MUEVE el arranque, y eso es a propósito:
+            // de esos tiempos viven los cortes, y moverlos distinto sería otro
+            // cambio, que habría que medir aparte.
+            var measured = Boolean(on && on.time > floor) && soundsLikeSpeech(wav, on.time, speech, opts);
             if (on && on.time > floor && Math.abs(on.time - s0) >= frame) s1 = on.time;
 
             // El final, igual pero al revés: si en el último tramo de la palabra ya no
@@ -698,8 +722,15 @@
             var off = edgeAt(wav, e0, "OUT", outOpts);
             if (off && off.time < ceil && Math.abs(off.time - e0) >= frame) e1 = off.time;
 
+            var fitsRun = (e1 - s1) >= minDur * run.length;
+            // La marca va en la palabra que abre el tramo, que es la que se queda
+            // con el arranque medido (`applyRun`). Y solo si el tramo cabe: cuando
+            // no cabe no se toca nada, así que ese arranque sigue siendo el crudo
+            // aunque la onda haya medido algo.
+            if (measured && fitsRun) out[run[0]].onset = true;
+
             if (s1 === s0 && e1 === e0) continue;
-            if (!(e1 - s1 >= minDur * run.length)) continue;   // no cabe: mejor no tocar
+            if (!fitsRun) continue;   // no cabe: mejor no tocar
 
             if (s1 !== s0) {
                 st.movedStarts++;
@@ -715,6 +746,42 @@
             st.medianStartShift = round(shifts[Math.floor(shifts.length / 2)]);
         }
         return { words: out, stats: st };
+    }
+
+    /**
+     * ¿Lo que la onda encontró en `time` es alguien hablando, o es la sala?
+     *
+     * El umbral con el que `refine` busca un borde sale de su propia ventana, y eso
+     * es lo correcto para UBICAR un ataque —el ataque es abrupto y el contraste
+     * local es lo que lo define— pero no sirve para decidir si hubo ataque: en una
+     * ventana de puro ruido de sala el umbral se apoya en el ruido y contesta que
+     * sí. Para esa pregunta hace falta el nivel de la CLASE, que es el mismo con el
+     * que se decide más arriba si conviene buscar lejos.
+     *
+     * Y hace falta **sostenido**, no en un pico, que es la misma razón por la que
+     * existe `voiceMs`: un pico se lo lleva cualquier fluctuación de la sala. Es la
+     * diferencia entre arreglar el defecto y no arreglarlo. En el arranque de la
+     * clase 1 la sala pica en 0,00188 contra un nivel de habla de 0,00179 —la pasa
+     * por un 4%— pero no la sostiene ni 10 ms; sostenida, esa tirada deja de estar
+     * marcada y el DTW puede poner la frase donde se dice. Medido sobre las dos
+     * clases con alineación: pedirlo sostenido deja sin marca 23 de las 39 tiradas
+     * de la clase 1 en las que el DTW discrepa más de un segundo, contra 15 si se
+     * mira el pico.
+     *
+     * El precio está medido y es chico: 25 de 264 tiradas donde el DTW confirma el
+     * tiempo del STT tampoco quedan marcadas, y ahí el borde pasa de 20 a 60 ms de
+     * error. La asimetría es toda a favor de dudar — una marca de más son hasta 28
+     * segundos de panel clavado en una palabra.
+     *
+     * Sin nivel de clase (una clase demasiado corta para estimarlo) no hay con qué
+     * dudar y vale lo que dijo la onda.
+     */
+    function soundsLikeSpeech(wav, time, speech, opts) {
+        if (speech == null) return true;
+        var p = probe(wav, time, opt(opts, "alignGraceSec"), opts);
+        if (!p) return false;
+        var minRun = Math.max(1, Math.round(opt(opts, "voiceMs") / (p.hopSec * 1000)));
+        return voiceRuns(p.env, speech, minRun).length > 0;
     }
 
     /** Palabras seguidas sin un silencio de `minGap` en medio, por índices. */

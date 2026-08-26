@@ -152,7 +152,10 @@ async function unaClase(scan, cls, cliente, modelo) {
     return {
         transcript, plan, exported, msProceso, avisos,
         review: decided.review,
-        cuenta: defectos.contarClase(transcript.words, decided.alignResult.blocks)
+        // Con las palabras que el motor USÓ para decidir y no con las del
+        // transcript: los defectos se cuentan mirando qué palabras caen dentro de
+        // cada bloque, así que medir con otro reloj mide otra cosa.
+        cuenta: defectos.contarClase(decided.palabras, decided.alignResult.blocks)
     };
 }
 

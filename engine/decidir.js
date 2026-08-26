@@ -18,6 +18,7 @@
  */
 
 const align = require('./align');
+const relojes = require('./reloj');
 const speech = require('./speech-edges');
 const cutRefine = require('./cut-refine');
 const repeticiones = require('./repeticiones');
@@ -26,17 +27,28 @@ const coherence = require('./coherence');
 const repasar = require('./repasar');
 
 /**
+ * **Con qué reloj se decide.** Las palabras entran como las guardó el transcript y
+ * acá se pasan al reloj bueno (`reloj.paraDecidir`), que es el del DTW cuando el
+ * transcript lo trae. Va acá y no en cada caller a propósito: el pipeline, el lote
+ * y el banco de modelos tienen que decidir con el mismo reloj, porque un banco que
+ * mide con otro reloj mide un producto que no se distribuye. Los tiempos que se
+ * usaron salen en `palabras`, para que quien mida el resultado lo mida con lo mismo
+ * con lo que se decidió.
+ *
  * @param {object} params
  *   cls      clase del escaneo, ya medida
  *   words    palabras del transcript, con tiempos
+ *   reloj    `auto` (por defecto) | `crudo`, para el A/B de `tools/medir-repaso.js`
  *   wav      {file, info} del Live-Mix, o null si no hay
  *   ai       cliente del modelo local, o null para cortar solo con reglas
  *   signal   AbortSignal
  *   onStage  (etapa, {percent}) para el progreso
- * @returns {Promise<{alignResult:object, review:object|null, warnings:object[]}>}
+ * @returns {Promise<{alignResult, review, warnings, palabras, reloj}>}
  */
 async function decidirCortes(params) {
-    const { cls, words, wav, ai, signal } = params;
+    const { cls, wav, ai, signal } = params;
+    const puesto = relojes.paraDecidir(params.words, params.reloj || 'auto');
+    const words = puesto.palabras;
     const notify = (stage, info) => { if (params.onStage) params.onStage(stage, info || {}); };
     const options = { fps: cls.fps || 30, ...(params.options || {}) };
     const warnings = [];
@@ -67,11 +79,18 @@ async function decidirCortes(params) {
         durationSec: cls.durationSec,
         options
     });
+    // Con qué reloj se decidió queda escrito en el plan, y no es un dato de
+    // curiosidad: `tools/medir-cortes.js` cuenta los defectos mirando qué palabras
+    // caen dentro de cada bloque, así que leer un plan del DTW con los tiempos
+    // crudos del transcript inventa defectos que no existen — 26 bloques
+    // "terminando en habla del director" contra los 0 que tenía. Un plan sin este
+    // campo es de antes y se lee con el reloj crudo, que es con el que se hizo.
+    alignResult.reloj = puesto.como;
     warnings.push(...alignResult.warnings);
 
     // Sin transcript no hay nada que afinar ni que leer: los marcadores se quedan
     // donde el CD los dejó, que ya se avisó al alinear.
-    if (!words.length) return { alignResult, review: null, warnings };
+    if (!words.length) return { alignResult, review: null, warnings, palabras: words, reloj: puesto.como };
 
     // El suelo de la claqueta lo descubre el alineado (es quien la busca en el
     // audio) y de acá en adelante lo respeta todo el mundo: ningún IN puede
@@ -171,7 +190,7 @@ async function decidirCortes(params) {
         }
     }
 
-    return { alignResult, review, warnings };
+    return { alignResult, review, warnings, palabras: words, reloj: puesto.como };
 }
 
 module.exports = { decidirCortes };

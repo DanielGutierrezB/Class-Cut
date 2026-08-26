@@ -95,9 +95,23 @@
  * del «¿Te» de la toma buena. El reloj corregido gana ese bloque por paliza y la
  * vara vieja lo contaba como el defecto que hundía la variante.
  *
- * Sigue fuera del motor por una sola razón, y es de calendario: whisper.cpp
- * tiene una alineación por DTW que va a mover estos mismos tiempos otra vez, y
- * el cableado se decide una vez con todo sobre la mesa.
+ * **Y aun así el motor no corta con esto, porque llegó algo mejor.** El cableado
+ * se dejó pendiente hasta tener la alineación por DTW de whisper.cpp sobre la
+ * mesa, y con las trece clases transcriptas de nuevo (con `-nfa`, que cambia el
+ * texto) se midieron los tres relojes sobre entradas congeladas, mismo criterio y
+ * misma semilla. Medido cada plan con el reloj con el que se decidió: 24 defectos
+ * de borde con el reloj crudo, 26 con este reparto, 21 con el DTW.
+ *
+ * O sea que la ventaja que este reparto tenía sobre los transcripts de antes —28
+ * contra 23— no se sostiene sobre los nuevos, y no es raro: la mitad de lo que
+ * arreglaba eran tiradas que Whisper amontonaba, y el DTW ya no las amontona. Los
+ * cortes encima de alguien hablando, que es la única vara que no depende del reloj
+ * con el que se mire, dan 4 con el crudo y 6 con este.
+ *
+ * Queda como el reloj de los transcripts SIN DTW, que es lo que va a haber cada
+ * vez que el modelo empaquetado no tenga grilla de cabezas de atención conocida, y
+ * como el reloj del panel para esas mismas clases. Para lo demás manda
+ * `engine/reloj.js`.
  *
  * Sin estado y sin audio: acá entra un mapa de voz ya medido, así que esto se
  * prueba solo (`tests/retimeo.test.js`).

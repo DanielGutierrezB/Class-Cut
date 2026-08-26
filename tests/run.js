@@ -18,6 +18,7 @@ const FILES = [
     'transcribe.test.js',
     'align.test.js',
     'aire.test.js',
+    'ataque.test.js',
     'claqueta.test.js',
     'export.test.js',
     'criterio.test.js',
