@@ -189,6 +189,154 @@ class FileRegistry {
 }
 
 /**
+ * La geometría del recuadro del profesor, copiada de la regla
+ * `.player-video.is-inset` de src/css/visor.css.
+ *
+ * Ahí se decidió cómo se ve, así que ahí está la fuente: si cambia el reproductor
+ * se cambian estos tres números y el XML sale igual que la pantalla. Lo que la
+ * regla dice con `aspect-ratio: 1` y `object-fit: cover` no son números sino la
+ * forma —cuadrado— y de dónde se recorta —del centro—, y eso lo resuelve
+ * `encuadreDelRecuadro()`.
+ */
+const RECUADRO = {
+    alto: 0.30,     // height: 30%   → del alto del cuadro
+    derecha: 0.025, // inset: auto 2.5% ...  → del ancho
+    abajo: 0.044,   // ... 4.4% auto         → del alto
+    /**
+     * Qué tan ancho es el recuadro respecto de su alto.
+     *
+     * El reproductor lo muestra cuadrado (`object-fit: cover` sobre una caja
+     * 1:1), pero el editor no lo quiere cuadrado: en su Premiere la forma la da
+     * un Recorte redondeado con **Left 18 %, simétrico y sin tocar el alto**, que
+     * de 1920×1080 deja 1229×1080. Se midió lo mismo en su monitor —1,13— así que
+     * el número no sale de leerle el panel sino de dos lados que coinciden.
+     *
+     * Va como proporción y no como «recortá 18 % de los costados» porque son la
+     * misma cosa solo mientras la cámara sea 16:9. Dicho así, una fuente con otro
+     * formato da el mismo recuadro en vez de uno deformado.
+     */
+    proporcion: 0.64 * (16 / 9)
+};
+
+/**
+ * Las dos formas de decir el recorte que puede llegar a entender Premiere.
+ *
+ * Premiere ESCRIBE `leftcrop`/`topcrop`/… adentro del propio Basic Motion —así
+ * salió del export del editor— y por eso es la de fábrica: lo que él escribe es
+ * lo que sabe leer. Pero su importador de FCP XML conoce además los nombres
+ * canónicos del formato (`left`/`right`/`top`/`bottom` en un filtro `crop`
+ * aparte), que son los que Adobe documenta como traducidos al importar. Cuál de
+ * las dos gana no se puede saber sin importar, así que se deja elegir y el XML de
+ * prueba lleva las dos (ver tools/probar-recuadro.js).
+ */
+const RECORTE_EN_BASIC = 'recorte-en-basic';
+const RECORTE_APARTE = 'recorte-aparte';
+
+/** Seis decimales, que es la precisión con la que Premiere escribe los suyos. */
+function redondear(n) {
+    return Number(Number(n).toFixed(6));
+}
+
+/**
+ * Píxeles del cuadro → las unidades en las que Basic Motion escribe un punto.
+ *
+ * **Esta cuenta se hace acá y en ningún otro lado.** Es el único número dudoso de
+ * todo el encuadre, así que si el editor reporta que el recuadro llega corrido, se
+ * corrige este divisor y queda corregido en todas partes.
+ *
+ * Va dividido por el ancho y el alto ENTEROS del cuadro, con el origen en el
+ * centro. No sale de la documentación, que se contradice: la de Apple dice que
+ * para el Center «son valores de escala en el rango −100 a 100», que no es ni el
+ * orden de magnitud de lo que escribe Premiere. Sale de medir archivos que
+ * escribió Premiere:
+ *
+ *   · En una secuencia de 3840×2160, dos clips traen `center` −0,0742188 /
+ *     −0,409259 y −0,303906 / 0,127778. Multiplicados por 3840 y 2160 dan −285,
+ *     −884, −1167 y 276: los cuatro son píxeles enteros. Dividiendo por la MITAD
+ *     del cuadro darían −142,5 y −583,5, y esas no son posiciones que se puedan
+ *     tipear en el panel.
+ *   · Y por el otro lado: un anclaje llevado a la esquina (0, 0) de una fuente de
+ *     3200×1600 se escribió −0,5 / −0,5, o sea (0 − 1600)/3200 y (0 − 800)/1600.
+ */
+function aUnidadesDelCuadro(x, y, ancho, alto) {
+    return {
+        horiz: redondear((x - ancho / 2) / ancho),
+        vert: redondear((y - alto / 2) / alto)
+    };
+}
+
+/**
+ * El encuadre del recuadro para un cuadro y una fuente dados.
+ *
+ * **Se calcula, no se copia**, y eso costó un error. El editor exportó desde su
+ * Premiere un clip con el recuadro ya armado, y la tentación era copiar de ahí
+ * los números: si Premiere lo escribió, Premiere lo lee. Pero su recuadro estaba
+ * hecho con cuatro efectos y **Premiere solo traduce uno**: dejó dicho por
+ * escrito, en el informe que guarda al lado del XML, que descartó Drop Shadow,
+ * Rounded Crop y Transform. Lo que sobrevivió en Basic Motion no era su encuadre
+ * sino el resto, y puesto en la línea de tiempo deja la caja por el MEDIO del
+ * cuadro —centrada cerca de 1150 × 452— en vez de abajo a la derecha.
+ *
+ * Así que la posición sale de la geometría del reproductor, que es la que el
+ * editor viene mirando, y la forma de su recorte, que sí se puede leer del panel
+ * y además se midió en su monitor. Con eso lo que se previsualiza y lo que llega
+ * son la misma cosa.
+ *
+ * La escala va contra la fuente ENTERA y no contra lo que queda del recorte:
+ * para Premiere el clip sigue midiendo 1920×1080 aunque parte esté transparente.
+ * Como no se recorta el alto, la escala es directamente cuánto del cuadro ocupa
+ * el recuadro de alto.
+ */
+function encuadreDelRecuadro(medidas) {
+    const m = medidas || {};
+    const ancho = m.ancho || 1920;
+    const alto = m.alto || 1080;
+    // La fuente del recuadro es una de las cámaras, así que por defecto tiene el
+    // mismo formato que la secuencia.
+    const fuenteAncho = m.fuenteAncho || ancho;
+    const fuenteAlto = m.fuenteAlto || alto;
+
+    // Qué pedazo de la fuente sobrevive al recorte. Se saca del lado que sobra
+    // para llegar a la proporción pedida: de una cámara más ancha que el recuadro
+    // se sacan los costados, y de una más angosta, arriba y abajo. Siempre por
+    // igual de los dos lados, porque el recorte de Premiere no reencuadra —solo
+    // vuelve transparente lo que saca— y mientras sea simétrico el centro de lo
+    // que se ve sigue siendo el centro del clip. Desparejo correría el recuadro.
+    const sobraAncho = fuenteAncho / fuenteAlto > RECUADRO.proporcion;
+    const visibleAncho = sobraAncho ? fuenteAlto * RECUADRO.proporcion : fuenteAncho;
+    const visibleAlto = sobraAncho ? fuenteAlto : fuenteAncho / RECUADRO.proporcion;
+
+    // Lo que se ve tiene que medir de alto lo que dice la regla del reproductor,
+    // y la escala va contra la fuente ENTERA: para Premiere el clip sigue midiendo
+    // lo que medía aunque parte esté transparente.
+    const escala = RECUADRO.alto * alto / visibleAlto;
+    const enPantallaAncho = visibleAncho * escala;
+    const enPantallaAlto = RECUADRO.alto * alto;
+
+    return {
+        // Cuál de los dos dialectos del recorte se escribe. Por defecto, el que
+        // Premiere se escribe a sí mismo.
+        dialectoDelRecorte: m.dialectoDelRecorte || RECORTE_EN_BASIC,
+        escala: redondear(100 * escala),
+        // El centro de lo que se ve, pegado abajo a la derecha.
+        centro: aUnidadesDelCuadro(
+            ancho - RECUADRO.derecha * ancho - enPantallaAncho / 2,
+            alto - RECUADRO.abajo * alto - enPantallaAlto / 2,
+            ancho, alto),
+        // El anclaje se queda en el centro de la fuente, que es su valor de
+        // fábrica: moverlo obliga a compensar la posición, y son dos números para
+        // decir uno solo.
+        anclaje: { horiz: 0, vert: 0 },
+        recorte: {
+            izq: redondear(100 * (fuenteAncho - visibleAncho) / 2 / fuenteAncho),
+            der: redondear(100 * (fuenteAncho - visibleAncho) / 2 / fuenteAncho),
+            arriba: redondear(100 * (fuenteAlto - visibleAlto) / 2 / fuenteAlto),
+            abajo: redondear(100 * (fuenteAlto - visibleAlto) / 2 / fuenteAlto)
+        }
+    };
+}
+
+/**
  * Un parámetro de Basic Motion, escrito como lo escribe Premiere.
  *
  * Los `valuemin`/`valuemax` no son adorno: van en el archivo que exporta Premiere
@@ -197,38 +345,51 @@ class FileRegistry {
 function paramXml(id, name, value, min, max) {
     const rango = min == null ? ''
         : `<valuemin>${min}</valuemin><valuemax>${max}</valuemax>`;
-    return `<parameter authoringApp="PremierePro">` +
+    return '<parameter authoringApp="PremierePro">' +
         `<parameterid>${id}</parameterid><name>${name}</name>${rango}` +
         `<value>${value}</value></parameter>`;
 }
 
 function puntoXml(id, name, punto) {
-    return `<parameter authoringApp="PremierePro">` +
+    return '<parameter authoringApp="PremierePro">' +
         `<parameterid>${id}</parameterid><name>${name}</name>` +
         `<value><horiz>${punto.horiz}</horiz><vert>${punto.vert}</vert></value>` +
         '</parameter>';
 }
 
+/** Un parámetro del filtro `crop`, en el dialecto del formato y no de Premiere. */
+function paramDeCropXml(id, value) {
+    return '<parameter>' +
+        `<parameterid>${id}</parameterid><name>${id}</name>` +
+        `<valuemin>0</valuemin><valuemax>100</valuemax><value>${value}</value>` +
+        '</parameter>';
+}
+
 /**
- * El encuadre de un clip: escala, posición y recorte, en un filtro Basic Motion.
+ * El encuadre de un clip: escala, posición y recorte, en filtros de `<clipitem>`.
  *
- * **Es el único efecto que sobrevive al viaje**, y eso no es una suposición: el
- * editor armó el recuadro a mano en Premiere con Recorte redondeado, Sombra
- * paralela y Transform, exportó esa secuencia a FCP7 XML y en el archivo quedó un
- * solo `<filter>`, el de Basic Motion. Los otros tres los descarta el exportador
- * de Premiere. Por eso el recuadro llega con la forma y el lugar puestos pero con
- * las esquinas rectas y sin sombra: eso se aplica a mano una vez y se copia a los
- * demás clips con pegar atributos.
+ * Basic Motion es lo único que se sabe que sobrevive el viaje, y no es una
+ * suposición: el editor armó el recuadro a mano en Premiere con Recorte
+ * redondeado, Sombra paralela y Transform, exportó a FCP7 XML, y Premiere dejó su
+ * propio registro de lo que descartó —«Effect <Drop Shadow> … not translated», y
+ * lo mismo con los otros dos—. En el XML quedó un solo `<filter>`: el de Basic
+ * Motion.
  *
- * Las coordenadas van normalizadas contra el cuadro, con el origen en el centro:
- * `horiz = (x − ancho/2) / ancho`. Se comprobó contra ese mismo archivo, donde un
- * punto de anclaje que el panel de Premiere muestra en 1534,7 / 1064,3 quedó
- * escrito como 0,299342 / 0,48538 — que es exactamente ese punto dividido por
- * 1920 y 1080.
+ * De ahí que el recuadro llegue con la forma, el tamaño y el lugar puestos, pero
+ * con las **esquinas rectas y sin sombra**: para eso no hay parámetro en el
+ * formato. Se aplican a mano en un bloque y se copian a los demás con pegar
+ * atributos.
  */
 function encuadreXml(encuadre) {
     if (!encuadre) return '';
-    return '<filter><effect>' +
+    const aparte = encuadre.dialectoDelRecorte === RECORTE_APARTE;
+    // En el dialecto de afuera los recortes de Basic Motion van en cero: si se
+    // escribieran los dos, y Premiere entendiera los dos, recortaría dos veces.
+    const enBasic = aparte
+        ? { izq: 0, der: 0, arriba: 0, abajo: 0 }
+        : encuadre.recorte;
+
+    const basic = '<filter><effect>' +
         '<name>Basic Motion</name><effectid>basic</effectid>' +
         '<effectcategory>motion</effectcategory><effecttype>motion</effecttype>' +
         '<mediatype>video</mediatype><pproBypass>false</pproBypass>' +
@@ -237,10 +398,22 @@ function encuadreXml(encuadre) {
         puntoXml('center', 'Center', encuadre.centro) +
         puntoXml('centerOffset', 'Anchor Point', encuadre.anclaje) +
         paramXml('antiflicker', 'Anti-flicker Filter', 0, '0.0', '1.0') +
-        paramXml('leftcrop', 'Left', encuadre.recorte.izq, '0.0', '100.0') +
-        paramXml('topcrop', 'Top', encuadre.recorte.arriba, '0.0', '100.0') +
-        paramXml('rightcrop', 'Right', encuadre.recorte.der, '0.0', '100.0') +
-        paramXml('bottomcrop', 'Bottom', encuadre.recorte.abajo, '0.0', '100.0') +
+        paramXml('leftcrop', 'Left', enBasic.izq, '0.0', '100.0') +
+        paramXml('topcrop', 'Top', enBasic.arriba, '0.0', '100.0') +
+        paramXml('rightcrop', 'Right', enBasic.der, '0.0', '100.0') +
+        paramXml('bottomcrop', 'Bottom', enBasic.abajo, '0.0', '100.0') +
+        '</effect></filter>';
+
+    if (!aparte) return basic;
+
+    return basic + '<filter><effect>' +
+        '<name>Crop</name><effectid>crop</effectid>' +
+        '<effectcategory>motion</effectcategory><effecttype>filter</effecttype>' +
+        '<mediatype>video</mediatype>' +
+        paramDeCropXml('left', encuadre.recorte.izq) +
+        paramDeCropXml('right', encuadre.recorte.der) +
+        paramDeCropXml('top', encuadre.recorte.arriba) +
+        paramDeCropXml('bottom', encuadre.recorte.abajo) +
         '</effect></filter>';
 }
 
@@ -437,6 +610,12 @@ ${markersXml}      </sequence>
 module.exports = {
     sequenceXml,
     markerXml,
+    encuadreDelRecuadro,
+    encuadreXml,
+    aUnidadesDelCuadro,
+    RECUADRO,
+    RECORTE_EN_BASIC,
+    RECORTE_APARTE,
     toFrames,
     framesToSeconds,
     rateFor,

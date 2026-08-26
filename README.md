@@ -972,29 +972,77 @@ En los bloques que van con el grabador de pantalla, la cámara del profesor viaj
 en una pista aparte para el recuadro. Llegaba a pantalla completa, así que había
 que escalarla y ubicarla a mano en cada bloque.
 
-Ahora llega encuadrada, y los números no están calculados: **están copiados del
-Premiere del editor**. Armó el recuadro como lo quiere, exportó esa secuencia a
-FCP7 XML y de ahí salieron la escala, el centro y el anclaje. Calcularlos habría
-sido adivinar dos veces —la geometría que le gusta y las unidades del formato— y
-el archivo que Premiere escribe es el archivo que Premiere lee.
+Ahora llega encuadrada, y la geometría sale de **la misma regla de
+`src/css/visor.css`** que el editor ya vio funcionando en el reproductor: cuadrado
+recortado desde el centro, 30 % del alto del cuadro, pegado abajo a la derecha a
+2,5 % y 4,4 %. Así el recuadro del XML y el del visor son el mismo recuadro y se
+corrigen juntos. Con material 1920 × 1080 eso da escala 30 %, recorte de 21,875 %
+por lado —los 1080 del medio, que es lo que hace el `cover`— y el centro en
+`0,390625 / 0,306`.
 
-Ese mismo archivo contestó qué se puede y qué no. Su clip llevaba Basic Motion,
-Recorte redondeado, Sombra paralela y Transform, y **en el XML quedó un solo
-`<filter>`**: los otros tres los descarta el exportador de Premiere. Así que por
-acá viajan la escala, la posición y el recorte, y nada más. Las esquinas
-redondeadas y la sombra se aplican a mano en un bloque y se copian al resto con
-pegar atributos.
+**El recorte tiene que ser simétrico**, y no es un detalle: el recorte de Premiere
+no reencuadra, solo vuelve transparente lo que saca, así que el centro de lo que
+se ve sigue siendo el centro del clip y la posición lo puede ubicar. Desparejo, el
+recuadro se correría respecto de donde se lo puso.
 
-También confirmó las unidades, que es donde la documentación que circula se
-contradice: un punto de anclaje que el panel de Premiere muestra en 1534,7 /
-1064,3 quedó escrito como `0,299342 / 0,48538`, o sea el punto dividido por el
-ancho y el alto del cuadro, con el origen en el centro.
+#### Qué viaja y qué no, con la prueba
 
-El recorte es lo único que no vino de ahí. En su secuencia la forma casi cuadrada
-la hacía el Recorte redondeado, que no viaja, así que el recuadro habría llegado
-16:9 y mucho más ancho de lo que él ve. Basic Motion trae los suyos, y con 18 %
-por lado quedan 1229 × 1080 — la misma proporción 1,14 que se mide en su monitor.
-Simétrico a propósito: desparejo movería el centro de lo que se ve.
+El editor armó el recuadro a mano en Premiere y exportó a FCP7 XML. Su clip
+llevaba Basic Motion, Recorte redondeado, Sombra paralela y Transform, y **en el
+XML quedó un solo `<filter>`**, el de Basic Motion. No hay que deducirlo: Premiere
+dejó su propio registro al lado del archivo.
+
+```
+Effect <Drop Shadow> on Clip <1_CAMERA 1.mp4> not translated.
+Effect <Rounded Crop> on Clip <1_CAMERA 1.mp4> not translated.
+Effect <Transform> on Clip <1_CAMERA 1.mp4> not translated.
+```
+
+Así que viajan la escala, la posición y el recorte, y nada más. Las **esquinas
+redondeadas y la sombra no existen como parámetro** en el formato: se aplican a
+mano en un bloque y se copian al resto con pegar atributos.
+
+Hubo una versión que copiaba los números de ese export en vez de calcularlos, con
+el argumento de que el archivo que Premiere escribe es el que Premiere lee. Salió
+mal, y el registro de arriba explica por qué: en su secuencia **el lugar lo ponía
+el Transform y la forma cuadrada el Recorte redondeado**, y Premiere descarta los
+dos. Lo que quedaba escrito en Basic Motion era el resto, no lo que él veía: daba
+una caja de proporción 1,14 a 39,6 % del borde derecho y 57,8 % del inferior —
+o sea por el medio del cuadro— cuando el recuadro va cuadrado a 2,5 % y 4,4 %.
+
+#### Las unidades del `center`
+
+Es el único número del encuadre que no se puede leer en ninguna parte, así que la
+cuenta vive en un solo lugar (`aUnidadesDelCuadro`, en `engine/fcp-xml.js`) y
+corregirla es cambiar un divisor. Va dividido por el ancho y el alto **enteros**
+del cuadro, con el origen en el centro.
+
+La documentación no sirve para esto: la de Apple dice que para el Center «son
+valores de escala en el rango −100 a 100», que no es ni el orden de magnitud de lo
+que escribe Premiere. Lo que sí sirve es medir archivos que escribió Premiere:
+
+- En una secuencia de 3840 × 2160, dos clips traen `center` `−0,0742188 /
+  −0,409259` y `−0,303906 / 0,127778`. Multiplicados por 3840 y 2160 dan −285,
+  −884, −1167 y 276: **los cuatro son píxeles enteros**. Dividiendo por la mitad
+  del cuadro darían −142,5 y −583,5, y esas no son posiciones que se puedan tipear.
+- Y por el otro lado, el `centerOffset`: un anclaje llevado a la esquina (0, 0) de
+  una fuente de 3200 × 1600 se escribió `−0,5 / −0,5`, o sea (0 − 1600)/3200.
+
+#### Lo que queda por confirmar, y cómo
+
+Falta una sola cosa, y es dónde va el recorte. Premiere **escribe**
+`leftcrop`/`topcrop`/… adentro del propio Basic Motion, y por eso es la forma de
+fábrica: lo que él escribe es lo que sabe leer. Pero su importador conoce además
+los nombres canónicos del formato (`left`/`right`/`top`/`bottom` en un filtro
+`crop` aparte), que son los que Adobe documenta como traducidos al importar. Cuál
+gana no se sabe sin importar.
+
+`tools/probar-recuadro.js` deja la pregunta hecha para que **una sola importación**
+la conteste: escribe la clase entera con el recuadro puesto, y además una secuencia
+corta con tres tramos consecutivos —recorte adentro de Basic Motion, recorte en un
+filtro `crop` aparte, y el centro dividido por la mitad del cuadro, que tiene que
+salir mal— con un marcador en cada tramo diciendo qué es y qué debería verse.
+Escribe siempre fuera de la carpeta del cliente.
 
 ### Guardar deja al día toda la carpeta, no solo la clase abierta
 
@@ -1186,12 +1234,10 @@ O sea:
   guardado), o con un script en Premiere como el que ya existe para Resolve
   ([resolve/colorear-clips.py](resolve/colorear-clips.py)).
 
-Los números de la geometría (cuánta escala, cuánto crop, en qué esquina) están
-pendientes de calibrar contra Premiere: la unidad del `center` de Basic Motion no
-se puede adivinar sin verla, y una posición mal puesta manda el recuadro fuera de
-cuadro. La forma barata de resolverlo es al revés: armar el recuadro a mano en
-Premiere una vez, exportar esa secuencia como XML de FCP7 y leer de ahí los
-valores exactos.
+Los números de la geometría salen de `src/css/visor.css` y las unidades del
+`center` quedaron resueltas midiendo archivos que escribió Premiere — las dos cosas
+están contadas arriba, en «El recuadro llega con su encuadre puesto», junto con lo
+único que falta confirmar (dónde va el recorte) y el XML de prueba que lo contesta.
 
 ## Colores
 

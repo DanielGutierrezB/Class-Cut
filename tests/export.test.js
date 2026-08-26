@@ -266,21 +266,147 @@ module.exports = function (t) {
         // bloque de pantalla. Y al revés importa igual: un encuadre colado en un
         // clip a pantalla completa lo achicaría sin que nadie lo haya pedido.
         const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, planMixto(), null);
-        t.eq(cut.videoTracks[2][0].encuadre.escala, 26);
-        t.eq(cut.videoTracks[2][0].encuadre.recorte.izq, 18, 'recortado por los lados');
-        t.eq(cut.videoTracks[2][0].encuadre.recorte.der, 18, 'y por los dos igual');
+        t.eq(cut.videoTracks[2][0].encuadre.escala, 30, 'el 30 % del alto que pide el visor');
         t.eq(cut.videoTracks[0][0].encuadre, undefined, 'la cámara a pantalla completa, sin nada');
         t.eq(cut.videoTracks[1][1].encuadre, undefined, 'y la pantalla tampoco');
     });
 
+    t.group('fcp-xml · el encuadre del recuadro sale de visor.css');
+
+    /** Lo que se ve en pantalla, en píxeles, según lo que dice el encuadre. */
+    function loQueSeVe(e, ancho = 1920, alto = 1080) {
+        return {
+            ancho: ancho * (1 - (e.recorte.izq + e.recorte.der) / 100) * e.escala / 100,
+            alto: alto * (1 - (e.recorte.arriba + e.recorte.abajo) / 100) * e.escala / 100
+        };
+    }
+
+    t.test('el recuadro sale con la proporción que el editor usa en Premiere', () => {
+        // 1,14, que es lo que deja su Recorte redondeado de 18 % por lado sobre
+        // 16:9 — y lo que se mide en su monitor. Si esto se afloja, el recuadro
+        // llega 16:9 entero y se nota.
+        const v = loQueSeVe(fcp.encuadreDelRecuadro());
+        t.near(v.ancho / v.alto, 0.64 * 16 / 9, 0.001, 'ni cuadrado ni 16:9');
+        t.near(v.alto, 0.30 * 1080, 0.01, 'y mide el 30 % del alto del cuadro');
+    });
+
     t.test('el recorte es simétrico, que es lo que deja el recuadro en su lugar', () => {
-        // El recorte reemplaza al efecto Recorte redondeado, que no sobrevive al
-        // export de Premiere. Si fuera desparejo movería el centro de lo que se ve
-        // y el recuadro se correría respecto de donde el editor lo puso.
-        const { recorte } = exporter.ENCUADRE_DEL_RECUADRO;
+        // El recorte de Premiere no reencuadra: solo vuelve transparente lo que
+        // saca. Simétrico, el centro de lo que se ve sigue siendo el centro del
+        // clip y la posición lo ubica. Desparejo, el recuadro se correría.
+        const { recorte } = fcp.encuadreDelRecuadro();
         t.eq(recorte.izq, recorte.der, 'lo que se saca de un lado se saca del otro');
-        t.eq(recorte.arriba, 0, 'y el alto queda entero');
+        t.eq(recorte.arriba, 0, 'y el alto queda entero: la forma sale del ancho');
         t.eq(recorte.abajo, 0);
+    });
+
+    t.test('el recuadro queda pegado abajo a la derecha, a 2,5 % y 4,4 %', () => {
+        // Esta es la que atrapa el error que ya llegó a Premiere una vez: copiando
+        // los números del export del editor, la caja quedaba por el medio del
+        // cuadro. La cuenta va al revés de `aUnidadesDelCuadro`, de las unidades
+        // del formato de vuelta a píxeles, para leer el margen de cada borde.
+        const e = fcp.encuadreDelRecuadro();
+        const v = loQueSeVe(e);
+        const x = 1920 / 2 + e.centro.horiz * 1920;
+        const y = 1080 / 2 + e.centro.vert * 1080;
+        t.near(1920 - (x + v.ancho / 2), 0.025 * 1920, 0.01, '2,5 % del borde derecho');
+        t.near(1080 - (y + v.alto / 2), 0.044 * 1080, 0.01, '4,4 % del inferior');
+    });
+
+    t.test('el anclaje se queda en el centro de la fuente', () => {
+        // Moverlo obliga a compensar la posición: dos números para decir uno, y
+        // dos lugares donde equivocarse.
+        const { anclaje } = fcp.encuadreDelRecuadro();
+        t.deep(anclaje, { horiz: 0, vert: 0 });
+    });
+
+    t.test('una fuente cuadrada se recorta de arriba y abajo, no de los lados', () => {
+        // Con el recorte dicho como «18 % de los costados» esto salía deformado:
+        // una cámara cuadrada quedaba más alta que ancha. Dicho como proporción,
+        // se saca del lado que sobra y el recuadro se ve igual venga de donde
+        // venga.
+        const e = fcp.encuadreDelRecuadro({ fuenteAncho: 1080, fuenteAlto: 1080 });
+        t.eq(e.recorte.izq, 0, 'el ancho ya es el que falta, no se toca');
+        t.eq(e.recorte.arriba, e.recorte.abajo, 'y lo que sobra de alto sale parejo');
+        const v = loQueSeVe(e, 1080, 1080);
+        t.near(v.ancho / v.alto, 0.64 * 16 / 9, 0.001, 'misma proporción que con 16:9');
+        t.near(v.alto, 0.30 * 1080, 0.01, 'y el mismo alto en pantalla');
+    });
+
+    t.test('las unidades del centro se dividen por el cuadro entero', () => {
+        // La cuenta que confirmaron los archivos que escribió Premiere: un punto
+        // corrido 285 px a la izquierda del centro de un cuadro de 3840 se escribe
+        // −0,0742188. Con la mitad del cuadro daría el doble.
+        const p = fcp.aUnidadesDelCuadro(3840 / 2 - 285, 2160 / 2 - 884, 3840, 2160);
+        t.eq(p.horiz, -0.074219);
+        t.eq(p.vert, -0.409259);
+    });
+
+    t.test('el centro del cuadro es el cero', () => {
+        t.deep(fcp.aUnidadesDelCuadro(960, 540, 1920, 1080), { horiz: 0, vert: 0 });
+    });
+
+    t.group('fcp-xml · los filtros del recuadro');
+
+    t.test('el recuadro escribe un Basic Motion y nada más', () => {
+        const xml = fcp.encuadreXml(fcp.encuadreDelRecuadro());
+        t.eq((xml.match(/<filter>/g) || []).length, 1, 'un solo filtro');
+        t.ok(xml.includes('<effectid>basic</effectid>'), xml);
+        t.ok(xml.includes('<parameterid>leftcrop</parameterid>'), 'el recorte va adentro');
+        t.ok(!xml.includes('<effectid>crop</effectid>'), 'y no hay filtro de recorte aparte');
+    });
+
+    t.test('el dialecto de afuera saca el recorte a su propio filtro', () => {
+        const xml = fcp.encuadreXml(fcp.encuadreDelRecuadro({
+            dialectoDelRecorte: fcp.RECORTE_APARTE
+        }));
+        t.eq((xml.match(/<filter>/g) || []).length, 2, 'Basic Motion y Crop');
+        t.ok(xml.includes('<effectid>crop</effectid>'), xml);
+        // Los dos a la vez recortarían dos veces si Premiere entendiera ambos.
+        const basic = xml.slice(0, xml.indexOf('<effectid>crop</effectid>'));
+        t.ok(/<parameterid>leftcrop<\/parameterid><name>Left<\/name>[^]*?<value>0<\/value>/.test(basic),
+            'los de Basic Motion quedan en cero');
+    });
+
+    t.test('un clip sin encuadre no lleva ningún filtro', () => {
+        // Lo importante del otro lado: si un filtro mal escrito puede hacer que
+        // Premiere rechace el XML entero, los clips que no lo necesitan no lo llevan.
+        t.eq(fcp.encuadreXml(null), '');
+        t.eq(fcp.encuadreXml(undefined), '');
+    });
+
+    t.test('en el XML de la clase el filtro está solo en la pista del recuadro', () => {
+        // La prueba que importa de verdad: un encuadre colado en un clip a
+        // pantalla completa lo achica, y un filtro mal puesto puede hacer que
+        // Premiere rechace el archivo entero. Se cuenta por pista sobre el XML ya
+        // escrito, que es lo que el editor abre.
+        const cls = { videos: CAMERAS, audios: AUDIOS, width: 1920, height: 1080 };
+        const cut = exporter.cutTracks(cls, planMixto(), null);
+        const xml = fcp.sequenceXml({
+            name: 'clase', fps: 30, width: 1920, height: 1080,
+            videoTracks: cut.videoTracks, audioTracks: cut.audioTracks,
+            markers: cut.markers, durationSec: cut.durationSec
+        });
+        // Las pistas de la secuencia son las únicas que llevan atributos TL.SQ*;
+        // las de los clips maestros del bin van sin nada.
+        const pistas = xml.match(/<track TL\.SQTrackShy[^>]*>[\s\S]*?<\/track>/g) || [];
+        const conFiltro = pistas.map(p => (p.match(/<filter>/g) || []).length);
+        t.deep(conFiltro, [0, 0, 1], 'V1 y V2 sin filtros, V3 con el del recuadro');
+    });
+
+    t.test('el encuadre entra adentro del clipitem y después del file', () => {
+        // Es el orden en el que lo escribe Premiere en su propio export.
+        const source = { path: '/curso/Video/1_CAMERA 1.mp4', name: '1_CAMERA 1.mp4', durationSec: 600 };
+        const xml = fcp.sequenceXml({
+            name: 'x', fps: 30, durationSec: 10, audioTracks: [], markers: [],
+            videoTracks: [[{
+                source, startSec: 0, endSec: 10, sourceInSec: 0, enabled: true,
+                encuadre: fcp.encuadreDelRecuadro()
+            }]]
+        });
+        const clip = xml.match(/<clipitem id="clipitem-1"[\s\S]*?<\/clipitem>/)[0];
+        t.ok(clip.includes('<effectid>basic</effectid>'), 'el filtro va adentro del clipitem');
+        t.ok(clip.indexOf('</file>') < clip.indexOf('<filter>'), 'y después del file');
     });
 
     t.test('una clase toda de cámara no estrena pista de recuadro', () => {

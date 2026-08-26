@@ -195,34 +195,6 @@ function markersFromAlign(alignResult, parsed, guardadas) {
 const VISTA_DEL_PROFESOR = 'PV';
 
 /**
- * Dónde va el recuadro del profesor sobre el grabador de pantalla.
- *
- * Los números no están calculados: **están copiados del Premiere del editor**. Él
- * armó el recuadro como lo quiere, exportó esa secuencia a FCP7 XML y de ahí
- * salieron la escala, el centro y el anclaje, tal cual. Calcularlos habría sido
- * adivinar dos veces —la geometría que le gusta y las unidades del formato— y no
- * hay por qué: el archivo que Premiere escribe es el archivo que Premiere lee.
- *
- * El recorte es el único que no vino de ahí, y tiene su motivo. En su secuencia
- * la forma casi cuadrada la hacía el efecto Recorte redondeado, que **el
- * exportador de Premiere descarta**: en el XML los cuatro recortes de Basic
- * Motion quedaron en cero y el recuadro habría llegado 16:9, mucho más ancho de
- * lo que él ve. Basic Motion trae los suyos y esos sí viajan, así que se
- * reproduce ahí: 18 % por lado deja 1229 × 1080, la misma proporción 1,14 que se
- * mide en su monitor. Simétrico a propósito, para que el centro no se mueva.
- *
- * Lo que no llega de ninguna manera son las esquinas redondeadas y la sombra: no
- * existen como parámetro en el formato. Se aplican a mano en un bloque y se pegan
- * atributos en el resto.
- */
-const ENCUADRE_DEL_RECUADRO = {
-    escala: 26,
-    centro: { horiz: 0.0986844, vert: -0.0818712 },
-    anclaje: { horiz: 0.299342, vert: 0.48538 },
-    recorte: { izq: 18, der: 18, arriba: 0, abajo: 0 }
-};
-
-/**
  * La clase ya cortada: cada bloque uno detrás de otro, con su vista.
  *
  * Las pistas quedan por papel y no por casualidad del orden del material:
@@ -255,13 +227,28 @@ function cutTracks(cls, plan, guardadas) {
     const delProfesor = (plan.viewMap && plan.viewMap[VISTA_DEL_PROFESOR]) || 0;
     const conRecuadro = kept.filter(segment => segment.cameraIndex !== delProfesor);
     if (videos[delProfesor] && conRecuadro.length) {
+        const camara = videos[delProfesor];
+        // La geometría no se decide acá ni se copia de una secuencia suelta: se
+        // calcula desde la misma regla de src/css/visor.css que el editor ya vio
+        // funcionando en el reproductor, así el recuadro del XML y el del visor
+        // son el mismo y se corrigen juntos (ver `fcp.encuadreDelRecuadro`).
+        //
+        // Lo que no llega de ninguna manera son las esquinas redondeadas y la
+        // sombra: no existen como parámetro en el formato.
+        const encuadre = fcp.encuadreDelRecuadro({
+            ancho: cls.width,
+            alto: cls.height,
+            fuenteAncho: camara.width,
+            fuenteAlto: camara.height,
+            dialectoDelRecorte: cls.dialectoDelRecorte
+        });
         videoTracks.push(conRecuadro.map(segment => ({
-            source: videoSource(videos[delProfesor], delProfesor),
+            source: videoSource(camara, delProfesor),
             startSec: segment.timelineStartSec,
             endSec: segment.timelineEndSec,
             sourceInSec: segment.sourceStartSec,
             enabled: true,
-            encuadre: ENCUADRE_DEL_RECUADRO
+            encuadre
         })));
     }
 
@@ -414,6 +401,5 @@ function fmt(seconds) {
 
 module.exports = {
     exportClass, fullTracks, cutTracks,
-    markersFromParsed, markersFromAlign, markerColor, videoSource,
-    ENCUADRE_DEL_RECUADRO
+    markersFromParsed, markersFromAlign, markerColor, videoSource
 };
