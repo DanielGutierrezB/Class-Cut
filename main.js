@@ -78,7 +78,13 @@ protocol.registerSchemesAsPrivileged([{
     // Sin `bypassCSP`: el video está declarado en la política de la ventana
     // (`media-src … clase:`), así que la política sigue siendo la frontera real
     // y no algo que este protocolo se saltea.
-    privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true }
+    // `corsEnabled` va junto con la cabecera que manda `media-server.js`: las dos
+    // hacen falta para poder pasar el audio por Web Audio, y sin ellas Chromium
+    // no falla, silencia.
+    privileges: {
+        standard: true, secure: true, stream: true,
+        supportFetchAPI: true, corsEnabled: true
+    }
 }]);
 
 const mediaPermitida = new Set();

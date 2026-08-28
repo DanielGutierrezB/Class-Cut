@@ -99,7 +99,15 @@ function responder(request, permitidas) {
             'Content-Type': tipo,
             'Content-Length': String(hasta - desde + 1),
             // Sin esto Chromium ni intenta pedir por rangos y no deja buscar.
-            'Accept-Ranges': 'bytes'
+            'Accept-Ranges': 'bytes',
+            // Para que el audio se pueda procesar (subir el volumen por encima
+            // del 100%, medir, lo que venga). Sin esta cabecera Chromium deja
+            // reproducir pero **no falla al conectar el elemento a Web Audio: lo
+            // silencia**, y avisa por consola con un mensaje que nadie ve. Es
+            // seguro abrirlo: por acá solo salen los archivos que la clase abierta
+            // habilitó (`mediaPermitida` en `main.js`), así que no amplía nada de
+            // lo que la ventana ya podía pedir.
+            'Access-Control-Allow-Origin': '*'
         }, rango ? { 'Content-Range': `bytes ${desde}-${hasta}/${size}` } : {})
     });
 }
