@@ -24,6 +24,18 @@
     min-height: 0;
 }
 
+/* La columna de la imagen: el video se queda con el alto que sobre y la onda del
+   bloque tiene el suyo fijo. Al revés —la onda flexible— el panel crecería en
+   una ventana alta hasta ser más grande que el video, y es una referencia. */
+.player-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
 /* El reparto entre imagen y texto: la zona de agarre es ancha para no tener que
    apuntar, la línea que se ve es fina. */
 .player-split {
@@ -116,8 +128,173 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
 }
 .player-empty { color: var(--text-mute); font-size: 13px; }
 
+/* ── El audio del bloque que se está viendo ─────────────────────── */
+
+/* Alto fijo y en píxeles, no flexible: es una referencia al lado del video, y
+   estirándose se comería la imagen en una ventana alta. Y de paso el búfer del
+   canvas queda dependiendo de un número escrito acá y de nada que el propio
+   dibujo pueda tocar, que es de donde salía el canvas en blanco de la pestaña de
+   cortes (ver `onda.js`). */
+.player-onda {
+    /* El alto de la fila de subtítulos, en un solo lugar: la fila lo usa de alto
+       y la onda lo descuenta del suyo. Con el número escrito dos veces, cambiar
+       uno deja la onda pisando los clips o un renglón vacío en el medio. */
+    --frases: 32px;
+    position: relative;
+    flex: none;
+    height: 118px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+/* Sin bloque no hay nada que mostrar, y un cuadro vacío se lee como que falló. */
+.player-onda.sin-bloque { opacity: .35; }
+
+/* Los subtítulos arriba y la onda abajo, como dos pistas: la fila de texto tiene
+   su alto propio para que las frases no se encimen con la silueta. */
+.onda-frases {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--frases);
+    border-bottom: 1px solid var(--border-soft);
+}
+/* El alto va escrito y no deducido de `top` + `bottom`: un `<canvas>` es un
+   elemento reemplazado, y para esos el alto `auto` lo resuelve la proporción
+   natural del búfer —ignorando `bottom`, que queda sobreespecificado—. Medido:
+   con `top: 32px; bottom: 0` el canvas salía de 945×473 px, o sea la proporción
+   2:1 de los atributos por defecto, y como el búfer se calcula desde lo que mide
+   en pantalla, la medida se sostenía a sí misma. La onda se dibujaba entera,
+   cuatrocientos píxeles más abajo del panel, y con `overflow: hidden` lo que se
+   veía era un cuadro vacío. Es el mismo pozo que documenta `onda.js`, entrando
+   por otro lado. */
+.onda-canvas {
+    position: absolute;
+    top: var(--frases);
+    left: 0;
+    width: 100%;
+    height: calc(100% - var(--frases));
+    cursor: pointer;
+}
+
+/* Cada frase, un clip: empieza y termina donde se dice, como en la línea de
+   tiempo de un editor. El texto se corta con puntos suspensivos y el completo
+   queda en el `title`, porque el ancho lo manda la duración y no lo que dice. */
+.onda-frase {
+    position: absolute;
+    top: 2px;
+    bottom: 3px;
+    min-width: 6px;
+    padding: 0 5px;
+    border: 1px solid rgba(79, 156, 249, .45);
+    border-radius: 4px;
+    background: rgba(79, 156, 249, .14);
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 11px;
+    line-height: 25px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background .12s ease, color .12s ease;
+}
+.onda-frase:hover { background: rgba(79, 156, 249, .3); color: var(--text); }
+/* La que suena: el mismo trato que la palabra alumbrada del panel de texto, así
+   los dos resaltados se leen como el mismo hecho y no como dos cosas. */
+.onda-frase.is-on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+}
+/* El bloque la corta: el borde punteado del lado por donde se la comió. Sin
+   esto, una frase a medias se lee como una frase corta. */
+.onda-frase.es-cortada-antes { border-left-style: dashed; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.onda-frase.es-cortada-despues { border-right-style: dashed; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+/* La aguja cruza las frases y la onda: es la misma línea de tiempo, y es lo que
+   deja ver contra qué parte del audio está sonando lo que se lee. */
+/* Sin margen negativo para centrarla en el momento exacto: el panel recorta lo
+   que se sale, así que al principio del bloque —donde queda la aguja en cada
+   salto— se veía la mitad de una línea de dos píxeles. Un píxel de corrimiento
+   sobre 945 no se ve; media aguja, sí. */
+.onda-head {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--warn);
+    pointer-events: none;
+}
+
+.onda-vacia {
+    position: absolute;
+    left: 12px;
+    top: calc(var(--frases) + 26px);
+    font-size: 12px;
+    color: var(--text-mute);
+}
+
 .player-bar { display: flex; align-items: center; gap: 10px; }
-.player-play { min-width: 108px; }
+/* El botón es un símbolo: lo que hace lo dice el `title`, y un ancho de 108 px
+   para un caracter deja al ▶ perdido en el medio. */
+.player-play { min-width: 48px; font-size: 15px; line-height: 1; }
+
+/* ── El volumen ─────────────────────────────────────────────────── */
+
+.player-vol {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.player-vol-icono { color: var(--text-mute); }
+/* Corto a propósito: la tira de bloques es la que tiene que quedarse con el
+   ancho, y 96 px alcanzan para apuntar a cualquier tramo de 0 a 150. */
+.player-vol-rango { width: 96px; accent-color: var(--accent); }
+.player-vol-pct {
+    font-variant-numeric: tabular-nums;
+    min-width: 34px;
+    text-align: right;
+}
+/* Arriba del 100% puede recortar: se avisa con palabras y además con el color,
+   no solo con el color. */
+.player-vol.is-saturado .player-vol-pct { color: var(--warn); font-weight: 600; }
+.player-vol.is-saturado .player-vol-rango { accent-color: var(--warn); }
+.player-vol-aviso { color: var(--warn); white-space: nowrap; }
+
+/* ── Las ondas prendidas o apagadas ─────────────────────────────── */
+
+/* Hereda de `.toggle` (`style.css`), como el «Repetir» de la pestaña de cortes:
+   es el mismo tipo de decisión —una preferencia de cómo mirar— y en la misma
+   app tiene que verse igual. Solo se le baja el cuerpo para que empareje con el
+   resto de la barra, que va en 11-12 px. */
+.player-ondas { flex: none; font-size: 11px; color: var(--text-dim); }
+
+/* Con las ondas apagadas, "limpio" no es dejar el hueco vacío. La tira vuelve a
+   los 26 px que tenía cuando era solo colores y el panel de abajo del video se
+   queda con la fila de subtítulos y nada más; los píxeles que se liberan se los
+   lleva la imagen, que es de donde habían salido. */
+.player.sin-ondas .player-track { height: 26px; }
+.player.sin-ondas .player-tira-onda { display: none; }
+/* El alto justo de la fila más los dos bordes del panel. */
+.player.sin-ondas .player-onda { height: calc(var(--frases) + 2px); }
+.player.sin-ondas .onda-canvas,
+.player.sin-ondas .onda-vacia { display: none; }
+/* La línea que separaba las dos pistas ya no separa nada, y pegada al borde de
+   abajo del panel quedaba un doble borde de dos tonos distintos. */
+.player.sin-ondas .onda-frases { border-bottom: 0; }
+/* Sin onda y sin frases no queda nada que mostrar, y un recuadro vacío de 34 px
+   se lee como algo que no terminó de cargar. Es el caso de una clase sin
+   transcripción: con la onda prendida el panel sigue valiendo, apagada no. */
+.player.sin-ondas .player-onda.sin-frases { display: none; }
+
 .player-time {
     font-size: 12px;
     color: var(--text-dim);
@@ -126,10 +303,13 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     text-align: center;
 }
 
+/* 44 px y no 26: adentro de cada clip van ahora los primeros píxeles con el
+   color de la cámara y el resto con la onda, y una silueta de nueve píxeles no
+   se distingue de una línea. */
 .player-track {
     position: relative;
     flex: 1;
-    height: 26px;
+    height: 44px;
     border-radius: var(--radius-sm);
     background: var(--surface-2);
     border: 1px solid var(--border-soft);
@@ -137,6 +317,17 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     cursor: pointer;
 }
 .player-blocks { position: absolute; inset: 0; }
+
+/* Encima de los bloques y sin recibir clics: los clips siguen siendo botones con
+   su `title` y su hover, y lo que el canvas no pinta se ve a través — que es lo
+   que deja intactas las líneas de "conviene revisarlo" y "tiene comentario". */
+.player-tira-onda {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
 
 /* El fondo de cada bloque dice CON QUÉ se ve, y son los mismos colores que se
    escriben como etiqueta de clip en el XML: la cámara 1 en celeste y la 2 en
@@ -156,7 +347,16 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     transition: filter .12s ease;
 }
 .player-block:hover { filter: brightness(1.45); }
-.player-block.is-on { background: var(--accent); }
+/* El bloque que suena se ALUMBRA, no se repinta. Antes se le ponía el color de
+   acento encima y con eso un bloque del grabador de pantalla, que es rosa, se
+   volvía celeste al seleccionarlo: exactamente el color con el que esta misma
+   tira dice "esto es la otra cámara". El brillo más el contorno lo destacan igual
+   de fuerte sin mentir sobre con qué se ve. */
+.player-block.is-on {
+    filter: brightness(1.75);
+    box-shadow: inset 0 0 0 2px var(--text);
+    z-index: 1;
+}
 
 /* Los colores de cámara, en el orden de `CLIP_LABELS` de engine/fcp-xml.js. */
 .cam-0 { --cam: #3f7fb5; }   /* Cerulean */

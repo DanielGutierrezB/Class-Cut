@@ -24,6 +24,10 @@ import { esc, fmtClock } from '../formato.js';
 import { rev, cambio } from './estado.js';
 import { COLORES_DE_CAMARA, comentariosEn, construir, tramoEn, posicionDeBloque, seTermino, siguiente } from './pista.js';
 import { abrirLetra, cerrarLetra, seguir } from './panel-letra.js';
+import { aplicarVolumen, despertarAudio, estadoDelAudio, wireVolumen } from './volumen.js';
+import {
+    abrirOndas, cerrarOndas, moverAgujaDeOnda, pintarOndaDeLaTira, pintarOndaDelBloque, wireOndas
+} from './onda-clase.js';
 
 /**
  * Cuánto puede separarse el recuadro de la imagen principal antes de reacomodarlo.
@@ -71,6 +75,13 @@ function montarVideos(camaras) {
     estado.videos = camaras.map((camara, i) => {
         const video = document.createElement('video');
         video.className = 'player-video';
+        // ANTES del `src`, y no es un detalle de orden: sin el permiso pedido en
+        // la petición, el elemento queda "contaminado" y conectarlo a Web Audio
+        // —lo que hace falta para pasar del 100% de volumen— devuelve silencio
+        // sin fallar. Si el archivo ya estuviera en memoria sin permiso habría
+        // que volver a llamar a `load()`; acá el elemento se crea recién ahora,
+        // así que alcanza con ponerlo primero.
+        video.crossOrigin = 'anonymous';
         video.src = camara.url;
         video.preload = 'auto';
         video.playsInline = true;
@@ -120,6 +131,10 @@ function componer(tramo) {
 
     estado.principal = principal;
     estado.inset = inset;
+    // El nivel se pone acá y no una sola vez al abrir: quién tiene que sonar
+    // cambia en cada bloque, y arriba del 100% el volumen ya no vive en el
+    // elemento sino en un nodo por elemento (ver `volumen.js`).
+    aplicarVolumen(estado.videos, principal);
     return principal;
 }
 
@@ -151,7 +166,11 @@ function ir(segundo, seguirReproduciendo) {
     if (!donde) return;
 
     estado.posicionSec = Math.max(0, Math.min(segundo, estado.pista.duracionSec));
+    const anterior = estado.tramo;
     estado.tramo = donde.tramo;
+    // La onda de abajo y sus subtítulos son de UN bloque: se rearman al saltar
+    // de bloque y no en cada cuadro, que es lo que las hace baratas.
+    if (!anterior || anterior.indice !== donde.tramo.indice) pintarOndaDelBloque(donde.tramo);
 
     const principal = componer(donde.tramo);
     if (!principal) return;
@@ -201,6 +220,10 @@ function reproducir() {
 
     estado.reproduciendo = true;
     if (!estado.principal && estado.tramo) componer(estado.tramo);
+    // El `AudioContext` arranca suspendido hasta que hay un gesto del usuario, y
+    // suspendido no sale audio por el grafo. Acá se llega por el botón o por la
+    // barra espaciadora, así que el gesto ya está hecho.
+    despertarAudio();
     for (const video of enUso()) {
         video.play().catch(err => {
             // `AbortError` es lo que devuelve Chromium cuando el pedido de
@@ -253,10 +276,21 @@ function pintarAguja() {
     const fraccion = total ? (estado.posicionSec / total) * 100 : 0;
     $('player-head').style.left = `${fraccion}%`;
     $('player-time').textContent = `${fmtClock(estado.posicionSec)} / ${fmtClock(total)}`;
+    // La otra aguja: la misma posición, pero medida contra el bloque.
+    moverAgujaDeOnda(estado.posicionSec);
 }
 
 function pintarEstado() {
-    $('player-play').textContent = estado.reproduciendo ? 'Pausa' : 'Reproducir';
+    // El botón dice el estado con un símbolo, así que lo que hace tiene que
+    // decirlo el `title` —y el `aria-label`, que es lo único que le queda a un
+    // lector de pantalla cuando el texto es un ▶—. Los dos se actualizan en los
+    // dos estados: un botón que dice "Reproducir" mientras pausa es peor que uno
+    // sin texto. El atajo va adentro porque el botón es donde se lo descubre.
+    const boton = $('player-play');
+    const que = estado.reproduciendo ? 'Pausa' : 'Reproducir';
+    boton.textContent = estado.reproduciendo ? '⏸' : '▶';
+    boton.title = `${que} (barra espaciadora)`;
+    boton.setAttribute('aria-label', boton.title);
     pintarAguja();
 
     const tramo = estado.tramo;
@@ -321,6 +355,10 @@ function pintarBloques() {
         contenedor.appendChild(boton);
     }
 
+    // La onda va después de los botones, en su propio canvas encima: la tira es
+    // una sola línea de tiempo y las dos cosas se miden con los mismos
+    // porcentajes, así que tienen que dibujarse en el mismo pase.
+    pintarOndaDeLaTira(estado.pista);
     pintarLeyenda();
 }
 
@@ -391,6 +429,7 @@ function pintarLeyenda() {
  */
 export function abrirReproductor() {
     const camaras = (rev.data && rev.data.cameras) || [];
+    abrirOndas();
     estado.pista = construir(rev.segments, {
         viewMap: rev.data && rev.data.cutplan ? rev.data.cutplan.viewMap : null,
         camaras: camaras.length,
@@ -419,10 +458,21 @@ export function abrirReproductor() {
     ir(desde == null ? 0 : desde, false);
 }
 
+/**
+ * El audio como quedó armado, con los videos de este bloque.
+ *
+ * Es lo que deja comprobar desde el arnés que subir el volumen no destapó el
+ * recuadro: en pantalla no se ve, y la única alternativa es escuchar y opinar.
+ */
+export function audioDelReproductor() {
+    return { ...estadoDelAudio(estado.videos), principal: estado.principal, inset: estado.inset };
+}
+
 /** Al salir de la pestaña o de la clase: nada sigue sonando por detrás. */
 export function cerrarReproductor() {
     pausar();
     cerrarLetra();
+    cerrarOndas();
     for (const video of estado.videos) { video.removeAttribute('src'); video.load(); video.remove(); }
     estado.videos = [];
     estado.principal = null;
@@ -473,6 +523,10 @@ export function wireReproductor() {
     $('player-play').onclick = alternar;
     $('player-prev').onclick = () => saltarBloque(-1);
     $('player-next').onclick = () => saltarBloque(1);
+
+    // Quién tiene que sonar lo sabe el reproductor; cuánto, el control.
+    wireVolumen(() => aplicarVolumen(estado.videos, estado.principal));
+    wireOndas(segundo => ir(segundo, estado.reproduciendo));
 
     $('player-blocks').addEventListener('click', e => {
         const boton = e.target.closest('.player-block');

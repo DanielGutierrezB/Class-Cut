@@ -31,6 +31,8 @@ const FILES = [
     'pista.test.js',
     'letra.test.js',
     'onda.test.js',
+    'picos.test.js',
+    'volumen.test.js',
     'escucha.test.js',
     'estilos.test.js',
     'notas.test.js',

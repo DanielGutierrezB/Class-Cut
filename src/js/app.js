@@ -16,7 +16,7 @@ import {
 } from './vista-clases.js';
 import { run, startProcessing, alAvanzarEtapa, alCambiarClase } from './vista-corrida.js';
 import { openReview, wireReview } from './visor/index.js';
-import { cerrarReproductor } from './visor/reproductor.js';
+import { audioDelReproductor, cerrarReproductor } from './visor/reproductor.js';
 import { rev } from './visor/estado.js';
 import { marcarPaso, refrescarPasos, wirePasos, PASOS } from './pasos.js';
 import { showDoctor } from './diagnostico.js';
@@ -237,7 +237,10 @@ window.dev = {
     visor: () => rev,
     // Lo mismo para la barra de la corrida: si avanza o no avanza es una
     // cuenta, y desde una captura de pantalla no se puede comprobar.
-    corrida: () => run
+    corrida: () => run,
+    // Y el volumen, que no se ve ni se cuenta: devuelve los nodos de Web Audio
+    // para poder colgarles un analizador desde afuera y medir qué suena.
+    audio: () => audioDelReproductor()
 };
 
 init().catch(err => {

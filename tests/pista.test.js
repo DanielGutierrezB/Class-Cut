@@ -226,6 +226,89 @@ module.exports = async t => {
         t.eq(pista.comentariosEn(p.tramos[0].origenDesdeSec, p.tramos[0].origenHastaSec, [{ sourceStartSec: 10 }, { sourceStartSec: 20 }]).length, 2);
     });
 
+    t.group('dónde cae cada subtítulo dentro de un bloque');
+
+    // En tiempo de grabación, como vienen de la transcripción. El bloque 1 va de
+    // 100 a 130 del original.
+    const frases = [
+        { start: 95, end: 104, text: 'arranca antes de que entre el bloque' },
+        { start: 104, end: 112, text: 'entera adentro' },
+        { start: 112, end: 118, text: 'la del medio' },
+        { start: 126, end: 140, text: 'sigue después de que salga' },
+        { start: 200, end: 210, text: 'en material que quedó afuera' }
+    ];
+
+    t.test('trae las que suenan en el bloque y ninguna más', () => {
+        const p = pista.construir(planDeEjemplo());
+        const salen = pista.frasesEn(p.tramos[1], frases);
+        t.deep(salen.map(f => f.texto), [
+            'arranca antes de que entre el bloque',
+            'entera adentro',
+            'la del medio',
+            'sigue después de que salga'
+        ]);
+    });
+
+    t.test('la que cruza el borde entra recortada, no descartada', () => {
+        // Descartarla dejaría el arranque del bloque sin texto justo donde el
+        // editor está mirando si el corte entró bien.
+        const p = pista.construir(planDeEjemplo());
+        const primera = pista.frasesEn(p.tramos[1], frases)[0];
+        t.eq(primera.origenDesdeSec, 100, 'se recorta al borde del bloque');
+        t.eq(primera.origenHastaSec, 104);
+        t.eq(primera.fraccionDesde, 0, 'y arranca pegada al principio');
+        t.ok(primera.cortadaAlEntrar, 'y queda marcada como cortada');
+        t.ok(!primera.cortadaAlSalir);
+    });
+
+    t.test('la del final también, por el otro lado', () => {
+        const p = pista.construir(planDeEjemplo());
+        const ultima = pista.frasesEn(p.tramos[1], frases)[3];
+        t.eq(ultima.origenHastaSec, 130);
+        t.eq(ultima.fraccionHasta, 1);
+        t.ok(ultima.cortadaAlSalir);
+        t.ok(!ultima.cortadaAlEntrar);
+    });
+
+    t.test('la fracción dice dónde dibujarla sobre la onda del bloque', () => {
+        // El bloque dura 30 s: la frase de 112 a 118 cae del 40% al 60%.
+        const p = pista.construir(planDeEjemplo());
+        const medio = pista.frasesEn(p.tramos[1], frases)[2];
+        t.near(medio.fraccionDesde, 0.4, 0.001);
+        t.near(medio.fraccionHasta, 0.6, 0.001);
+    });
+
+    t.test('el segundo al que salta el clic es del CORTE, no de la grabación', () => {
+        // Es lo que hace que hacer clic en una frase lleve la reproducción a
+        // donde se la oye: el bloque 1 empieza a los 10 s del corte final.
+        const p = pista.construir(planDeEjemplo());
+        const medio = pista.frasesEn(p.tramos[1], frases)[2];
+        t.eq(medio.desdeSec, 22, '10 del corte + 12 adentro del bloque');
+        const cortada = pista.frasesEn(p.tramos[1], frases)[0];
+        t.eq(cortada.desdeSec, 10, 'la recortada arranca en el borde del bloque');
+    });
+
+    t.test('vienen en orden aunque la transcripción no lo esté', () => {
+        const p = pista.construir(planDeEjemplo());
+        const alReves = [...frases].reverse();
+        t.deep(pista.frasesEn(p.tramos[1], alReves).map(f => f.origenDesdeSec), [100, 104, 112, 126]);
+    });
+
+    t.test('una frase que solo toca el borde no cuenta', () => {
+        // Termina exactamente donde el bloque empieza: no se oye nada de ella.
+        const p = pista.construir(planDeEjemplo());
+        t.deep(pista.frasesEn(p.tramos[1], [{ start: 90, end: 100, text: 'justo antes' }]), []);
+        t.deep(pista.frasesEn(p.tramos[1], [{ start: 130, end: 140, text: 'justo después' }]), []);
+    });
+
+    t.test('sin frases, sin tramo o con tiempos ilegibles no rompe', () => {
+        const p = pista.construir(planDeEjemplo());
+        t.deep(pista.frasesEn(p.tramos[0], []), []);
+        t.deep(pista.frasesEn(p.tramos[0], null), []);
+        t.deep(pista.frasesEn(null, frases), []);
+        t.deep(pista.frasesEn(p.tramos[0], [{ start: null, end: 15, text: 'sin arranque' }]), []);
+    });
+
     t.group('avanzar de bloque en bloque');
 
     t.test('se salta cuando el archivo pasó el final del bloque', () => {

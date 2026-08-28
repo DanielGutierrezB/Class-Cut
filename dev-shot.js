@@ -6,8 +6,9 @@
  *
  * Carga la carpeta, espera a que la tabla termine de medir, corre el JS que se
  * le pase, guarda el PNG y sale. Para atajos de teclado hay `--key=Space` (una
- * tecla de verdad, con su acción por defecto) y `--js-despues=` para mirar cómo
- * quedó todo.
+ * tecla de verdad, con su acción por defecto), `--click=x,y[,cuántos]` para
+ * clics de verdad (con su tercer número, un doble clic) y `--js-despues=` para
+ * mirar cómo quedó todo.
  *
  * `--responder=N` contesta los diálogos de varias salidas con esa opción, sin
  * abrirlos: es la única forma de probar desde afuera qué hace la ventana con
@@ -89,11 +90,20 @@ async function pase(win, shot, medida) {
 
     // Y `elemento.click()` tampoco mueve el foco como lo mueve el mouse, que es
     // de dónde salen la mitad de los problemas con los atajos.
+    //
+    // Con un tercer número, esa cantidad de clics seguidos: `--click=120,760,2`
+    // es un doble clic. Y no es dos veces `--click`, que es justamente el punto:
+    // el `dblclick` lo sintetiza el navegador a partir del `clickCount` que trae
+    // cada evento del sistema, así que dos clics con `clickCount: 1` no lo
+    // producen nunca. Sin esto, ningún gesto de doble clic de la app —el del
+    // divisor del panel y el del volumen— se podía probar desde afuera.
     const click = argValue('click');
     if (click) {
-        const [x, y] = click.split(',').map(Number);
-        win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-        win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+        const [x, y, cuantos] = click.split(',').map(Number);
+        for (let n = 1; n <= Math.max(1, cuantos || 1); n++) {
+            win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: n });
+            win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: n });
+        }
         await new Promise(r => setTimeout(r, 300));
     }
 
@@ -106,11 +116,15 @@ async function pase(win, shot, medida) {
         win.webContents.sendInputEvent({ type: 'char', keyCode: key });
         win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
         await new Promise(r => setTimeout(r, 500));
-        const despues = argValue('js-despues');
-        if (despues) {
-            const salida = await win.webContents.executeJavaScript(despues);
-            if (salida !== undefined) console.log(salida);
-        }
+    }
+
+    // Después de todo lo que se haya mandado, no solo de las teclas: lo que un
+    // clic dejó en el estado no siempre se ve en la captura, y colgado de
+    // `--key` había que mandar una tecla al aire para poder mirar.
+    const despues = argValue('js-despues');
+    if (despues) {
+        const salida = await win.webContents.executeJavaScript(despues);
+        if (salida !== undefined) console.log(salida);
     }
 
     if (!shot) return;

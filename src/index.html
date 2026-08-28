@@ -186,9 +186,26 @@
 
             <div class="player" id="rev-player" hidden>
                 <div class="player-top">
-                    <div class="player-stage" id="player-stage">
-                        <div class="player-frame" id="player-frame"></div>
-                        <div class="player-empty" id="player-empty">No hay bloques para ver.</div>
+                    <!-- La imagen y, debajo, el audio del bloque que suena: son
+                         la misma columna porque comparten el ancho, y el panel
+                         de texto va al costado de las dos. -->
+                    <div class="player-main">
+                        <div class="player-stage" id="player-stage">
+                            <div class="player-frame" id="player-frame"></div>
+                            <div class="player-empty" id="player-empty">No hay bloques para ver.</div>
+                        </div>
+
+                        <!-- El audio del bloque actual, con los subtítulos como
+                             clips encima y la aguja cruzando los dos: sin
+                             atributos de tamaño, el alto lo pone el CSS y el
+                             búfer de dibujo lo calcula `onda-clase.js`. -->
+                        <div class="player-onda" id="player-onda"
+                             title="El audio del bloque que se está viendo · clic en la onda para mover la aguja, clic en una frase para ir ahí">
+                            <div class="onda-frases" id="onda-frases"></div>
+                            <canvas class="onda-canvas" id="onda-canvas"></canvas>
+                            <div class="onda-vacia" id="onda-vacia" hidden>Esta clase no tiene Live-Mix: no hay onda para dibujar.</div>
+                            <div class="onda-head" id="onda-head" hidden></div>
+                        </div>
                     </div>
 
                     <div class="player-split" id="player-split" role="separator"
@@ -205,12 +222,50 @@
                 </div>
 
                 <div class="player-bar">
-                <button class="btn btn-primary player-play" id="player-play" title="Barra espaciadora">Reproducir</button>
-                <button class="btn btn-ghost" id="player-prev" title="Bloque anterior (flecha arriba)">◀◀</button>
-                <button class="btn btn-ghost" id="player-next" title="Bloque siguiente (flecha abajo)">▶▶</button>
+                    <!-- El símbolo dice el estado y el `title`/`aria-label` dice
+                         qué hace y con qué tecla: los pone `pintarEstado`, que
+                         es el único que sabe si está sonando. -->
+                    <button class="btn btn-primary player-play" id="player-play"
+                            title="Reproducir (barra espaciadora)"
+                            aria-label="Reproducir (barra espaciadora)">▶</button>
+                    <button class="btn btn-ghost" id="player-prev" title="Bloque anterior (flecha arriba)">◀◀</button>
+                    <button class="btn btn-ghost" id="player-next" title="Bloque siguiente (flecha abajo)">▶▶</button>
+
+                    <!-- Hasta 150%: arriba del 100% el nivel lo pone Web Audio,
+                         porque `video.volume` topa en 1 (ver `volumen.js`). El
+                         valor de acá es solo el de fábrica: el guardado lo pone
+                         `wireVolumen` al arrancar. -->
+                    <label class="player-vol" id="player-vol">
+                        <!-- Texto y no un ícono de parlante: los caracteres de
+                             parlante que hay en Unicode los dibuja macOS como
+                             emoji de tres colores y con brillo, y al lado de
+                             ▶, ⏸ y ◀◀ —que salen planos— se veía como un tornillo
+                             cromado pegado en la barra. Visto en la captura. -->
+                        <span class="player-vol-icono" aria-hidden="true">Vol</span>
+                        <input type="range" class="player-vol-rango" id="player-volumen"
+                               min="0" max="150" step="5" value="100"
+                               aria-label="Volumen de la clase">
+                        <span class="player-vol-pct" id="player-vol-pct">100%</span>
+                        <span class="player-vol-aviso" id="player-vol-aviso" hidden>puede saturar</span>
+                    </label>
+
+                    <!-- Un interruptor para las DOS ondas, no uno por cada una:
+                         lo que se pidió es "interfaz limpia", y eso es una
+                         decisión. Los clips de subtítulos no se van con esto —el
+                         por qué está en `onda-clase.js`. -->
+                    <label class="toggle player-ondas"
+                           title="Dibujar el audio: adentro de cada clip de la tira y abajo del video&#10;Los subtítulos se quedan igual">
+                        <input type="checkbox" id="player-ondas" checked>
+                        Ondas
+                    </label>
+
                     <span class="player-time" id="player-time">0:00 / 0:00</span>
                     <div class="player-track" id="player-track">
                         <div class="player-blocks" id="player-blocks"></div>
+                        <!-- La onda de cada clip, encima de los botones y sin
+                             recibir clics: lo que no pinta se ve a través, y así
+                             las dos líneas de la tira siguen visibles. -->
+                        <canvas class="player-tira-onda" id="player-tira-onda"></canvas>
                         <div class="player-head" id="player-head"></div>
                     </div>
                 </div>

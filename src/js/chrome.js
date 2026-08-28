@@ -38,10 +38,18 @@ export function showView(name) {
  * Vive acá y no en el reproductor porque ahora hay dos pestañas que atienden la
  * barra —"Ver la clase" y los cortes— y la regla tiene que ser una sola: con dos
  * copias, arreglar una deja la otra comiéndose los espacios del editor.
+ *
+ * Un deslizador es un `<input>` pero ahí no se escribe nada, y contarlo como que
+ * sí tiene una consecuencia concreta: después de arrastrar el volumen el foco
+ * queda en él, y la barra espaciadora dejaba de reproducir hasta que el editor
+ * hiciera clic en otro lado. Las teclas que el deslizador sí usa —las flechas—
+ * las para él mismo, como hace el divisor del panel (ver `volumen.js` y
+ * `division.js`): quien quiera quedarse una tecla, que la pare.
  */
 export function estaEscribiendo(donde) {
-    return Boolean(donde)
-        && (donde.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(donde.tagName));
+    if (!donde) return false;
+    if (donde.tagName === 'INPUT' && donde.type === 'range') return false;
+    return Boolean(donde.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(donde.tagName));
 }
 
 let toastTimer = null;

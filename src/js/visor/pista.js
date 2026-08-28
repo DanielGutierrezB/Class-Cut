@@ -134,6 +134,60 @@ export function comentariosEn(desdeSec, hastaSec, comentarios) {
 }
 
 /**
+ * Las frases del transcript que suenan dentro de un tramo, ya recortadas a él.
+ *
+ * Es la pieza que deja ver dónde cae cada subtítulo sobre la onda del bloque.
+ * Se pregunta por solapamiento y no por "arranca adentro": las frases de la
+ * transcripción son largas —397 para 2516 s en la clase 1 del curso real, o sea
+ * 6 s promedio, con algunas de 16— así que la que cruza el borde de entrada es
+ * habitual: 5 de los 15 bloques de esa clase empiezan en medio de una.
+ * Descartarla dejaría el arranque del bloque sin texto justo donde el editor
+ * está mirando si el corte entró bien.
+ *
+ * Cada frase vuelve con las dos medidas que hacen falta y que no conviene
+ * recalcular en el dibujo: dónde cae dentro del bloque (de 0 a 1, que es como
+ * se posiciona sobre la onda) y en qué momento del corte final está (que es
+ * adónde tiene que ir la reproducción al hacerle clic).
+ *
+ * @param {object} tramo uno de los de `construir`
+ * @param {Array} frases las de `rev.data.segments`, en tiempo de grabación
+ */
+export function frasesEn(tramo, frases) {
+    if (!tramo || !frases || !tramo.duracionSec) return [];
+    const salida = [];
+
+    for (const frase of frases) {
+        // `null` se descarta a mano: `Number(null)` es 0, que como tiempo de
+        // arranque es válido, así que una frase sin tiempos se dibujaría pegada
+        // al principio del bloque como si el profesor hubiera dicho eso ahí.
+        if (frase.start == null || frase.end == null) continue;
+        const desde = Number(frase.start);
+        const hasta = Number(frase.end);
+        if (!isFinite(desde) || !isFinite(hasta)) continue;
+        if (hasta <= tramo.origenDesdeSec || desde >= tramo.origenHastaSec) continue;
+
+        const recorteDesde = Math.max(desde, tramo.origenDesdeSec);
+        const recorteHasta = Math.min(hasta, tramo.origenHastaSec);
+        salida.push({
+            texto: frase.text || '',
+            origenDesdeSec: recorteDesde,
+            origenHastaSec: recorteHasta,
+            // Del corte final, para poder saltar ahí.
+            desdeSec: tramo.desdeSec + (recorteDesde - tramo.origenDesdeSec),
+            fraccionDesde: (recorteDesde - tramo.origenDesdeSec) / tramo.duracionSec,
+            fraccionHasta: (recorteHasta - tramo.origenDesdeSec) / tramo.duracionSec,
+            // Si se la cortó el borde del bloque: lo que se lee acá no es la
+            // frase entera y el dibujo lo marca, para que nadie crea que el
+            // profesor dijo justo eso y nada más.
+            cortadaAlEntrar: desde < tramo.origenDesdeSec,
+            cortadaAlSalir: hasta > tramo.origenHastaSec
+        });
+    }
+
+    return salida.sort((a, b) => a.origenDesdeSec - b.origenDesdeSec);
+}
+
+/**
  * En qué tramo cae un momento del corte final, y a qué segundo del archivo.
  *
  * @returns {{tramo:object, origenSec:number}|null}
