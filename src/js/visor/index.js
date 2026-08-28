@@ -220,7 +220,7 @@ function renderReviewList() {
         <button class="rev-item conf-${esc(segment.confidence)} ${index === rev.selected ? 'is-active' : ''} ${segment.keep ? '' : 'is-out'}"
                 data-idx="${index}">
             <span class="rev-item-head">
-                <span>${index + 1}.</span>
+                <span class="rev-item-n">Bloque ${segment.blockIndex + 1}</span>
                 <span class="rev-item-time">${fmtClock(segment.sourceStartSec)}</span>
                 <span class="cell-dim">${(segment.sourceEndSec - segment.sourceStartSec).toFixed(1)}s</span>
                 <span class="badge ${segment.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(segment.view)}</span>

@@ -1010,24 +1010,32 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 
 .script-block {
     display: grid;
-    grid-template-columns: 34px 1fr;
+    grid-template-columns: 72px 1fr;
     gap: 12px;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
     border-left: 2px solid var(--surface-3);
     background: var(--surface);
-    cursor: pointer;
 }
 .script-block:hover { background: var(--surface-2); }
 .script-block.has-alta { border-left-color: var(--err); }
 .script-block.has-media { border-left-color: var(--warn); }
 .script-block.has-baja { border-left-color: var(--accent-dim); }
+/* Es lo único clicable del bloque: el resto es texto para leer y seleccionar. */
 .script-n {
     font-variant-numeric: tabular-nums;
     font-size: 11.5px;
     color: var(--text-mute);
-    padding-top: 2px;
+    background: none;
+    border: 0;
+    padding: 2px 0 0;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    align-self: start;
+    white-space: nowrap;
 }
+.script-n:hover { color: var(--accent); text-decoration: underline; }
 .script-text { font-size: 13.5px; line-height: 1.72; color: var(--text-dim); }
 .script-block.has-alta .script-text,
 .script-block:hover .script-text { color: var(--text); }

@@ -39,6 +39,46 @@ const TIPO_ARREGLADO = {
 };
 
 /**
+ * El número con el que se conoce a un bloque en toda la app.
+ *
+ * El guion guardado numera los bloques entre los que QUEDARON, y la lista de
+ * cortes los numera entre TODOS. Mientras no se apague ninguno da igual, pero en
+ * el curso ya pasa en 4 de 13 clases: el mismo bloque es el 12 acá y el 13 allá,
+ * y no hay manera de saberlo mirando. Manda el de la lista, que es el que no se
+ * mueve: apagar un bloque no renumera a los demás.
+ *
+ * La numeración del guion no se toca por dentro —el motor y la IA la comparten
+ * como clave y renumerarla obligaría a reprocesar—, así que se traduce al leer.
+ */
+function numeroDe(bloque) {
+    return bloque.index + 1;
+}
+
+/** De la numeración del guion a la que se ve. Vacío si ya coinciden. */
+function traduccion(bloques) {
+    const mapa = new Map();
+    for (const b of bloques || []) {
+        if (b.n !== numeroDe(b)) mapa.set(b.n, numeroDe(b));
+    }
+    return mapa;
+}
+
+/**
+ * Los números de bloque que la IA escribió adentro de su texto, traducidos.
+ *
+ * La mitad de los hallazgos del curso citan un bloque por su número —«repite el
+ * cierre del bloque 13», «los bloques 8 y 9»—, así que cambiar el rótulo sin
+ * tocar el texto haría que la explicación señale al bloque equivocado justo en
+ * las clases donde las dos numeraciones no coinciden.
+ */
+export function traducirTexto(texto, mapa) {
+    if (!mapa || !mapa.size) return String(texto || '');
+    return String(texto || '').replace(
+        /\bbloques?\s+\d+(?:\s*(?:y|,|-|a)\s*\d+)*/gi,
+        tramo => tramo.replace(/\d+/g, n => String(mapa.get(Number(n)) || n)));
+}
+
+/**
  * Las palabras de un bloque, con sus tiempos de grabación.
  *
  * El guion guardado trae el texto ya armado, pero un texto no se puede anclar:
@@ -92,6 +132,7 @@ export function renderScript() {
         byBlock.get(finding.bloque).push(finding);
     }
 
+    const numeros = traduccion(coherence.blocks);
     const arreglos = arreglosPorBloque();
     // Lo ya corregido no se cuenta como pendiente: el sentido de arreglarlo era
     // justamente que dejara de ser una tarea del editor.
@@ -111,7 +152,7 @@ export function renderScript() {
                 <div class="finding-head">
                     <span class="finding-tipo">${esc(TIPO_ARREGLADO[f.tipo] || f.tipo)}, ya arreglado</span>
                 </div>
-                <div>${esc(f.corregido)}</div>
+                <div>${esc(traducirTexto(f.corregido, numeros))}</div>
             </div>`
             : `
             <div class="finding ${esc(f.gravedad)}">
@@ -119,8 +160,8 @@ export function renderScript() {
                     <span class="finding-tipo">${esc(TIPO_LABEL[f.tipo] || f.tipo)}</span>
                     <span class="badge ${f.fuente === 'ia' ? 'badge-by-ia' : 'badge-by-regla'}">${f.fuente === 'ia' ? 'IA' : 'regla'}</span>
                 </div>
-                <div>${esc(f.detalle)}</div>
-                ${f.sugerencia ? `<div class="finding-fix">${esc(f.sugerencia)}</div>` : ''}
+                <div>${esc(traducirTexto(f.detalle, numeros))}</div>
+                ${f.sugerencia ? `<div class="finding-fix">${esc(traducirTexto(f.sugerencia, numeros))}</div>` : ''}
             </div>`).join('');
 
         const arreglo = arreglos.get(block.index);
@@ -142,15 +183,27 @@ export function renderScript() {
         const texto = palabras.length
             ? palabras.map((p, i) => {
                 const id = comentadas.get(i);
+                // Cuando la marca sigue en la palabra siguiente, el espacio va
+                // ADENTRO: pintado palabra por palabra, el espacio queda sin
+                // pintar y la frase marcada se lee como un código de barras. Se
+                // resolvió así y no estirando las cajas con márgenes negativos
+                // porque el fondo es translúcido y al superponerse se duplica el
+                // color: quedaban costuras oscuras en cada junta.
+                const sigue = id && comentadas.get(i + 1) === id;
+                const hueco = i < palabras.length - 1 ? ' ' : '';
                 return `<span class="script-palabra${id ? ' is-comentado' : ''}"` +
                     `${id ? ` data-com="${esc(id)}"` : ''} data-b="${block.index}" data-p="${i}"` +
-                    `>${esc(p.text)}</span>`;
-            }).join(' ')
+                    `>${esc(p.text)}${sigue ? hueco : ''}</span>${sigue ? '' : hueco}`;
+            }).join('')
             : (esc(block.text) || '<span class="cell-dim">(sin habla)</span>');
 
+        // El rótulo es lo único que lleva al corte. Antes lo hacía el bloque
+        // entero, y eso peleaba con seleccionar texto: soltar el mouse termina en
+        // un clic y se cambiaba de pestaña con la selección hecha.
         return `
         <div class="script-block ${worstLevel ? `has-${worstLevel}` : ''}" data-block="${block.index}">
-            <div class="script-n">${block.n}</div>
+            <button class="script-n" data-ir="${block.index}"
+                    title="Ir a este bloque en Cortes">Bloque ${numeroDe(block)}</button>
             <div>
                 ${block.note ? `<div class="script-note">${esc(block.note)}</div>` : ''}
                 <div class="script-text">${texto}</div>
@@ -379,16 +432,12 @@ export function wireGuion(irALaPestaña) {
         const marcado = e.target.closest('[data-com]');
         if (marcado) { resaltar(marcado.dataset.com); return; }
 
-        // El margen es para leer y escribir, no para navegar.
-        if (e.target.closest('.script-margen')) return;
-
-        // Seleccionar texto termina en un clic, y saltar de pestaña en medio de
-        // eso se lleva puesta la selección justo cuando se iba a comentar.
-        if (!window.getSelection().isCollapsed) return;
-
-        const el = e.target.closest('.script-block');
-        if (!el) return;
-        const position = rev.segments.findIndex(s => s.blockIndex === Number(el.dataset.block));
+        // Solo el rótulo lleva al corte: el resto del bloque es texto para leer y
+        // seleccionar, y saltar de pestaña en medio de una selección se la lleva
+        // puesta justo cuando se iba a comentar.
+        const ir = e.target.closest('[data-ir]');
+        if (!ir) return;
+        const position = rev.segments.findIndex(s => s.blockIndex === Number(ir.dataset.ir));
         if (position === -1) return;
         rev.selected = position;
         irALaPestaña('cortes');

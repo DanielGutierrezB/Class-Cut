@@ -25,6 +25,7 @@ function span(bloque, palabra) {
 module.exports = async t => {
     const guion = await cargar('guion.js');
     const comentarios = await cargar('comentarios.js');
+    const traducir = guion.traducirTexto;
 
     const PALABRAS = {
         0: [
@@ -78,6 +79,40 @@ module.exports = async t => {
     t.test('sin palabras no hay ancla que inventar', () => {
         t.eq(comentarios.anclaDeSeleccion(null), null);
         t.eq(comentarios.anclaDeSeleccion([]), null);
+    });
+
+    t.group('guion · el número de bloque es el mismo en toda la app');
+
+    // Una clase donde se apagó un bloque: el guion numera entre los que quedaron
+    // y la lista de cortes entre todos, así que a partir de ahí van corridos.
+    // Pasa en 4 de las 13 clases del curso.
+    const MAPA = new Map([[12, 13], [8, 9], [9, 10]]);
+
+    t.test('el texto de la IA se traduce a la numeración que se ve', () => {
+        // La mitad de los hallazgos del curso citan un bloque por su número, así
+        // que cambiar el rótulo sin tocar el texto haría que la explicación
+        // señale al bloque equivocado.
+        t.eq(traducir('Repite el cierre del bloque 12.', MAPA),
+            'Repite el cierre del bloque 13.');
+    });
+
+    t.test('también cuando cita varios', () => {
+        t.eq(traducir('repite el cierre de los bloques 8 y 9', MAPA),
+            'repite el cierre de los bloques 9 y 10');
+        t.eq(traducir('los bloques 8, 9 y 12 dicen lo mismo', MAPA),
+            'los bloques 9, 10 y 13 dicen lo mismo');
+    });
+
+    t.test('un número que no es un bloque no se toca', () => {
+        // Los conteos de toma y las duraciones están llenos de números sueltos.
+        t.eq(traducir('dice "3, 2, 1" y son 12 segundos', MAPA),
+            'dice "3, 2, 1" y son 12 segundos');
+    });
+
+    t.test('sin bloques apagados no se traduce nada', () => {
+        // El caso normal: nueve de trece clases. Sin mapa, el texto sale igual.
+        t.eq(traducir('Repite el cierre del bloque 12.', new Map()),
+            'Repite el cierre del bloque 12.');
     });
 
     t.group('guion · a qué altura va cada tarjeta del margen');

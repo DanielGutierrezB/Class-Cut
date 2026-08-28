@@ -440,10 +440,11 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
 }
 .script-margen { position: relative; min-height: 1px; }
 
-/* Cada palabra es su propio blanco para poder seleccionar de a pedazos. El
-   relleno lateral va en cero porque las palabras se separan con un espacio de
-   texto: con relleno, el resaltado se lo come y se leen pegadas. */
-.script-palabra { border-radius: 3px; padding: 1px 0; }
+/* Cada palabra es su propio blanco para poder seleccionar de a pedazos, pero el
+   resaltado tiene que leerse como UNO: la continuidad la da el espacio metido
+   adentro de la marca (ver `guion.js`), no el relleno, así que acá no hay ni
+   padding lateral ni márgenes en negativo. */
+.script-palabra { border-radius: 2px; }
 .script-palabra.is-comentado {
     background: rgba(240, 180, 41, .16);
     box-shadow: 0 1px 0 var(--warn);
