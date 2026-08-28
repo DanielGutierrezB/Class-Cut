@@ -24,7 +24,7 @@ import { esc, fmtClock } from '../formato.js';
 import { rev, cambio } from './estado.js';
 import { COLORES_DE_CAMARA, comentariosEn, construir, tramoEn, posicionDeBloque, seTermino, siguiente } from './pista.js';
 import { abrirLetra, cerrarLetra, seguir } from './panel-letra.js';
-import { aplicarVolumen, despertarAudio, estadoDelAudio, wireVolumen } from './volumen.js';
+import { aplicarVolumen, despertarAudio, estadoDelAudio, ponerNivelado, wireVolumen } from './volumen.js';
 import {
     abrirOndas, cerrarOndas, moverAgujaDeOnda, pintarOndaDeLaTira, pintarOndaDelBloque, wireOndas
 } from './onda-clase.js';
@@ -499,6 +499,11 @@ function pintarLeyenda() {
  */
 export function abrirReproductor() {
     const camaras = (rev.data && rev.data.cameras) || [];
+    // Antes que nada: cuánto hay que levantar ESTA clase. Se sabe con los picos
+    // que ya vinieron con la revisión, y tiene que estar puesto antes del primer
+    // `aplicarVolumen` o el primer bloque suena con el nivelado de la clase
+    // anterior.
+    ponerNivelado(rev.data && rev.data.waveform ? rev.data.waveform.peaks : null);
     abrirOndas();
     estado.pista = construir(rev.segments, {
         viewMap: rev.data && rev.data.cutplan ? rev.data.cutplan.viewMap : null,

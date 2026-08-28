@@ -60,9 +60,63 @@ export function porcentajeValido(valor) {
     return Math.max(0, Math.min(MAXIMO, Math.round(n)));
 }
 
-/** La ganancia del `GainNode`: 1 es el nivel del archivo. */
-export function gananciaDe(porcentaje) {
-    return porcentajeValido(porcentaje) / 100;
+/**
+ * Hasta dónde se levanta el pico de la clase al nivelarla.
+ *
+ * 0,7 son unos −3 dBFS. No se va a 1 porque el pico sale de los picos que ya
+ * calculó `engine/waveform.js`, y esos se leen por muestreo —un pedazo por
+ * cubo—, así que el pico de verdad puede ser un poco más alto que el que se ve.
+ * Dejar aire evita que el nivelado solo, sin que nadie toque el deslizador, entre
+ * al limitador.
+ */
+const OBJETIVO = 0.7;
+
+/**
+ * Cuánto se puede levantar una clase. Diez veces son +20 dB.
+ *
+ * El tope existe porque el pico puede venir de una clase casi muda —un archivo
+ * mal grabado, o uno donde lo único que se oye es la sala—, y sin límite el
+ * nivelado convertiría el ruido de fondo en el sonido principal.
+ */
+const NIVELADO_MAXIMO = 10;
+
+/**
+ * Cuánto le falta a esta clase para sonar a un nivel usable.
+ *
+ * **Por qué hace falta.** El material del curso está grabado 18-20 dB por debajo
+ * de lo normal: medido con `loudnorm` sobre el Live-Mix, la clase 1 da −36,0
+ * LUFS y la 13 −34,0, contra los −16 LUFS con los que se publica voz. Con el
+ * archivo tal cual, revisar es pegar la oreja al parlante — y por eso el tope de
+ * 150% no alcanzaba: son +3,5 dB peleando contra un problema de veinte.
+ *
+ * **De dónde sale el número.** Del pico de la clase, que la app ya tiene: los
+ * picos de la onda vienen en escala absoluta (`engine/waveform.js` divide por el
+ * máximo del formato), así que el más alto de todos ES el pico del archivo. No
+ * hay que medir nada aparte. En el curso da ×3,7 para la clase 1 y ×6,2 para la
+ * 13, que es exactamente lo que les falta.
+ *
+ * Se nivela por CLASE y no por bloque a propósito: bloque a bloque, cada corte
+ * cambiaría de volumen y la clase se escucharía como una escalera.
+ *
+ * @param {number[]} picos los de `rev.data.waveform`
+ */
+export function niveladoDe(picos) {
+    const lista = picos || [];
+    let pico = 0;
+    for (const p of lista) if (p > pico) pico = p;
+    // Sin onda —una clase sin Live-Mix— no hay nada que medir y se deja como
+    // viene: inventar una ganancia a ciegas puede reventar un audio que estaba
+    // bien.
+    if (!(pico > 0)) return 1;
+    return Math.min(NIVELADO_MAXIMO, Math.max(1, OBJETIVO / pico));
+}
+
+/**
+ * La ganancia del `GainNode`: el nivelado de la clase por lo que pide el
+ * deslizador. En 100% suena la clase nivelada, que es lo que se quiere oír.
+ */
+export function gananciaDe(porcentaje, nivelado) {
+    return (porcentajeValido(porcentaje) / 100) * (nivelado || 1);
 }
 
 /**
@@ -96,6 +150,9 @@ const estado = {
     // Una vez que el audio salió por el grafo, ya no puede volver a la salida
     // directa: no es un modo que se prenda y se apague, es una puerta de ida.
     porGrafo: false,
+    // Cuánto se levanta esta clase para que se oiga a un nivel usable. Lo pone
+    // `ponerNivelado` al abrirla; en 1 mientras no se sepa.
+    nivelado: 1,
     // El volumen con el que empezó el clic, para saber si el doble clic movió
     // algo (ver `alDoblarElClic`).
     antesDelClic: null,
@@ -114,7 +171,21 @@ function contexto() {
     return estado.ctx;
 }
 
-/** El nodo de un `<video>`, armándolo la primera vez. */
+/**
+ * El nodo de un `<video>`, armándolo la primera vez.
+ *
+ * Después de la ganancia va un limitador, y no es un adorno: nivelando la clase
+ * al pico, un bloque grabado más fuerte que el resto llegaría al techo, y
+ * subiendo el deslizador por arriba del 100% se pasa seguro. Sin él eso cruje.
+ * Con él, lo que se pasa se aplasta y lo que está bajo —el arranque de la clase
+ * 13, catorce dB por debajo del resto de su propia clase— se oye igual.
+ *
+ * Es un compresor con relación alta y rodilla dura, que es la forma que tiene
+ * Web Audio de decir "limitador". El ataque corto agarra las consonantes fuertes
+ * antes de que se recorten; la soltura larga evita que el fondo de sala suba y
+ * baje entre palabra y palabra, que es lo que hace que un audio comprimido
+ * "respire".
+ */
 function nodoDe(video) {
     const ya = estado.nodos.get(video);
     if (ya) return ya;
@@ -123,9 +194,16 @@ function nodoDe(video) {
     try {
         const fuente = ctx.createMediaElementSource(video);
         const ganancia = ctx.createGain();
+        const limite = ctx.createDynamicsCompressor();
+        limite.threshold.value = -3;
+        limite.knee.value = 0;
+        limite.ratio.value = 20;
+        limite.attack.value = 0.003;
+        limite.release.value = 0.25;
         fuente.connect(ganancia);
-        ganancia.connect(ctx.destination);
-        const nodo = { fuente, ganancia };
+        ganancia.connect(limite);
+        limite.connect(ctx.destination);
+        const nodo = { fuente, ganancia, limite };
         estado.nodos.set(video, nodo);
         return nodo;
     } catch {
@@ -159,21 +237,40 @@ export function despertarAudio() {
  */
 export function aplicarVolumen(videos, principal) {
     const porcentaje = estado.porcentaje;
-    if (porcentaje > 100) estado.porGrafo = true;
-
+    // El grafo va siempre, porque nivelar la clase YA es pasar del 100%: el
+    // material está veinte dB abajo y `video.volume` topa en 1. Antes se armaba
+    // solo al subir el deslizador, cuando lo único que se perdía sin él era el
+    // tramo de arriba; ahora, sin grafo, la clase se oiría como venía del
+    // Rodecaster, o sea inaudible.
     for (const video of videos || []) {
         const suena = video === principal;
-        const nodo = estado.porGrafo ? nodoDe(video) : null;
+        const nodo = nodoDe(video);
         if (nodo) {
+            estado.porGrafo = true;
             // Con el grafo puesto, el elemento queda en 1 y todo el nivel lo
             // pone la ganancia: son dos atenuaciones en cadena y multiplicarlas
             // daría un volumen que no es el que dice el número.
             video.volume = 1;
-            nodo.ganancia.gain.value = suena ? gananciaDe(porcentaje) : 0;
+            nodo.ganancia.gain.value = suena ? gananciaDe(porcentaje, estado.nivelado) : 0;
         } else {
+            // Sin Web Audio no hay nivelado posible: el elemento no pasa de 1.
+            // Se oye bajo, que es peor, pero se oye.
             video.volume = suena ? volumenDelElemento(porcentaje) : 0;
         }
     }
+}
+
+/**
+ * El nivelado de la clase que se abrió.
+ *
+ * Lo pone el reproductor con los picos que ya vinieron con la revisión. Va por
+ * clase: cada una se grabó con su propio nivel, y el curso tiene 4,5 dB de
+ * diferencia entre la más fuerte y la más floja.
+ */
+export function ponerNivelado(picos) {
+    estado.nivelado = niveladoDe(picos);
+    pintar();
+    return estado.nivelado;
 }
 
 /**
@@ -189,6 +286,10 @@ export function aplicarVolumen(videos, principal) {
 export function estadoDelAudio(videos) {
     return {
         porcentaje: estado.porcentaje,
+        // Cuánto se levantó esta clase. Va acá porque es lo que explica que dos
+        // clases suenen distinto con el deslizador en el mismo lugar, y sin
+        // asomarlo no hay forma de verificarlo salvo escuchando y opinando.
+        nivelado: estado.nivelado,
         porGrafo: estado.porGrafo,
         ctx: estado.ctx,
         estadoDelCtx: estado.ctx ? estado.ctx.state : null,
@@ -216,9 +317,14 @@ function pintar() {
     // El doble clic va escrito acá porque un gesto que no se ve no existe: es la
     // única pista de que existe, y va en renglón aparte para que el aviso de
     // recorte —que es sobre el sonido— no quede mezclado con una instrucción.
+    // Cuánto se levantó la clase, dicho en dB porque es la unidad en la que se
+    // habla de nivel. No es un detalle de implementación: explica por qué esta
+    // clase se oye distinto de la anterior con el deslizador en el mismo lugar.
+    const dB = Math.round(20 * Math.log10(estado.nivelado));
     $('player-volumen').title = (saturando
         ? `Volumen ${porcentaje}% · arriba del 100% el audio puede recortar`
         : `Volumen ${porcentaje}%`)
+        + (dB > 0 ? `\nEsta clase se grabó baja: va levantada +${dB} dB` : '')
         + '\nDoble clic en el pomo para volver al 100%';
 }
 

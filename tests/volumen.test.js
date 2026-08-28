@@ -65,4 +65,55 @@ module.exports = async t => {
         t.eq(vol.porcentajeValido(127.4), 127);
         t.eq(vol.porcentajeValido(99.6), 100);
     });
+
+    t.group('volumen · el nivelado de la clase');
+
+    /** dB de una ganancia, que es como se habla de nivel. */
+    const dB = g => Math.round(20 * Math.log10(g));
+
+    t.test('levanta la clase hasta dejarle aire bajo el techo', () => {
+        // El curso está grabado 18-20 dB por debajo de lo normal (−36 LUFS la
+        // clase 1, −34 la 13, contra −16 con los que se publica voz), así que sin
+        // esto revisar es pegar la oreja al parlante.
+        t.near(vol.niveladoDe([0.1, 0.24, 0.05]), 0.7 / 0.24, 0.001, 'pico de la clase 1');
+        t.eq(dB(vol.niveladoDe([0.24])), 9);
+        t.eq(dB(vol.niveladoDe([0.14])), 14, 'la 13, más floja, se levanta más');
+    });
+
+    t.test('una clase que ya suena bien no se toca', () => {
+        // Bajarla sería decidir por el editor sobre un audio que estaba bien.
+        t.eq(vol.niveladoDe([0.95]), 1);
+        t.eq(vol.niveladoDe([0.7]), 1, 'justo en el objetivo, tampoco');
+    });
+
+    t.test('una clase casi muda no se levanta sin límite', () => {
+        // El pico puede venir de un archivo mal grabado donde lo único que se oye
+        // es la sala: sin tope, el nivelado convertiría el ruido de fondo en el
+        // sonido principal.
+        t.eq(vol.niveladoDe([0.0001]), 10);
+    });
+
+    t.test('sin onda no se inventa una ganancia', () => {
+        // Una clase sin Live-Mix no tiene picos que mirar, y adivinar puede
+        // reventar un audio que estaba bien.
+        t.eq(vol.niveladoDe(null), 1);
+        t.eq(vol.niveladoDe([]), 1);
+        t.eq(vol.niveladoDe([0, 0, 0]), 1);
+    });
+
+    t.test('el deslizador multiplica al nivelado, no lo reemplaza', () => {
+        // El 100% pasa a ser "esta clase a un nivel usable" y no "el archivo tal
+        // cual": es lo que hace que abrir una clase y oírla no necesite tocar
+        // nada. El deslizador sigue mandando por encima de eso.
+        const n = vol.niveladoDe([0.24]);
+        t.near(vol.gananciaDe(100, n), n, 0.0001);
+        t.near(vol.gananciaDe(150, n), n * 1.5, 0.0001);
+        t.near(vol.gananciaDe(50, n), n * 0.5, 0.0001);
+    });
+
+    t.test('sin nivelado se comporta como antes', () => {
+        // La rama sin Web Audio y las pruebas viejas llaman con un solo argumento.
+        t.eq(vol.gananciaDe(120), 1.2);
+        t.eq(vol.gananciaDe(120, 1), 1.2);
+    });
 };
