@@ -5,11 +5,11 @@
  * Este archivo coordina; lo que dibuja está en `onda`, `bordes` y `guion`.
  */
 
-import { $, showView, toast, anotar } from '../chrome.js';
+import { $, showView, toast, anotar, estaEscribiendo } from '../chrome.js';
 import { esc, fmtClock, fmtDur, plural } from '../formato.js';
 import { state, clases } from '../estado.js';
 import { marcarPaso, PASOS } from '../pasos.js';
-import { rev, actual, alRedibujar, cambio } from './estado.js';
+import { rev, actual, alRedibujar, cambio, editar, deshacer, rehacer, olvidarHistoria } from './estado.js';
 import { renderOverview, renderZoom } from './onda.js';
 import { setEdge, renderEdges, renderDecided, renderTranscript } from './bordes.js';
 import { escucharBorde, pausar as pausarEscucha, renderEscucha, wireEscucha } from './escucha.js';
@@ -85,6 +85,9 @@ export async function openReview(id) {
     rev.zoomWave = null;
     rev.notas = data.notas || { bloques: {}, comentarios: [] };
     rev.pista = null;
+    // Las fotos del historial son de los bloques de la clase anterior: deshacer
+    // con ellas metería los cortes de una clase adentro de otra.
+    olvidarHistoria();
     // Se trabaja sobre una copia: hasta que no se guarda, el plan del disco es el
     // que vale y "Volver a lo calculado" tiene de dónde volver.
     rev.segments = data.cutplan.segments.map(s => ({ ...s, original: { ...s } }));
@@ -392,30 +395,55 @@ export function wireReview(callbacks) {
         const button = e.target.closest('.view-btn');
         const segment = actual();
         if (!button || !segment) return;
-        segment.view = button.dataset.view;
-        rev.dirty = true;
-        cambio();
+        editar(`cambiar la vista del bloque ${segment.blockIndex + 1}`, () => {
+            segment.view = button.dataset.view;
+        });
     });
 
     $('rev-keep').onchange = event => {
-        actual().keep = event.target.checked;
-        rev.dirty = true;
-        cambio();
+        const segment = actual();
+        editar(`${event.target.checked ? 'devolver' : 'sacar'} el bloque ${segment.blockIndex + 1}`, () => {
+            segment.keep = event.target.checked;
+        });
     };
     $('rev-ok').onclick = () => {
         const segment = actual();
-        segment.confidence = 'alta';
-        segment.reviewed = true;
-        rev.dirty = true;
-        if (rev.selected < rev.segments.length - 1) rev.selected++;
-        cambio();
+        editar(`marcar revisado el bloque ${segment.blockIndex + 1}`, () => {
+            segment.confidence = 'alta';
+            segment.reviewed = true;
+            if (rev.selected < rev.segments.length - 1) rev.selected++;
+        });
     };
     $('rev-reset').onclick = () => {
         const segment = actual();
-        rev.segments[rev.selected] = { ...segment.original, original: segment.original };
-        rev.dirty = true;
-        cambio();
+        editar(`volver a lo calculado en el bloque ${segment.blockIndex + 1}`, () => {
+            rev.segments[rev.selected] = { ...segment.original, original: segment.original };
+        });
     };
+
+    // Deshacer y rehacer, con los atajos de siempre. Van en el documento y no en
+    // un elemento porque para recibir teclas hay que tener el foco, y acá lo
+    // tiene lo último que se tocó: un botón de ±1 cuadro, la lista, nada.
+    //
+    // Sirven en las tres pestañas: un corte se puede mover desde la onda y
+    // también saltando desde el guion, así que atar el deshacer a una sola
+    // pantalla obligaría a volver a la que lo hizo para poder arrepentirse.
+    document.addEventListener('keydown', evento => {
+        if (!rev.data || !$('view-review').classList.contains('is-visible')) return;
+        if (!(evento.metaKey || evento.ctrlKey) || evento.key.toLowerCase() !== 'z') return;
+        // Adentro de un campo manda el deshacer del texto, que es el que el
+        // editor está esperando mientras escribe una nota.
+        if (estaEscribiendo(evento.target)) return;
+
+        evento.preventDefault();
+        const que = evento.shiftKey ? rehacer() : deshacer();
+        // Decir QUÉ se deshizo y no solo que algo pasó: con quince bloques en
+        // pantalla, un cambio que se revierte lejos de donde está la vista es
+        // invisible.
+        toast(que
+            ? `${evento.shiftKey ? 'Rehecho' : 'Deshecho'}: ${que}.`
+            : (evento.shiftKey ? 'No hay nada que rehacer.' : 'No hay nada que deshacer.'));
+    });
 
     for (const group of document.querySelectorAll('.nudges')) {
         group.addEventListener('click', e => {

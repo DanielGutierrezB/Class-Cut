@@ -8,7 +8,7 @@
 
 import { $ } from '../chrome.js';
 import { esc, fmtClock } from '../formato.js';
-import { rev, actual, cambio } from './estado.js';
+import { rev, actual, editar } from './estado.js';
 
 const DECIDED_LABEL = {
     nota: 'la nota del CD',
@@ -32,6 +32,12 @@ export function setEdge(edge, seconds) {
     const frame = 1 / (rev.data.fps || 30);
     const value = Math.max(0, Math.min(rev.data.durationSec || seconds, seconds));
 
+    editar(`mover ${edge === 'in' ? 'la entrada' : 'la salida'} del bloque ${segment.blockIndex + 1}`, () => {
+        aplicarBorde(segment, edge, value, frame);
+    });
+}
+
+function aplicarBorde(segment, edge, value, frame) {
     if (edge === 'in') {
         segment.sourceStartSec = Math.min(value, segment.sourceEndSec - frame);
     } else {
@@ -39,8 +45,6 @@ export function setEdge(edge, seconds) {
     }
     segment.sourceStartSec = Math.round(segment.sourceStartSec * 1000) / 1000;
     segment.sourceEndSec = Math.round(segment.sourceEndSec * 1000) / 1000;
-    rev.dirty = true;
-    cambio();
 }
 
 export function renderEdges() {
