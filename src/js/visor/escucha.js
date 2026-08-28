@@ -25,6 +25,7 @@ import { $, toast, estaEscribiendo } from '../chrome.js';
 import { fmtClock } from '../formato.js';
 import { rev, actual } from './estado.js';
 import { zoomWindow } from './onda.js';
+import { seguirTranscript } from './bordes.js';
 
 /**
  * Cuánto antes del borde arranca el "Escuchar" de cada lado.
@@ -230,11 +231,15 @@ function pintar() {
 
     if (!listo || !segmento) {
         $('rev-audio-time').textContent = '—';
+        seguirTranscript(null);
         return;
     }
 
     $('rev-zoom-head').style.left = `${fraccionEn(posicion(), marco) * 100}%`;
     $('rev-audio-time').textContent = reloj(posicion());
+    // El texto de abajo sigue a la aguja, no al play: así también alumbra cuando
+    // se arrastra la tira, que es como se busca un momento sin escuchar todo.
+    seguirTranscript(posicion());
 
     // El bloque marcado sobre la tira: sin esto la tira es una barra gris y no
     // se ve qué parte de lo que suena es el margen que quedó afuera.

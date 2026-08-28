@@ -183,12 +183,15 @@ function renderReview() {
     renderReviewList();
     renderOverview();
     renderZoom();
-    // Después del zoom: la aguja se ubica sobre la ventana que el zoom acaba de
-    // dibujar, y mover un borde corre esa ventana.
-    renderEscucha();
     renderEdges();
     renderDecided();
     renderTranscript();
+    // Último, y detrás del transcript a propósito: ubica la aguja sobre la
+    // ventana que el zoom acaba de dibujar —mover un borde la corre— y de paso
+    // alumbra la palabra que le toca. Antes del transcript alumbraría sobre las
+    // palabras que están por reemplazarse, y con el audio en pausa el resaltado
+    // se perdería hasta que alguien volviera a tocar algo.
+    renderEscucha();
     if (rev.tab === 'guion') renderScript();
     // La tira del reproductor marca qué bloques tienen comentario, así que un
     // comentario nuevo tiene que verse ahí sin salir y volver a entrar.

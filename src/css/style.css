@@ -933,6 +933,19 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 }
 .transcript .seg { color: var(--text-mute); }
 .transcript .seg.inside { color: var(--text); }
+/* La palabra que suena, igual que en el panel del reproductor: mismo gesto en
+   los dos lados de la revisión. El padding lateral va en cero porque acá las
+   palabras se separan con un espacio de texto y no con margen: con relleno, el
+   resaltado se come el espacio y las palabras parecen pegadas. */
+.transcript .seg-palabra {
+    border-radius: 3px;
+    padding: 1px 0;
+    transition: color .1s ease, background .1s ease;
+}
+.transcript .seg-palabra.is-on {
+    color: var(--bg);
+    background: var(--accent);
+}
 .transcript .seg-time {
     font-variant-numeric: tabular-nums;
     font-size: 10.5px;
