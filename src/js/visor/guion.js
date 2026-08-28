@@ -16,7 +16,7 @@ import { $, toast } from '../chrome.js';
 import { esc, plural } from '../formato.js';
 import { rev, cambio } from './estado.js';
 import { notas, guardar, anclaDeSeleccion } from './comentarios.js';
-import { comentariosEn } from './pista.js';
+import { COLORES_DE_CAMARA, comentariosEn } from './pista.js';
 
 const TIPO_LABEL = {
     idea_colgando: 'Idea colgando',
@@ -101,6 +101,17 @@ function comentadasDe(bloque, palabras) {
         });
     }
     return marcas;
+}
+
+/**
+ * Con qué cámara se ve un bloque, para pintarlo con su color.
+ *
+ * Sale de los segmentos del plan y no de `rev.pista`, que solo existe después de
+ * abrir el reproductor: al guion se puede entrar sin haber pasado por ahí.
+ */
+function camaraDe(bloque) {
+    const segmento = (rev.segments || []).find(s => s.blockIndex === bloque.index);
+    return segmento && segmento.cameraIndex != null ? segmento.cameraIndex : 0;
 }
 
 /** Lo que se quitó por decir dos veces lo mismo, indexado por bloque. */
@@ -200,10 +211,24 @@ export function renderScript() {
         // El rótulo es lo único que lleva al corte. Antes lo hacía el bloque
         // entero, y eso peleaba con seleccionar texto: soltar el mouse termina en
         // un clic y se cambiaba de pestaña con la selección hecha.
+        // El color de la izquierda es el de la CÁMARA, el mismo que en la tira del
+        // reproductor, en el panel de texto y en la etiqueta del clip en Premiere:
+        // leyendo de corrido, lo que hay que poder ver sin pensar es dónde está el
+        // profesor de frente y dónde se pasa a la pantalla. La gravedad de lo que
+        // se encontró tenía ese lugar y se corre al punto de al lado del rótulo:
+        // ya la dicen también las fichas de abajo, así que no se pierde nada, y el
+        // color deja de significar dos cosas distintas en el mismo trazo.
+        //
+        // Con la vista escrita al lado, además del color: el color solo no lo
+        // puede leer todo el mundo, y "PV" o "R" no deja lugar a interpretación.
         return `
-        <div class="script-block ${worstLevel ? `has-${worstLevel}` : ''}" data-block="${block.index}">
-            <button class="script-n" data-ir="${block.index}"
-                    title="Ir a este bloque en Cortes">Bloque ${numeroDe(block)}</button>
+        <div class="script-block cam-${camaraDe(block) % COLORES_DE_CAMARA} ${worstLevel ? `has-${worstLevel}` : ''}"
+             data-block="${block.index}">
+            <div class="script-lado">
+                <button class="script-n" data-ir="${block.index}"
+                        title="Ir a este bloque en Cortes">Bloque ${numeroDe(block)}</button>
+                <span class="badge ${block.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(block.view || '—')}</span>
+            </div>
             <div>
                 ${block.note ? `<div class="script-note">${esc(block.note)}</div>` : ''}
                 <div class="script-text">${texto}</div>

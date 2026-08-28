@@ -1008,19 +1008,37 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 
 .script-body { max-width: 78ch; margin: 0 auto; display: grid; gap: 14px; }
 
+/* El borde de la izquierda es el color de la CÁMARA (`--cam`, de `.cam-N`, la
+   misma clase que la tira del reproductor y el panel de texto): leyendo de
+   corrido, lo que hay que ver sin pensar es dónde habla el profesor de frente y
+   dónde se pasa a la pantalla. La gravedad vive ahora en el punto de al lado del
+   rótulo, porque un mismo trazo no puede significar dos cosas. */
 .script-block {
     display: grid;
-    grid-template-columns: 72px 1fr;
+    grid-template-columns: 96px 1fr;
     gap: 12px;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
-    border-left: 2px solid var(--surface-3);
+    border-left: 2px solid var(--cam, var(--surface-3));
     background: var(--surface);
 }
 .script-block:hover { background: var(--surface-2); }
-.script-block.has-alta { border-left-color: var(--err); }
-.script-block.has-media { border-left-color: var(--warn); }
-.script-block.has-baja { border-left-color: var(--accent-dim); }
+.script-lado { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+/* El punto de gravedad: solo aparece si quedó algo pendiente en ese bloque. */
+.script-block.has-alta .script-n::before,
+.script-block.has-media .script-n::before,
+.script-block.has-baja .script-n::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: 1px;
+}
+.script-block.has-alta .script-n::before { background: var(--err); }
+.script-block.has-media .script-n::before { background: var(--warn); }
+.script-block.has-baja .script-n::before { background: var(--accent-dim); }
 /* Es lo único clicable del bloque: el resto es texto para leer y seleccionar. */
 .script-n {
     font-variant-numeric: tabular-nums;
