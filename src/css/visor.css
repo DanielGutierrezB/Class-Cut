@@ -34,6 +34,9 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
+    /* Para que la caja de comentar una frase se ubique contra esta columna: el
+       panel de la onda no sirve de referencia porque recorta lo que se sale. */
+    position: relative;
 }
 
 /* El reparto entre imagen y texto: la zona de agarre es ancha para no tener que
@@ -210,6 +213,51 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
     border-color: var(--accent);
     color: var(--bg);
 }
+
+/* Una frase con comentario, en el mismo ámbar con el que se marca en el guion y
+   con el que sale como marcador en el XML. Va como borde y no como fondo para no
+   pelear con el resaltado de la que suena, que puede ser la misma. */
+.onda-frase.es-comentada {
+    border-color: var(--warn);
+    box-shadow: inset 0 -2px 0 var(--warn);
+}
+
+/* La caja de comentar. Cuelga de la columna del video y no del panel de la onda,
+   que recorta lo que se sale; va apoyada sobre la fila de subtítulos, y la
+   posición horizontal la pone el JS contra la frase que se clickeó. */
+.onda-comentario {
+    position: absolute;
+    bottom: calc(var(--frases, 32px) + 8px);
+    z-index: 5;
+    width: 300px;
+    padding: 9px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--warn);
+    background: var(--surface-2);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+    font-size: 12px;
+}
+.onda-comentario-cita {
+    color: var(--text-mute);
+    font-style: italic;
+    margin-bottom: 6px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.onda-comentario-campo {
+    width: 100%;
+    resize: vertical;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font: inherit;
+}
+.onda-comentario-acciones { display: flex; gap: 6px; margin-top: 7px; }
 /* El bloque la corta: el borde punteado del lado por donde se la comió. Sin
    esto, una frase a medias se lee como una frase corta. */
 .onda-frase.es-cortada-antes { border-left-style: dashed; border-top-left-radius: 0; border-bottom-left-radius: 0; }

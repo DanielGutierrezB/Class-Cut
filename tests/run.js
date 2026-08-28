@@ -35,6 +35,7 @@ const FILES = [
     'volumen.test.js',
     'escucha.test.js',
     'estilos.test.js',
+    'modulos.test.js',
     'notas.test.js',
     'regenerar.test.js',
     'silencios.test.js',

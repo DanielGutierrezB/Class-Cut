@@ -36,8 +36,10 @@
  * el por qué está en `aplicarMostrar`.
  */
 
-import { $ } from '../chrome.js';
+import { $, toast } from '../chrome.js';
 import { rev } from './estado.js';
+// Con otro nombre: acá ya hay un `guardar`, el que recuerda el interruptor.
+import { notas, guardar as guardarNotas } from './comentarios.js';
 import { medidaDelCanvas } from './onda.js';
 import { porColumna, recortarPicos, techoDePicos } from './picos.js';
 import { frasesEn } from './pista.js';
@@ -233,19 +235,137 @@ function pintarLasFrases() {
     if (!estado.tramo) return;
 
     estado.frases.forEach((frase, i) => {
+        const yaComentada = comentarioDe(frase);
         const clip = document.createElement('button');
         clip.className = 'onda-frase'
             + (frase.cortadaAlEntrar ? ' es-cortada-antes' : '')
-            + (frase.cortadaAlSalir ? ' es-cortada-despues' : '');
+            + (frase.cortadaAlSalir ? ' es-cortada-despues' : '')
+            + (yaComentada ? ' es-comentada' : '');
         clip.dataset.frase = String(i);
         clip.style.left = `${frase.fraccionDesde * 100}%`;
         clip.style.width = `${Math.max(0, frase.fraccionHasta - frase.fraccionDesde) * 100}%`;
         clip.textContent = frase.texto;
-        clip.title = (frase.cortadaAlEntrar || frase.cortadaAlSalir)
-            ? `${frase.texto}\n\n(el bloque la corta: se oye solo el pedazo que se ve)`
-            : frase.texto;
+        const aclaracion = (frase.cortadaAlEntrar || frase.cortadaAlSalir)
+            ? '\n\n(el bloque la corta: se oye solo el pedazo que se ve)' : '';
+        clip.title = `${frase.texto}${aclaracion}\n\n`
+            + (yaComentada ? `Comentado: ${yaComentada.comentario}` : 'Clic derecho para comentar');
         caja.appendChild(clip);
     });
+}
+
+/* ─── Comentar una frase ────────────────────────────────────────────────── */
+
+/**
+ * El comentario que ya cubre a una frase, si hay.
+ *
+ * Se busca por el ARRANQUE, que es donde queda anclado el comentario: dos frases
+ * seguidas no comparten arranque, así que no hay forma de que una se lleve el
+ * comentario de la de al lado.
+ */
+function comentarioDe(frase) {
+    return ((notas().comentarios) || []).find(c =>
+        c.sourceStartSec >= frase.origenDesdeSec - 0.01
+        && c.sourceStartSec < frase.origenHastaSec) || null;
+}
+
+/**
+ * Comentar la frase con el botón derecho.
+ *
+ * Es el mismo comentario que se escribe seleccionando texto en el panel de al
+ * lado o en el guion —mismo almacén, mismo ancla al tiempo de la grabación, mismo
+ * marcador en el XML—, solo que acá la selección ya está hecha: la frase ES el
+ * tramo. Mirando la clase, que es cuando se nota que algo sobra, esto ahorra
+ * tener que ir a buscar ese mismo texto al panel para poder marcarlo.
+ *
+ * Con el derecho y no con el izquierdo porque el izquierdo ya tiene trabajo:
+ * lleva la reproducción ahí, que es el gesto que se pide solo al ver los clips.
+ */
+function abrirComentario(indice, cerca) {
+    const frase = estado.frases[indice];
+    if (!frase) return;
+    cerrarComentario();
+
+    const existente = comentarioDe(frase);
+    const caja = document.createElement('div');
+    caja.className = 'onda-comentario';
+    caja.id = 'onda-comentario';
+
+    const cita = document.createElement('div');
+    cita.className = 'onda-comentario-cita';
+    cita.textContent = frase.texto;
+
+    const campo = document.createElement('textarea');
+    campo.className = 'onda-comentario-campo';
+    campo.rows = 2;
+    campo.placeholder = 'Tu comentario para el editor…';
+    campo.value = existente ? existente.comentario : '';
+
+    const acciones = document.createElement('div');
+    acciones.className = 'onda-comentario-acciones';
+    const ok = document.createElement('button');
+    ok.className = 'btn btn-primary btn-inline';
+    ok.textContent = existente ? 'Guardar' : 'Comentar';
+    ok.onclick = () => confirmar(frase, existente, campo.value);
+    acciones.append(ok);
+    if (existente) {
+        const borrar = document.createElement('button');
+        borrar.className = 'btn btn-ghost btn-inline';
+        borrar.textContent = 'Borrar';
+        borrar.onclick = () => quitar(existente);
+        acciones.append(borrar);
+    }
+    const no = document.createElement('button');
+    no.className = 'btn btn-ghost btn-inline';
+    no.textContent = 'Cancelar';
+    no.onclick = cerrarComentario;
+    acciones.append(no);
+
+    caja.append(cita, campo, acciones);
+    // Cuelga de la columna y no del panel de la onda: ese recorta lo que se sale
+    // (`overflow: hidden`, que es lo que mantiene la onda adentro del cuadro), y
+    // la caja va justo por ARRIBA de los clips, o sea afuera.
+    const columna = $('player-onda').parentElement;
+    columna.appendChild(caja);
+    // Centrada en la frase y sin salirse de la columna: puesta en el puntero a
+    // secas, una frase del final abre la caja medio afuera de la ventana.
+    const marco = columna.getBoundingClientRect();
+    const ancho = caja.offsetWidth;
+    caja.style.left = `${Math.max(4, Math.min(marco.width - ancho - 4, cerca - marco.left - ancho / 2))}px`;
+    campo.focus();
+}
+
+function cerrarComentario() {
+    const caja = document.getElementById('onda-comentario');
+    if (caja) caja.remove();
+}
+
+async function confirmar(frase, existente, texto) {
+    const limpio = String(texto || '').trim();
+    if (!limpio) { toast('El comentario está vacío.'); return; }
+
+    if (existente) {
+        existente.comentario = limpio;
+    } else {
+        // Sin id: lo acuña `engine/notas.js` al guardar, que es el único que los
+        // reparte.
+        notas().comentarios.push({
+            sourceStartSec: frase.origenDesdeSec,
+            sourceEndSec: frase.origenHastaSec,
+            texto: frase.texto,
+            comentario: limpio
+        });
+    }
+    cerrarComentario();
+    if (await guardarNotas()) {
+        pintarLasFrases();
+        toast('Comentario guardado. Va a salir como marcador en el XML.');
+    }
+}
+
+async function quitar(comentario) {
+    notas().comentarios = notas().comentarios.filter(c => c.id !== comentario.id);
+    cerrarComentario();
+    if (await guardarNotas()) pintarLasFrases();
 }
 
 /**
@@ -431,6 +551,24 @@ export function wireOndas(alSaltar) {
         if (!clip || !estado.alSaltar) return;
         const frase = estado.frases[Number(clip.dataset.frase)];
         if (frase) estado.alSaltar(frase.desdeSec);
+    });
+
+    $('onda-frases').addEventListener('contextmenu', evento => {
+        const clip = evento.target.closest('.onda-frase');
+        if (!clip) return;
+        // Sin esto sale el menú del sistema encima de la caja recién abierta.
+        evento.preventDefault();
+        abrirComentario(Number(clip.dataset.frase), evento.clientX);
+    });
+
+    // Fuera de la caja se cierra, como cualquier cosa que se abre sobre lo demás.
+    // Con `Escape` también, que es lo que la mano hace primero.
+    document.addEventListener('pointerdown', evento => {
+        const caja = document.getElementById('onda-comentario');
+        if (caja && !caja.contains(evento.target)) cerrarComentario();
+    });
+    document.addEventListener('keydown', evento => {
+        if (evento.key === 'Escape') cerrarComentario();
     });
 
     // Clic en la onda: la aguja va ahí. Es la misma cuenta que la tira de
