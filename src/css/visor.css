@@ -424,3 +424,82 @@ body.esta-repartiendo iframe, body.esta-repartiendo video { pointer-events: none
    de la ventana descarta sin avisar. */
 .btn-corner { float: right; margin-top: -4px; }
 .crash { padding: 24px; color: var(--err); white-space: pre-wrap; }
+
+/* ── Comentar sobre el guion, con las notas al margen ──────────── */
+
+/* El texto conserva su ancho de lectura y el margen va al lado, no encima: una
+   tarjeta flotando sobre el párrafo tapa justamente lo que se está comentando.
+   `align-items: start` para que la columna del margen no se estire y las
+   tarjetas puedan ubicarse contra su cita. */
+.script-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 78ch) 300px;
+    justify-content: center;
+    gap: 24px;
+    align-items: start;
+}
+.script-margen { position: relative; min-height: 1px; }
+
+/* Cada palabra es su propio blanco para poder seleccionar de a pedazos. El
+   relleno lateral va en cero porque las palabras se separan con un espacio de
+   texto: con relleno, el resaltado se lo come y se leen pegadas. */
+.script-palabra { border-radius: 3px; padding: 1px 0; }
+.script-palabra.is-comentado {
+    background: rgba(240, 180, 41, .16);
+    box-shadow: 0 1px 0 var(--warn);
+    cursor: pointer;
+}
+.script-palabra.is-comentado.is-activo { background: rgba(240, 180, 41, .34); }
+
+/* Ubicadas por JS contra su cita (`acomodarMargen`), así que la posición sale
+   de arriba y el ancho de la columna. */
+.script-com {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 9px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--warn);
+    background: var(--surface-2);
+    font-size: 12px;
+    transition: border-color .12s ease, transform .12s ease;
+}
+.script-com.is-activo {
+    border-color: var(--warn);
+    transform: translateX(-4px);
+}
+/* El que se está escribiendo va al final del margen y no anclado: todavía no
+   tiene id, así que no hay a qué cita pegarlo. */
+.script-com.is-nuevo { position: static; margin-top: 8px; }
+
+.script-com-cita {
+    color: var(--text-mute);
+    font-style: italic;
+    margin-bottom: 5px;
+    /* Dos renglones y corta: la cita está para reconocer de qué se hablaba, no
+       para volver a leer el párrafo. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.script-com-texto { color: var(--text); white-space: pre-wrap; }
+.script-com-acciones { display: flex; gap: 6px; margin-top: 7px; }
+.script-com-campo {
+    width: 100%;
+    resize: vertical;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font: inherit;
+}
+
+/* Angosta, el margen no entra al lado y las tarjetas van debajo del texto. */
+@media (max-width: 1150px) {
+    .script-cols { grid-template-columns: minmax(0, 1fr); }
+    .script-margen { position: static; display: grid; gap: 8px; }
+    .script-com { position: static; }
+}

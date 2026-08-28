@@ -38,6 +38,7 @@ const FILES = [
     'silencios.test.js',
     'retimeo.test.js',
     'reloj.test.js',
+    'guion.test.js',
     'repeticiones.test.js',
     'retoma.test.js',
     'repasar.test.js',

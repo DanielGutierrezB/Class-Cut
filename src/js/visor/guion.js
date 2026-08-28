@@ -1,9 +1,22 @@
 'use strict';
-/** La clase cortada leída de corrido, con lo que la revisión encontró. */
+/**
+ * La clase cortada leída de corrido, con lo que la revisión encontró.
+ *
+ * Y se puede comentar encima, seleccionando: leer de corrido es cuando se ven
+ * las cosas que bloque por bloque no se notan, así que es justo acá donde dan
+ * ganas de anotar algo. Los comentarios son los MISMOS que los del panel de al
+ * lado del video —mismo almacén, mismo ancla al tiempo de la grabación, mismo
+ * marcador en el XML—, así que da igual desde dónde se escriban.
+ *
+ * Van al margen, como en un documento compartido, y no intercalados en el texto:
+ * intercalados parten la lectura, que es lo único que esta pestaña hace bien.
+ */
 
-import { $ } from '../chrome.js';
+import { $, toast } from '../chrome.js';
 import { esc, plural } from '../formato.js';
 import { rev, cambio } from './estado.js';
+import { notas, guardar, anclaDeSeleccion } from './comentarios.js';
+import { comentariosEn } from './pista.js';
 
 const TIPO_LABEL = {
     idea_colgando: 'Idea colgando',
@@ -24,6 +37,31 @@ const TIPO_ARREGLADO = {
     orden: 'Orden que no fluye',
     otro: 'Para mirar'
 };
+
+/**
+ * Las palabras de un bloque, con sus tiempos de grabación.
+ *
+ * El guion guardado trae el texto ya armado, pero un texto no se puede anclar:
+ * para que un comentario sobreviva a que se mueva un borde hace falta saber en
+ * qué segundo de la grabación cae cada palabra. Son las mismas con las que se
+ * armó ese texto (`speech.textInside` sobre el mismo tramo), así que lo que se
+ * lee no cambia.
+ */
+function palabrasDe(bloque) {
+    return (rev.data.words || [])
+        .filter(p => p.start >= bloque.startSec && p.start < bloque.endSec);
+}
+
+/** Qué palabras de un bloque están abarcadas por un comentario, por su id. */
+function comentadasDe(bloque, palabras) {
+    const marcas = new Map();
+    for (const c of comentariosEn(bloque.startSec, bloque.endSec, notas().comentarios)) {
+        palabras.forEach((p, i) => {
+            if (p.start >= c.sourceStartSec && p.start <= c.sourceEndSec) marcas.set(i, c.id);
+        });
+    }
+    return marcas;
+}
 
 /** Lo que se quitó por decir dos veces lo mismo, indexado por bloque. */
 function arreglosPorBloque() {
@@ -96,12 +134,26 @@ export function renderScript() {
                 <div class="finding-fix">${esc(arreglo.texto.slice(0, 160))}…</div>
             </div>` : '';
 
+        // Palabra por palabra para poder seleccionar y comentar. Un guion viejo,
+        // servido sin tiempos por palabra, cae en el texto corrido: se lee igual,
+        // solo que no se puede anclar nada encima.
+        const palabras = palabrasDe(block);
+        const comentadas = comentadasDe(block, palabras);
+        const texto = palabras.length
+            ? palabras.map((p, i) => {
+                const id = comentadas.get(i);
+                return `<span class="script-palabra${id ? ' is-comentado' : ''}"` +
+                    `${id ? ` data-com="${esc(id)}"` : ''} data-b="${block.index}" data-p="${i}"` +
+                    `>${esc(p.text)}</span>`;
+            }).join(' ')
+            : (esc(block.text) || '<span class="cell-dim">(sin habla)</span>');
+
         return `
         <div class="script-block ${worstLevel ? `has-${worstLevel}` : ''}" data-block="${block.index}">
             <div class="script-n">${block.n}</div>
             <div>
                 ${block.note ? `<div class="script-note">${esc(block.note)}</div>` : ''}
-                <div class="script-text">${esc(block.text) || '<span class="cell-dim">(sin habla)</span>'}</div>
+                <div class="script-text">${texto}</div>
                 ${quitado}
                 ${notes}
             </div>
@@ -131,7 +183,183 @@ export function renderScript() {
             <p class="script-sub">Después de arreglar se volvió a leer la clase entera: lo que figura como
                pendiente es lo que sigue sin cerrar en el corte que quedó.</p>` : ''}
         </div>
-        <div class="script-body">${body}</div>`;
+        <div class="script-cols">
+            <div class="script-body">${body}</div>
+            <div class="script-margen" id="script-margen"></div>
+        </div>`;
+
+    pintarMargen();
+}
+
+/* ─── Los comentarios, al margen ────────────────────────────────────────── */
+
+/** Cuánto se separan dos tarjetas que quieren el mismo alto. */
+const AIRE_ENTRE_TARJETAS = 8;
+
+function tarjetaDe(comentario) {
+    const caja = document.createElement('div');
+    caja.className = 'script-com';
+    caja.dataset.com = comentario.id;
+
+    const cita = document.createElement('div');
+    cita.className = 'script-com-cita';
+    cita.textContent = comentario.texto;
+
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'script-com-texto';
+    cuerpo.textContent = comentario.comentario;
+
+    const acciones = document.createElement('div');
+    acciones.className = 'script-com-acciones';
+    const borrar = document.createElement('button');
+    borrar.className = 'btn btn-ghost btn-inline';
+    borrar.textContent = 'Borrar';
+    borrar.dataset.borrar = comentario.id;
+    acciones.append(borrar);
+
+    caja.append(cita, cuerpo, acciones);
+    return caja;
+}
+
+/**
+ * Pone cada tarjeta a la altura de lo que comenta, y las que chocan más abajo.
+ *
+ * Sin el empujón, dos comentarios sobre frases vecinas se dibujan uno encima del
+ * otro y el de arriba queda ilegible. Empujar hacia abajo y no repartir a los
+ * dos lados mantiene el orden de lectura: la tarjeta nunca aparece antes que su
+ * cita.
+ */
+export function acomodarMargen(alturas, pedidos) {
+    const salida = [];
+    let piso = 0;
+    for (let i = 0; i < pedidos.length; i++) {
+        const arriba = Math.max(pedidos[i], piso);
+        salida.push(arriba);
+        piso = arriba + alturas[i] + AIRE_ENTRE_TARJETAS;
+    }
+    return salida;
+}
+
+function pintarMargen() {
+    const margen = $('script-margen');
+    if (!margen) return;
+    margen.textContent = '';
+
+    // En el orden en que aparecen en la clase, que es el orden en que se leen.
+    const conAncla = [];
+    for (const comentario of notas().comentarios) {
+        const cita = $('rev-script').querySelector(`.script-palabra[data-com="${comentario.id}"]`);
+        if (cita) conAncla.push({ comentario, cita });
+    }
+    conAncla.sort((a, b) => a.cita.offsetTop - b.cita.offsetTop);
+
+    const tarjetas = conAncla.map(({ comentario }) => {
+        const tarjeta = tarjetaDe(comentario);
+        margen.append(tarjeta);
+        return tarjeta;
+    });
+
+    // Medir después de estar todas en el DOM: una tarjeta sin dibujar mide cero
+    // y todas se apilarían en el mismo alto.
+    const base = margen.getBoundingClientRect().top;
+    const pedidos = conAncla.map(({ cita }) => cita.getBoundingClientRect().top - base);
+    const alturas = tarjetas.map(t => t.offsetHeight);
+    acomodarMargen(alturas, pedidos).forEach((arriba, i) => {
+        tarjetas[i].style.top = `${Math.max(0, arriba)}px`;
+    });
+}
+
+/** Enciende una cita y su tarjeta a la vez, que es lo que las relaciona. */
+function resaltar(id) {
+    const raiz = $('rev-script');
+    for (const el of raiz.querySelectorAll('.is-activo')) el.classList.remove('is-activo');
+    if (!id) return;
+    for (const el of raiz.querySelectorAll(`[data-com="${id}"]`)) el.classList.add('is-activo');
+}
+
+/* ─── Comentar ──────────────────────────────────────────────────────────── */
+
+let seleccionViva = null;
+
+/** Qué palabras del guion abarca lo que quedó seleccionado. */
+export function palabrasSeleccionadas(spans, bloqueDe) {
+    if (!spans.length) return null;
+    // Una selección que cruza bloques no tiene un ancla claro: se queda con la
+    // del primero, que es lo que el editor estaba mirando.
+    const bloque = spans[0].dataset.b;
+    const delMismo = spans.filter(s => s.dataset.b === bloque);
+    const palabras = bloqueDe(Number(bloque));
+    if (!palabras) return null;
+    return delMismo
+        .map(s => palabras[Number(s.dataset.p)])
+        .filter(Boolean);
+}
+
+function bloqueDe(indice) {
+    const coherence = rev.data.coherence;
+    const bloque = ((coherence && coherence.blocks) || []).find(b => b.index === indice);
+    return bloque ? palabrasDe(bloque) : null;
+}
+
+function abrirCaja(ancla) {
+    cerrarCaja();
+    seleccionViva = ancla;
+
+    const caja = document.createElement('div');
+    caja.className = 'script-com is-nuevo';
+    caja.id = 'script-com-nuevo';
+
+    const cita = document.createElement('div');
+    cita.className = 'script-com-cita';
+    cita.textContent = ancla.texto;
+
+    const campo = document.createElement('textarea');
+    campo.className = 'script-com-campo';
+    campo.rows = 3;
+    campo.placeholder = 'Tu comentario para el editor…';
+
+    const acciones = document.createElement('div');
+    acciones.className = 'script-com-acciones';
+    const ok = document.createElement('button');
+    ok.className = 'btn btn-primary btn-inline';
+    ok.textContent = 'Comentar';
+    ok.onclick = () => confirmar(campo.value);
+    const no = document.createElement('button');
+    no.className = 'btn btn-ghost btn-inline';
+    no.textContent = 'Cancelar';
+    no.onclick = cerrarCaja;
+    acciones.append(ok, no);
+
+    caja.append(cita, campo, acciones);
+    $('script-margen').append(caja);
+    campo.focus();
+}
+
+function cerrarCaja() {
+    const caja = document.getElementById('script-com-nuevo');
+    if (caja) caja.remove();
+    seleccionViva = null;
+}
+
+async function confirmar(texto) {
+    const limpio = String(texto || '').trim();
+    if (!limpio) { toast('El comentario está vacío.'); return; }
+    if (!seleccionViva) return;
+
+    // Sin id: lo acuña `engine/notas.js` al guardar, que es el único que los
+    // reparte. La respuesta vuelve con todo asignado y de ahí se repinta.
+    notas().comentarios.push({ ...seleccionViva, comentario: limpio });
+    cerrarCaja();
+    window.getSelection().removeAllRanges();
+    if (await guardar()) {
+        renderScript();
+        toast('Comentario guardado. Va a salir como marcador en el XML.');
+    }
+}
+
+async function borrar(id) {
+    notas().comentarios = notas().comentarios.filter(c => c.id !== id);
+    if (await guardar()) renderScript();
 }
 
 /**
@@ -141,7 +369,23 @@ export function renderScript() {
  * @param {(tab:string) => void} irALaPestaña
  */
 export function wireGuion(irALaPestaña) {
-    $('rev-script').addEventListener('click', e => {
+    const raiz = $('rev-script');
+
+    raiz.addEventListener('click', e => {
+        const borrarBtn = e.target.closest('[data-borrar]');
+        if (borrarBtn) { borrar(borrarBtn.dataset.borrar); return; }
+
+        // Pararse en un comentario, desde cualquiera de sus dos puntas.
+        const marcado = e.target.closest('[data-com]');
+        if (marcado) { resaltar(marcado.dataset.com); return; }
+
+        // El margen es para leer y escribir, no para navegar.
+        if (e.target.closest('.script-margen')) return;
+
+        // Seleccionar texto termina en un clic, y saltar de pestaña en medio de
+        // eso se lleva puesta la selección justo cuando se iba a comentar.
+        if (!window.getSelection().isCollapsed) return;
+
         const el = e.target.closest('.script-block');
         if (!el) return;
         const position = rev.segments.findIndex(s => s.blockIndex === Number(el.dataset.block));
@@ -149,5 +393,26 @@ export function wireGuion(irALaPestaña) {
         rev.selected = position;
         irALaPestaña('cortes');
         cambio();
+    });
+
+    // Pasar por encima de una cita enciende su tarjeta, y al revés: es lo que
+    // dice cuál comenta a cuál sin tener que hacer clic.
+    raiz.addEventListener('mouseover', e => {
+        const marcado = e.target.closest('[data-com]');
+        if (marcado) resaltar(marcado.dataset.com);
+    });
+
+    raiz.addEventListener('mouseup', () => {
+        // En el siguiente turno: durante `mouseup` el navegador todavía no
+        // terminó de fijar la selección.
+        setTimeout(() => {
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+            const rango = sel.getRangeAt(0);
+            const spans = [...raiz.querySelectorAll('.script-palabra')]
+                .filter(span => rango.intersectsNode(span));
+            const ancla = anclaDeSeleccion(palabrasSeleccionadas(spans, bloqueDe));
+            if (ancla) abrirCaja(ancla);
+        }, 0);
     });
 }

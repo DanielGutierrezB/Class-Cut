@@ -14,7 +14,8 @@
  */
 
 import { $, toast } from '../chrome.js';
-import { rev, cambio } from './estado.js';
+import { rev } from './estado.js';
+import { notas, guardar } from './comentarios.js';
 import { repartir, palabraEn, anclaDe } from './letra.js';
 import { COLORES_DE_CAMARA, comentariosEn } from './pista.js';
 
@@ -30,14 +31,6 @@ const estado = {
     alSaltar: null,
     notaPendiente: null
 };
-
-/** Las notas de la clase, siempre con la forma que espera el resto. */
-function notas() {
-    if (!rev.notas) rev.notas = { bloques: {}, comentarios: [] };
-    if (!rev.notas.bloques) rev.notas.bloques = {};
-    if (!rev.notas.comentarios) rev.notas.comentarios = [];
-    return rev.notas;
-}
 
 function tramoDe(bloque) {
     return (rev.pista ? rev.pista.tramos : []).find(x => x.indice === bloque.indice) || null;
@@ -59,20 +52,6 @@ function comentariosDe(bloque) {
     const tramo = tramoDe(bloque);
     if (!tramo) return [];
     return comentariosEn(tramo.origenDesdeSec, tramo.origenHastaSec, notas().comentarios);
-}
-
-async function guardar() {
-    const respuesta = await window.cc.saveNotas({
-        id: rev.id,
-        bloques: notas().bloques,
-        comentarios: notas().comentarios
-    });
-    if (!respuesta.ok) { toast(respuesta.error); return false; }
-    rev.notas = respuesta.notas;
-    // La tira del reproductor y la lista de bloques marcan cuáles tienen
-    // comentario: sin avisar, el aviso recién aparecería al volver a entrar.
-    cambio();
-    return true;
 }
 
 /* ─── Dibujo ────────────────────────────────────────────────────────────── */
