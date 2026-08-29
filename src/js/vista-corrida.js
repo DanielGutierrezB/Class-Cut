@@ -16,6 +16,7 @@ const STAGE_LABEL = {
     reusar: 'Recuperando el trabajo ya hecho',
     transcribir: 'Transcribiendo el Live-Mix',
     alinear: 'Alineando los marcadores',
+    releer: 'Volviendo a oír los arranques sin texto',
     afinar: 'Afinando los cortes dudosos',
     despegar: 'Quitando lo que se dice dos veces',
     revisar: 'Leyendo la clase entera',

@@ -237,7 +237,7 @@ module.exports = async t => {
     t.test('las etapas anteriores cuentan enteras', () => {
         const enRevisar = progreso.fraccionDeClase({ etapa: 'revisar', percent: 0, transcribe: true });
         const w = progreso.pesos(true);
-        t.near(enRevisar, w.reusar + w.transcribir + w.alinear + w.afinar + w.despegar, 1e-9);
+        t.near(enRevisar, w.reusar + w.transcribir + w.alinear + w.releer + w.afinar + w.despegar, 1e-9);
     });
 
     t.test('una etapa que no corrió se da por cumplida al pasarla', () => {
@@ -286,7 +286,7 @@ module.exports = async t => {
             etapa: 'afinar', transcribe: true, esperadoClaseMs: 185000,
             percent: 40, msDesdeAviso: 99999999
         });
-        t.ok(tope < w.reusar + w.transcribir + w.alinear + w.afinar);
+        t.ok(tope < w.reusar + w.transcribir + w.alinear + w.releer + w.afinar);
     });
 
     t.test('una etapa desconocida no rompe la barra', () => {

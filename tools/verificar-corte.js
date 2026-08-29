@@ -39,6 +39,7 @@ const { spawnSync } = require('child_process');
 const paths = require('../engine/paths');
 const workspace = require('../engine/workspace');
 const transcribe = require('../engine/transcribe');
+const reloj = require('../engine/reloj');
 const coherence = require('../engine/coherence');
 const edges = require('../engine/speech-edges');
 // Reconocer la claqueta lo hace el motor, que la busca en el audio para
@@ -405,7 +406,16 @@ function preparar(root, sequenceName, wavPath) {
         throw new Error(`A ${sequenceName} le falta cutplan, align o transcript en el Backup.`);
     }
 
-    const words = transcript.words || [];
+    // Con el reloj CON EL QUE SE DECIDIÓ el plan, que el plan trae anotado. Es el
+    // mismo cuidado que ya toma `medir-cortes.js` y acá faltaba: lo esperado de
+    // cada bloque son las palabras que caen adentro, así que leer un plan del DTW
+    // con los tiempos crudos del transcript inventa diferencias que no existen.
+    // En el bloque 1 de la clase 13 informaba «SOBRA: una gran ventaja» sobre un
+    // render que decía exactamente lo que el plan describe: esas tres palabras
+    // figuran con `start` 121,41 —nueve segundos antes del IN— y su DTW las pone
+    // en 130,68, adentro.
+    const words = reloj.paraDecidir(transcript.words || [],
+        align.reloj === 'dtw' ? 'auto' : 'crudo').palabras;
     const guion = coherence.buildScript(align.blocks, words);
     const dentro = plan.segments.filter(s => s.keep);
 

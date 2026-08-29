@@ -24,6 +24,7 @@ const cutRefine = require('./cut-refine');
 const repeticiones = require('./repeticiones');
 const retoma = require('./retoma');
 const aire = require('./aire');
+const rescate = require('./rescate');
 const mapaDeVoz = require('./voz');
 const coherence = require('./coherence');
 const repasar = require('./repasar');
@@ -43,15 +44,18 @@ const repasar = require('./repasar');
  *   reloj    `auto` (por defecto) | `crudo`, para el A/B de `tools/medir-repaso.js`
  *   wav      {file, info} del Live-Mix, o null si no hay
  *   voz      mapa de voz de la clase (`engine/voz.js`); si no viene, se calcula
+ *   language idioma del transcript, para releer un pedazo suelto (`engine/rescate.js`)
+ *   rescate  `no` para no releer nada; ver `releerArranques`
  *   ai       cliente del modelo local, o null para cortar solo con reglas
  *   signal   AbortSignal
  *   onStage  (etapa, {percent}) para el progreso
- * @returns {Promise<{alignResult, review, warnings, palabras, reloj, voz}>}
+ * @returns {Promise<{alignResult, review, warnings, palabras, crudas, rescate, reloj, voz}>}
  */
 async function decidirCortes(params) {
     const { cls, wav, ai, signal } = params;
-    const puesto = relojes.paraDecidir(params.words, params.reloj || 'auto');
-    const words = puesto.palabras;
+    let crudas = params.words || [];
+    let puesto = relojes.paraDecidir(crudas, params.reloj || 'auto');
+    let words = puesto.palabras;
     const notify = (stage, info) => { if (params.onStage) params.onStage(stage, info || {}); };
     const options = { fps: cls.fps || 30, ...(params.options || {}) };
     const warnings = [];
@@ -72,42 +76,16 @@ async function decidirCortes(params) {
         });
     }
 
-    notify('alinear', {});
-    const alignResult = align.alignClass({
-        blocks: cls.blocks || [],
-        words,
-        wav,
-        classNumber: cls.classNumber,
-        clapMarkerSec: cls.clapSec,
-        durationSec: cls.durationSec,
-        options
-    });
-    // Con qué reloj se decidió queda escrito en el plan, y no es un dato de
-    // curiosidad: `tools/medir-cortes.js` cuenta los defectos mirando qué palabras
-    // caen dentro de cada bloque, así que leer un plan del DTW con los tiempos
-    // crudos del transcript inventa defectos que no existen — 26 bloques
-    // "terminando en habla del director" contra los 0 que tenía. Un plan sin este
-    // campo es de antes y se lee con el reloj crudo, que es con el que se hizo.
-    alignResult.reloj = puesto.como;
-    warnings.push(...alignResult.warnings);
-
-    // Sin transcript no hay nada que afinar ni que leer: los marcadores se quedan
-    // donde el CD los dejó, que ya se avisó al alinear.
-    if (!words.length) {
-        return { alignResult, review: null, warnings, palabras: words, reloj: puesto.como, voz: null };
-    }
-
-    // El suelo de la claqueta lo descubre el alineado (es quien la busca en el
-    // audio) y de acá en adelante lo respeta todo el mundo: ningún IN puede
-    // abrirse antes, ni por regla, ni por modelo, ni por repaso.
-    if (alignResult.pisoSec != null) options.pisoSec = alignResult.pisoSec;
-
     // El mapa de voz. Se calcula acá si nadie lo trajo, y no se saltea la etapa
     // cuando falta: el aire muerto de adentro de un bloque es un defecto que
     // ninguna otra regla puede ver —todas las demás miran palabras— y dejarlo
     // dependiendo de que cada caller se acuerde de pasar el mapa es la manera de
     // que un día deje de aplicarse sin que nada falle. Cuesta 0,3 s por clase;
     // quien ya lo tenga —el lote, el medidor— lo pasa y no se relee el Live-Mix.
+    //
+    // Va antes de alinear porque además es la mitad de la firma con la que
+    // `rescate` encuentra los arranques que el transcript no explica, y eso pasa
+    // entre el primer alineado y el definitivo.
     const voz = params.voz !== undefined
         ? params.voz
         : (wav && wav.file ? mapaDeVoz.deLaClase(wav.file) : null);
@@ -118,6 +96,68 @@ async function decidirCortes(params) {
                 'aire muerto adentro: esa comprobación queda sin hacer en esta clase.'
         });
     }
+
+    notify('alinear', {});
+    const alinear = () => {
+        const hecho = align.alignClass({
+            blocks: cls.blocks || [],
+            words,
+            wav,
+            classNumber: cls.classNumber,
+            clapMarkerSec: cls.clapSec,
+            durationSec: cls.durationSec,
+            options
+        });
+        // Con qué reloj se decidió queda escrito en el plan, y no es un dato de
+        // curiosidad: `tools/medir-cortes.js` cuenta los defectos mirando qué
+        // palabras caen dentro de cada bloque, así que leer un plan del DTW con los
+        // tiempos crudos del transcript inventa defectos que no existen — 26
+        // bloques "terminando en habla del director" contra los 0 que tenía. Un
+        // plan sin este campo es de antes y se lee con el reloj crudo, que es con
+        // el que se hizo.
+        hecho.reloj = puesto.como;
+        return hecho;
+    };
+    let alignResult = alinear();
+
+    // Sin transcript no hay nada que afinar ni que leer: los marcadores se quedan
+    // donde el CD los dejó, que ya se avisó al alinear.
+    if (!words.length) {
+        warnings.push(...alignResult.warnings);
+        return {
+            alignResult, review: null, warnings,
+            palabras: words, crudas, rescate: null, reloj: puesto.como, voz: null
+        };
+    }
+
+    // ── Lo que se oye en el arranque de un bloque y el transcript no dice ──
+    //
+    // Va acá, entre el primer alineado y el definitivo, porque necesita las dos
+    // cosas: los IN que el motor va a usar para saber dónde mirar, y volver a
+    // alinear con las palabras nuevas a la vista para que sirvan de algo. Y va
+    // ANTES de todo lo demás porque cambia la entrada de todo lo demás: con la
+    // cuenta escrita, el recorte del habla del director la saca sola
+    // (`speech-edges.finDeConteo`), el ancla de la nota del CD encuentra la toma
+    // buena y `retoma` puede ver las dos tomas que antes no tenía con qué
+    // comparar. El porqué de la firma y de por qué no se relee todo lo que no
+    // tiene texto está en `engine/rescate.js`.
+    const releido = params.rescate === 'no' ? null : await releerArranques({
+        crudas, words, alignResult, wav, voz, options, warnings,
+        language: params.language, signal, notify
+    });
+    if (releido && releido.stats.agregadas) {
+        crudas = releido.palabras;
+        puesto = relojes.paraDecidir(crudas, params.reloj || 'auto');
+        words = puesto.palabras;
+        notify('alinear', {});
+        alignResult = alinear();
+    }
+    warnings.push(...alignResult.warnings);
+
+    // El suelo de la claqueta lo descubre el alineado (es quien la busca en el
+    // audio) y de acá en adelante lo respeta todo el mundo: ningún IN puede
+    // abrirse antes, ni por regla, ni por modelo, ni por repaso.
+    if (alignResult.pisoSec != null) options.pisoSec = alignResult.pisoSec;
 
     // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
     // los que tienen más de una opción razonable, que es donde el criterio cambia
@@ -245,7 +285,52 @@ async function decidirCortes(params) {
     // El mapa sale con el resultado porque los defectos se miden con él: quien
     // pida los cortes tiene que poder contarlos con el mismo mapa con el que se
     // decidieron, igual que con las palabras y el reloj.
-    return { alignResult, review, warnings, palabras: words, reloj: puesto.como, voz };
+    //
+    // Y `crudas` son las palabras SIN reloj, que es lo que hay que guardar cuando
+    // la relectura agregó algo: el transcript guarda lo que midió cada alineador y
+    // el reloj se arma al leerlo (`engine/reloj.js`). Escribir `palabras` ahí
+    // dejaría el transcript con los tiempos ya combinados y la próxima corrida los
+    // volvería a combinar encima.
+    return {
+        alignResult, review, warnings,
+        palabras: words, crudas, rescate: releido, reloj: puesto.como, voz
+    };
+}
+
+/**
+ * Relee los arranques que el transcript no explica, avisando de lo que no pudo.
+ *
+ * Envuelto aparte para que una relectura que falla no tumbe la clase: sin las
+ * palabras nuevas el corte sale como salía antes, que es peor pero no es nada.
+ */
+async function releerArranques(params) {
+    const { crudas, words, alignResult, wav, voz, options, warnings, signal, notify } = params;
+    try {
+        notify('releer', {});
+        const hecho = await rescate.rescatar({
+            crudas, words, blocks: alignResult.blocks, wav, voz, options,
+            language: params.language, signal,
+            onProgress: info => notify('releer', {
+                percent: Math.round((info.hecho / Math.max(1, info.total)) * 100)
+            })
+        });
+        for (const h of hecho.hallazgos.filter(x => x.accion === 'no se pudo')) {
+            warnings.push({
+                code: 'rescate',
+                message: `Bloque ${h.bloque + 1}: se oye alguien en los ${h.sonidoSec}s que abren el bloque y ` +
+                    `el transcript no tiene ni una palabra ahí; releerlo falló (${h.error}). ` +
+                    'Si es la cuenta de la toma, va a quedar dentro del corte.'
+            });
+        }
+        return hecho;
+    } catch (err) {
+        if (err && err.code === 'cancelado') throw err;
+        warnings.push({
+            code: 'rescate_fallo',
+            message: `No se pudo releer el arranque de los bloques sin texto: ${err.message}`
+        });
+        return null;
+    }
 }
 
 module.exports = { decidirCortes };

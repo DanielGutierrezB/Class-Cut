@@ -170,6 +170,48 @@ module.exports = function (t) {
         t.deep(reloj.deDtw([una]).palabras, [una]);
     });
 
+    t.test('el final de la tirada es el más tardío de sus finales', () => {
+        // El arranque del bloque 1 de la clase 13 con la cuenta ya injertada
+        // (`engine/rescate.js`). Los `start` guardados NO van en orden: Whisper
+        // había repartido «una gran ventaja competitiva» encima de la cuenta —de
+        // 121,41 a 131,88— mientras su DTW la pone entre 130,68 y 131,56, así que la
+        // cuenta se injerta antes y sus finales quedan más allá.
+        //
+        // Con el final de la ÚLTIMA palabra de la tirada como techo, el número que
+        // salía era el 122,57 del «una» y las siete palabras se aplastaban en ese
+        // instante: el panel dejaba de alumbrar seis.
+        const r = reloj.deDtw([
+            { start: 120.64, end: 121.41, text: 'es', dtw: 121.78 },
+            { start: 121.41, end: 127.80, text: 'tres,', dtw: 127.22 },
+            { start: 127.80, end: 128.38, text: 'dos,', dtw: 127.94 },
+            { start: 128.38, end: 129.10, text: 'uno.', dtw: 128.52 },
+            { start: 121.41, end: 122.57, text: 'una', dtw: 130.68 },
+            { start: 122.57, end: 124.12, text: 'gran', dtw: 130.86 },
+            { start: 124.12, end: 131.88, text: 'competitiva,', dtw: 131.56 }
+        ]);
+        const arranques = r.palabras.map(p => p.start);
+        t.eq(new Set(arranques).size, 7, `siete arranques distintos, salieron ${arranques.join(' ')}`);
+        for (let i = 1; i < arranques.length; i++) {
+            t.ok(arranques[i] > arranques[i - 1], `y en orden: ${arranques.join(' ')}`);
+        }
+        t.near(arranques[1], 127.22 - DESFASE, 0.001, 'cada una donde la puso el DTW');
+        t.near(arranques[4], 130.68 - DESFASE, 0.001);
+    });
+
+    t.test('un techo más chico que todos los DTW ya aplastaba sin injertar nada', () => {
+        // La barandilla de la prueba de arriba: que no se lea como que el injerto
+        // introdujo el aplastamiento. Estas dos palabras solas —el «una gran» que
+        // Whisper puso nueve segundos antes de donde suena— se aplastan igual sin
+        // que nadie injerte nada, y es lo que el techo tiene que hacer: una tirada
+        // no puede terminar después de su propio sonido. El injerto solo AGREGA
+        // finales, así que el techo nunca baja.
+        const r = reloj.deDtw([
+            { start: 121.41, end: 122.57, text: 'una', dtw: 130.68 },
+            { start: 122.57, end: 124.12, text: 'gran', dtw: 130.86 }
+        ]);
+        t.eq(r.palabras[1].start, 124.12);
+    });
+
     t.group('el reloj del panel · lo que no puede pasar');
 
     t.test('ninguna arranca antes que la anterior', () => {

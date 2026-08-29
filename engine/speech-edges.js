@@ -811,8 +811,8 @@ function huecosDeAire(voz, desdeSec, hastaSec, options) {
  * un frame— y el reloj no tiene resolución para eso. Por eso la segunda pregunta
  * va a la onda.
  *
- * **Los 2 que quedan son los 2 bloques del curso con el transcript roto**, y
- * esta cuenta es lo único que los señala:
+ * **Los 2 que quedaban eran los 2 bloques del curso con el transcript roto**, y
+ * esta cuenta era lo único que los señalaba:
  *
  *   - clase 11 bloque 2 suena «con Cypress. Sin embargo, con sistemas
  *     agénticos…» y le faltan seis segundos de su propia frase: el profesor
@@ -820,11 +820,14 @@ function huecosDeAire(voz, desdeSec, hastaSec, options) {
  *     deberíamos dedicarle horas escribiendo test unitarios con Cypress». Hubo
  *     dos tomas y el transcript guardado se comió la segunda entera, así que la
  *     nota del CD no tuvo dónde anclar y el corte quedó a mitad de la frase.
- *   - clase 3 bloque 13 abre bien —«En este punto vamos a parar…»— y esta cuenta
- *     lo marca por la palabra suelta de una toma abandonada que tiene delante.
- *     Pero el bloque igual está mal: adentro trae la toma DOS VECES con el «Ok.
- *     Ok. 3, 2, 1.» en el medio, y `retoma` no lo puede ver porque el transcript
- *     también perdió ese tramo. La cuenta acierta por la razón equivocada.
+ *   - clase 3 bloque 13 abría bien —«En este punto vamos a parar…»— y esta cuenta
+ *     lo marcaba por la palabra suelta de una toma abandonada que tenía delante.
+ *     Pero el bloque igual estaba mal: adentro traía la toma DOS VECES con el
+ *     «Ok. Ok. 3, 2, 1.» en el medio, y `retoma` no lo podía ver porque el
+ *     transcript también había perdido ese tramo. **Ese ya no está**: desde que
+ *     `engine/rescate.js` relee los arranques sin texto, la cuenta aparece en el
+ *     transcript, el recorte del habla del director abre el bloque en la toma
+ *     buena y el renglón bajó a 1. Queda el de la clase 11, que es el único.
  *
  * **Y uno que esta cuenta ya no ve, anotado para que no se busque**: clase 13
  * bloque 4 suena «no me refiero al código…», sin la «Y» que el CD había escrito

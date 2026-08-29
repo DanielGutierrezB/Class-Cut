@@ -202,8 +202,18 @@ const volcarEn = arg('volcar');
         // `voz: mapa` para que el motor no lo vuelva a calcular del Live-Mix: es
         // el mismo mapa con el que se mide unas líneas abajo, así que los dos
         // brazos deciden y se miden con el mismo, que es de lo que se trata acá.
+        // `rescate: 'no'` y no es un agujero en la medición: las palabras que
+        // `engine/rescate.js` rescata ya están en el transcript guardado, que es la
+        // entrada congelada de este A/B, así que releerlas nunca cambiaría nada
+        // —el rescate es idempotente: donde ya hay palabras no encuentra agujero—.
+        // Lo que sí haría es dos cosas malas: llamar a Whisper con los brazos
+        // corriendo, y escribir en el Backup del editor, que es justo lo que esta
+        // herramienta promete no hacer. Los brazos, además, traen su reloj ya
+        // armado (`paraDecidir` con los tiempos de este brazo), y las palabras
+        // nuevas salen sin reloj: entrarían con los tiempos crudos del pedazo.
         const salida = await decidir.decidirCortes({
-            cls, words: paraDecidir, reloj: 'crudo', wav, voz: mapa, ai: cliente,
+            cls, words: paraDecidir, reloj: 'crudo', rescate: 'no',
+            wav, voz: mapa, ai: cliente,
             options: sinRepaso ? { repaso: 'no' } : null
         });
 

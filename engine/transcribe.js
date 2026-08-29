@@ -606,6 +606,55 @@ async function transcribeClass(params) {
     return { ...transcript, fromCache: false };
 }
 
+/**
+ * Vuelve a guardar el transcript de una clase con otras palabras.
+ *
+ * Existe por `engine/rescate.js`, que relee los arranques de bloque donde la
+ * pasada de la clase entera no escribió nada y devuelve las palabras con lo que
+ * se oyó adentro. Esas palabras tienen que entrar al transcript GUARDADO, porque
+ * de ahí las leen el panel del visor, los cortes y las mediciones; si se
+ * quedaran en una variable del motor, el panel seguiría empezando tarde y la
+ * medición seguiría informando cero conteos en un curso que tiene cuatro.
+ *
+ * Vive acá y no en `rescate.js` porque la forma del artefacto es de este módulo:
+ * las cuentas derivadas —cuántas palabras, cuántas con DTW, cuánta puntuación de
+ * cierre— se calculan al guardar y una segunda copia de ese cálculo terminaría
+ * diciendo otra cosa. Y por lo mismo se rehacen las frases y los silencios: las
+ * dos cosas se derivan de las palabras, y un cache de antes miente.
+ *
+ * La huella del audio NO cambia, y es a propósito: el Live-Mix es el mismo, así
+ * que `isUsable` sigue dando por bueno este transcript y nadie vuelve a pagar
+ * cuarenta minutos de Whisper por una clase que ya está leída. `audioAlign`
+ * tampoco se toca: describe lo que midió la onda en la pasada larga, y las
+ * palabras nuevas no pasaron por ella (por eso no traen la marca `onset`).
+ *
+ * @param {object} params { root, sequenceName, wavPath, transcript, words, rescate }
+ * @returns {object} el transcript ya guardado
+ */
+function reescribir(params) {
+    const { root, sequenceName, wavPath, transcript, words } = params;
+    const guardado = {
+        ...transcript,
+        wordCount: words.length,
+        dtwWords: words.filter(w => w.dtw != null).length,
+        puntuacion: speech.densidadDeCierres(words),
+        // Qué se releyó y qué se agregó, para que abriendo el JSON se pueda
+        // distinguir una palabra que salió de la pasada larga de una que salió de
+        // un pedazo suelto. Sin esto, un transcript rescatado y uno que nunca lo
+        // necesitó se leen igual.
+        rescate: params.rescate || null,
+        words,
+        segments: segmentsFromWords(words)
+    };
+    delete guardado.fromCache;
+
+    if (wavPath) {
+        silencios.asegurar({ root, sequenceName, wavPath, palabras: words, rehacer: true });
+    }
+    workspace.writeJson(workspace.artifact(root, sequenceName, 'transcript'), guardado);
+    return guardado;
+}
+
 /** ¿Sirve el transcript guardado para este audio y este motor? */
 function isUsable(cached, source) {
     if (!cached || !VERSIONES_QUE_SIRVEN.has(cached.version)) return false;
@@ -616,6 +665,7 @@ function isUsable(cached, source) {
 
 module.exports = {
     transcribeClass,
+    reescribir,
     runWhisper,
     collapseLoops,
     segmentsFromWords,

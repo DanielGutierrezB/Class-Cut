@@ -45,6 +45,7 @@ const FILES = [
     'historia.test.js',
     'repeticiones.test.js',
     'retoma.test.js',
+    'rescate.test.js',
     'repasar.test.js',
     'verificar-corte.test.js',
     'media-server.test.js'

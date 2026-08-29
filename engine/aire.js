@@ -60,8 +60,11 @@
  *     vuelve audible, que es peor que el hueco.
  *   - **Partirlo en dos deja la elección igual sin hacer.** Los pedazos serían
  *     tres intentos de la misma frase; cuál es el bueno lo dice la cuenta de la
- *     toma, y la cuenta no está en el transcript (por eso `conteo` mide 0 en todo
- *     el curso). La máquina no tiene con qué elegir.
+ *     toma, y en ese bloque la cuenta no está en el transcript. (Desde que
+ *     `engine/rescate.js` relee los arranques sin texto, en cuatro bloques del
+ *     curso SÍ está; este no es uno de ellos, porque sus tres arrancadas fallidas
+ *     están en el MEDIO del bloque y el arreglo se acota al arranque.) La máquina
+ *     no tiene con qué elegir.
  *   - **Al abrir sí se puede, y sin ambigüedad**, porque no hay que elegir entre
  *     pedazos: lo que está antes del primer sonido sostenido no es la clase, y lo
  *     que está después es el bloque entero. Son 2 de los 14.
@@ -71,40 +74,33 @@
  * se mide y se avisa —`tools/defectos.js`, defecto `aire`— para que la próxima vez
  * que pase lo vea alguien, que era el pedido.
  *
- * ## Hasta dónde llega, medido
+ * ## Hasta dónde llega, y quién dio el paso que faltaba
  *
- * **Se queda a un paso: el borde nuevo aterriza sobre la cuenta de la toma.** En
- * los dos bloques que esto mueve, entre el hueco y la clase hay un «3, 2, 1» —
- * clase 13 en 127,12, clase 7 en 2076,96— y el borde queda justo delante. La
- * cuenta ya estaba adentro del bloque entregado, así que mover el IN no la mete:
- * la deja al descubierto. Lo que se gana son los 9,1 y 15,9 s de ensayo y toma
- * abandonada que había delante.
+ * **Esta regla se quedaba a un paso: el borde nuevo aterrizaba sobre la cuenta de
+ * la toma.** En los dos bloques que mueve, entre el hueco y la clase hay un
+ * «3, 2, 1» —clase 13 en 127,12, clase 7 en 2076,96— y el borde quedaba justo
+ * delante. La cuenta ya estaba adentro del bloque entregado, así que mover el IN no
+ * la metía: la dejaba al descubierto, y el editor la oyó al abrir el corte de la 13.
  *
- * No se saca acá por dos razones medidas, no por falta de ganas:
+ * Lo que faltaba **no era una regla más, era el texto**: `trimChatter` ya sabe
+ * quitar la cuenta del arranque de un bloque (`finDeConteo`) y no podía porque
+ * Whisper no la había escrito —entre «es» (121,65) y «una» (130,54) el transcript de
+ * la clase 13 no tenía una sola palabra—. Eso lo resuelve `engine/rescate.js`,
+ * releyendo ese pedazo suelto y metiendo lo que se oye en el transcript; de ahí en
+ * adelante el motor la saca con lo que ya sabía hacer. Este módulo corre ANTES y
+ * queda igual: sigue sacando los 9,1 y 15,9 s de ensayo y toma abandonada.
  *
- *   - **El transcript no la tiene, y ahí está el arreglo de verdad.**
- *     `trimChatter` ya sabe quitar la cuenta del arranque de un bloque
- *     (`finDeConteo`), y en estos dos no puede porque Whisper no la escribió:
- *     entre «es» (121,65) y «una» (130,54) el transcript de la clase 13 no tiene
- *     una sola palabra. Renderizando ese pedazo suelto, Whisper SÍ la escribe
- *     —«Tres, dos, uno. Hoy saber bytecodear es…»—, así que la cuenta se oye y lo
- *     que falla es la transcripción de la clase entera. Por eso `conteo` mide 0 en
- *     el curso y `tools/verificar-corte.js` es lo único que las ve.
- *   - **En la onda casi se distingue, y ese «casi» es el problema.** La cuenta son
- *     tres golpes cortos con hueco. Midiendo los 169 arranques del curso en los
- *     3 s que siguen al primer sonido, la clase ocupa el 83% de mediana con
- *     huecos de 0,34 s, y solo 5 arranques bajan del 50% con un hueco de más de
- *     1,2 s. Escuchados los 5: cuatro son cuentas (clase 13 bloque 1, clase 7
- *     bloques 1 y 8, clase 3 bloque 13) y el quinto es el bloque 7 de la clase 3,
- *     que suena «quinta herramienta es SpecKit de GitHub. Esta herramienta es la
- *     que nos va a permitir…», o sea clase. Un listón que saque las cuatro se
- *     lleva ese bloque por delante, y borrar clase es peor que dejar una cuenta.
- *
- * Con esa cuenta —4 de 5— no se construye una regla que BORRA material: se anota
- * el número y se deja para cuando la cuenta esté en el transcript, que es donde el
- * motor ya sabe qué hacer con ella. La cuenta ya estaba adentro de los dos bloques
- * entregados, así que esto no la agrega; lo que hace es dejarla al descubierto, y
- * `verificar-corte` la marca en 0:00 del corte para que nadie la pase por alto.
+ * **Y por qué no se intentó sacarla desde la onda, que es lo que había acá.** La
+ * cuenta son tres golpes cortos con hueco. Midiendo los 169 arranques del curso en
+ * los 3 s que siguen al primer sonido, la clase ocupa el 83% de mediana con huecos
+ * de 0,34 s, y solo 5 arranques bajan del 50% con un hueco de más de 1,2 s.
+ * Escuchados los 5: cuatro son cuentas (clase 13 bloque 1, clase 7 bloques 1 y 8,
+ * clase 3 bloque 13) y el quinto es el bloque 7 de la clase 3, que suena «quinta
+ * herramienta es SpecKit de GitHub. Esta herramienta es la que nos va a
+ * permitir…», o sea clase. Un listón que saque las cuatro se lleva ese bloque por
+ * delante, y borrar clase es peor que dejar una cuenta. Con 4 de 5 no se construye
+ * una regla que BORRA material — y no hubo que construirla, porque leer el pedazo
+ * contesta la misma pregunta con el texto en la mano.
  *
  * Va aparte de `align.js` porque el mapa de voz no está ahí: el alineado trabaja
  * con la onda cruda (`audio-onset`), que busca el borde del sonido en ±2 s

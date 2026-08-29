@@ -119,11 +119,29 @@ async function unaClase(scan, cls, cliente, modelo) {
         words: transcript.words,
         wav: info ? { file: cls.liveMixPath, info } : null,
         voz: mapa,
+        language: transcript.language,
         ai: cliente,
         onStage: (etapa, i) => process.stdout.write(
             `\r  ${etapa}${i && i.percent != null ? ` ${i.percent}%` : ''}          `)
     });
     avisos.push(...decided.warnings);
+
+    // Igual que el pipeline: lo que se oyó releyendo los arranques sin texto va
+    // al transcript guardado, porque de ahí lo leen el panel del visor y las
+    // mediciones. Sin esto, el lote dejaría el corte arreglado y el Backup
+    // diciendo que ahí no se dice nada.
+    let rescatadas = 0;
+    if (decided.rescate && decided.rescate.stats.agregadas) {
+        rescatadas = decided.rescate.stats.agregadas;
+        transcribe.reescribir({
+            root: scan.root,
+            sequenceName: cls.sequenceName,
+            wavPath: cls.liveMixPath,
+            transcript,
+            words: decided.crudas,
+            rescate: { stats: decided.rescate.stats, hallazgos: decided.rescate.hallazgos }
+        });
+    }
 
     workspace.writeJson(workspace.artifact(scan.root, cls.sequenceName, 'align'), decided.alignResult);
     if (decided.review) {
@@ -159,7 +177,7 @@ async function unaClase(scan, cls, cliente, modelo) {
     if (!guardado.ok) avisos.push({ code: 'estado_no_guardado', message: guardado.error });
 
     return {
-        transcript, plan, exported, msProceso, avisos,
+        transcript, plan, exported, msProceso, avisos, rescatadas,
         review: decided.review,
         // Con las palabras que el motor USÓ para decidir y no con las del
         // transcript: los defectos se cuentan mirando qué palabras caen dentro de
@@ -207,7 +225,8 @@ async function unaClase(scan, cls, cliente, modelo) {
                 hechas.push({ cls, r });
                 parte(`\r${etiqueta} ✓ ${hhmmss(r.msProceso)} · ${r.plan.totals.kept}/${r.plan.totals.segments} bloques · ` +
                     `${Math.round(r.plan.totals.keepSec / 60)}min de ${Math.round((cls.durationSec || 0) / 60)}min · ` +
-                    `${r.transcript.wordCount} palabras · ${((p.ratio || 0) * 100).toFixed(1)}% cierran (pozo ${p.pozoSec}s)`);
+                    `${r.transcript.wordCount} palabras · ${((p.ratio || 0) * 100).toFixed(1)}% cierran (pozo ${p.pozoSec}s)` +
+                    (r.rescatadas ? ` · ${r.rescatadas} releídas` : ''));
                 // De la lista de tipos y no a mano: escrito a mano se quedó sin
                 // `retoma` y sin `aire`, y el parte del lote decía "sin defectos"
                 // en clases que tenían uno de esos. Es el mismo cuidado que ya

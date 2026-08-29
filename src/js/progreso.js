@@ -30,7 +30,7 @@
  */
 
 /** El orden real del pipeline (`engine/pipeline.js`, STAGES). */
-export const ORDEN = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
+export const ORDEN = ['reusar', 'transcribir', 'alinear', 'releer', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
 
 /**
  * Cuánto cuesta cada etapa, en unidades relativas. Salen de la medición de
@@ -45,6 +45,11 @@ export const COSTO = {
     reusar: 0.3,
     transcribir: 26,
     alinear: 0.3,
+    // Volver a oír los arranques sin texto cuesta un segundo de Whisper por
+    // bloque, y en el curso son 4 bloques de 170: en nueve de las trece clases
+    // esta etapa no lee nada y pasa en milisegundos. Va con el piso de las
+    // baratas, no con el peso de transcribir.
+    releer: 0.3,
     afinar: 21,
     despegar: 0.3,
     revisar: 42,

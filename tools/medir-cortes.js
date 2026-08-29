@@ -57,6 +57,11 @@ const baseline = {
     // margen de 20. Con la pregunta contestada por la onda son 2, y no se movió
     // ningún corte: comparar contra el 7 diría que se arreglaron cinco. El
     // detalle está en `speech-edges.abreAMitad`.
+    //
+    // De esos 2 se arregló uno: el bloque 13 de la clase 3 tenía la toma dos
+    // veces con un «Ok, ok. 3, 2, 1.» en el medio que el transcript no había
+    // escrito, y desde que `engine/rescate.js` lo relee, el bloque abre en la
+    // toma buena. Queda el de la clase 11, que es transcript perdido de verdad.
     abriendo: 2,
     mitadPalabra: 2,
     repetido: 2,

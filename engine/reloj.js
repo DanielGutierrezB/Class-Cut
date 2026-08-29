@@ -188,7 +188,18 @@ function deDtw(palabras) {
     // palabra que acá no abre ninguna tirada y nadie la leería.
     for (const tirada of retimeo.tiradas(entrada, retimeo.HUECO_SEC)) {
         stats.tiradas++;
-        const cierre = entrada[tirada[tirada.length - 1]].end;
+        // El final de la tirada es el MÁS TARDÍO de sus finales, no el de su última
+        // palabra. En un transcript recién salido de Whisper son el mismo número
+        // —cada palabra termina donde arranca la siguiente— y la diferencia aparece
+        // cuando alguien injerta palabras leídas aparte (`engine/rescate.js`): las
+        // de la relectura traen los tiempos del pedazo y el array queda ordenado por
+        // el instante del DTW, que en un tramo mal leído no es el orden de los
+        // `start`. Con el final de la última palabra, una cuenta injertada en medio
+        // de «una gran ventaja competitiva» —que Whisper había repartido ENCIMA de
+        // la cuenta— aplastaba las once palabras del arranque de la clase 13 a un
+        // mismo instante, porque el techo salía de un `end` anterior a todas.
+        let cierre = -Infinity;
+        for (const i of tirada) cierre = Math.max(cierre, entrada[i].end);
         const abre = entrada[tirada[0]];
         // Acá está todo el injerto: si la onda midió el ataque de esta tirada, ese
         // arranque es el mejor que hay y se conserva; si no lo midió, el `start`

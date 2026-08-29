@@ -21,7 +21,7 @@ const onset = require('./vendor/audio-onset');
 const ia = require('./ia');
 const tokens = require('./tokens');
 
-const STAGES = ['reusar', 'transcribir', 'alinear', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
+const STAGES = ['reusar', 'transcribir', 'alinear', 'releer', 'afinar', 'despegar', 'revisar', 'repasar', 'cortar', 'exportar'];
 
 /**
  * Cuánto tardó cada etapa, medido acá y no adivinado en la ventana.
@@ -144,11 +144,40 @@ async function processClass(params) {
 
     const decided = await decidir.decidirCortes({
         cls, words, wav, signal,
+        // El idioma lo resolvió la pasada larga sobre la clase entera. Hace falta
+        // para releer un pedazo suelto: sobre seis segundos que dicen «3, 2, 1.»
+        // la detección automática no tiene con qué decidir (`engine/rescate.js`).
+        language: transcript ? transcript.language : null,
         ai: params.ai || null,
         onStage: notify
     });
     const alignResult = decided.alignResult;
     warnings.push(...decided.warnings);
+
+    // Lo que se oyó releyendo los arranques sin texto entra al transcript
+    // guardado, que es de donde lo leen el panel del visor, las mediciones y la
+    // próxima corrida. Dejarlo solo en memoria arreglaría el corte y no el panel,
+    // que es la mitad de lo que se vino a arreglar (`engine/rescate.js`).
+    if (transcript && decided.rescate && decided.rescate.stats.agregadas) {
+        transcript = {
+            ...transcribe.reescribir({
+                root,
+                sequenceName: cls.sequenceName,
+                wavPath: cls.liveMixPath,
+                transcript,
+                words: decided.crudas,
+                rescate: { stats: decided.rescate.stats, hallazgos: decided.rescate.hallazgos }
+            }),
+            // Si esta clase se saltó Whisper lo dice la pasada larga, no la
+            // relectura: de ese dato vive el estimado de la corrida, que separa
+            // las clases reusadas (segundos) de las que se transcriben de cero
+            // (una hora).
+            fromCache: transcript.fromCache
+        };
+        workspace.appendLog(workspace.artifact(root, cls.sequenceName, 'log'),
+            `rescate: ${decided.rescate.stats.agregadas} palabras en ` +
+            `${decided.rescate.stats.releidos} arranques que el transcript no explicaba`);
+    }
 
     workspace.writeJson(workspace.artifact(root, cls.sequenceName, 'align'), alignResult);
     if (decided.review) {
