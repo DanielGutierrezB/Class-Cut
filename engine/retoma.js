@@ -43,6 +43,67 @@
  * quedan miden 12,2 s, 26,1 s, 4,7 s y 22,5 s, y las cuatro cierran su frase),
  * pero la forma sale de las cuatro maneras en que un par de marcadores puede
  * caer sobre dos tomas, no de una muestra, así que las dos ramas existen.
+ *
+ * ## La toma que se corta y no vuelve
+ *
+ * La cuenta encuentra las retomas y se le escapa la otra forma del mismo
+ * defecto: la toma que se cortó y NO se rehízo adentro del bloque. El bloque 1
+ * de la clase 11 dura 93 s y a los 30 el profesor cierra su frase
+ * —«…auditar el código versus nuestras especificaciones.»— y dice «Pausa.». Lo
+ * que sigue son 62 segundos de sala: «Ah, bueno. Sí, sí. Pensé que si iba a
+ * mostrar igual la pantalla. Bueno, en este punto ya la aplicación está
+ * funcionando. Ah, ok, ok. Ok, Ah, bueno, no hay problema. Listo. Vamos a ver.»
+ * La toma buena arranca con la cuenta de 115,7 s, que cae FUERA del bloque, así
+ * que del otro lado de la charla no hay nada que comparar y la regla de arriba no
+ * tiene con qué confirmar nada.
+ *
+ * La señal acá es otra y el motor ya la sabe leer: la orden al editor. `Pausa`,
+ * `corte`, `alto` (`speech-edges.STRONG_CHATTER`) son palabras que nadie dice
+ * como parte de la clase, y hasta ahora se las buscaba solo en los bordes del
+ * bloque (`trimChatter`), donde ya no queda ninguna. Adentro quedan seis en todo
+ * el curso, y hacen falta dos filtros para separar la que importa. Cada uno mata
+ * casos distintos:
+ *
+ *   - **Viene sola, como su propia frase**: la palabra de antes cierra frase y
+ *     ella también. Un aparte del director es un «Pausa.» suelto; una palabra en
+ *     medio de una oración es la clase hablando. Esto descarta «Pausa el video,
+ *     termina de leer el PROM» del bloque 14 de la clase 2 —que se lo dice al
+ *     alumno— y los dos «el artefacto más alto que toca» de la clase 12. Es el
+ *     mismo criterio que `isChatter` ya le aplica al vocabulario flojo.
+ *   - **Detrás sigue habiendo habla de rodaje**: al menos otra palabra del
+ *     director, suelta, en lo que queda del bloque. Es lo que distingue una pausa
+ *     de verdad —el profesor para, respira y sigue con la clase— de una toma que
+ *     se murió ahí. Descarta «…nos permite corregir eso. Pausa. Entonces, aquí
+ *     mostramos pantalla.» del bloque 6 de la clase 1, donde cortar tiraría 6,5 s
+ *     de material único, y «…adaptar a tu proyecto. Pausa. No dije exacto.» del
+ *     bloque 10 de la clase 5.
+ *
+ * De las 6 órdenes internas del curso queda 1, y es la de verdad. La charla
+ * suelta adentro de un bloque es rara por lo mismo: 18 palabras en 170 bloques y
+ * 13.231 palabras, casi todas cifras de un conteo que sobró, y el bloque 1 de la
+ * clase 11 es el único que tiene una orden fuerte suelta con más charla detrás.
+ *
+ * **Por qué esto no reabre la puerta que la cuenta cerró.** Aflojar la cuenta
+ * —probar cada final de frase como si fuera un borde— daba 11 candidatos con 7
+ * falsos positivos, que eran el profesor volviendo a nombrar algo a propósito.
+ * Esto no afloja nada de eso: no busca repeticiones ni prueba bordes, pide una
+ * palabra que nadie dice dando clase. Los 7 falsos positivos de entonces no
+ * tienen ninguna.
+ *
+ * Y se queda la PRIMERA orden del bloque, al revés que con la cuenta. No es una
+ * inconsistencia: la cuenta marca dónde ARRANCA la toma que el profesor quiere, y
+ * la orden marca dónde se MURIÓ la que estaba haciendo. Con la cuenta interesa la
+ * más nueva; con la orden, la más vieja, porque todo lo que viene después es la
+ * charla.
+ *
+ * **La onda dice lo mismo, y sirve de comprobación.** Ese mismo bloque 1 de la
+ * clase 11 es el peor del curso midiendo aire muerto (`engine/aire.js`): tiene un
+ * hueco de 23,0 s a los 66 s y otro de 6,0 s a los 48 s, porque después de la
+ * orden la sala habla suelto y en el medio no hay nadie. Son el mismo hecho visto
+ * de dos formas —el transcript ve una orden, el mapa de voz ve la sala vacía—, y
+ * recortar el OUT acá se lleva los dos huecos. Que dos mediciones independientes
+ * señalen el mismo borde es la única confirmación disponible cuando el caso de
+ * verdad es uno solo.
  */
 
 const speech = require('./speech-edges');
@@ -55,7 +116,12 @@ const DEFAULTS = {
     // una toma del otro lado de la cuenta: hay el arranque de una.
     minimoQueQuedaSec: 3,
     // Y lo que se va tiene que valer mover el borde.
-    minimoQueSeVaSec: 1.5
+    minimoQueSeVaSec: 1.5,
+    // Cuánta charla de rodaje hace falta DETRÁS de una orden al editor para creer
+    // que la toma se murió ahí. Con cero, «Pausa. Entonces, aquí mostramos
+    // pantalla.» contaría y se tirarían 6,5 s de clase; los números de los seis
+    // casos del curso están en la cabecera.
+    charlaDetrasMinima: 1
 };
 
 function opt(options, key) {
@@ -96,6 +162,7 @@ function mirarLaCuenta(words, block, dentro, cuenta, options) {
 
     const base = {
         bloque: block.index,
+        senal: 'cuenta',
         cuentaSec: dec(cuentaSec),
         tomaSec: dec(tomaSec),
         score: solape.score,
@@ -131,9 +198,59 @@ function mirarLaCuenta(words, block, dentro, cuenta, options) {
 }
 
 /**
+ * ¿Esta orden al editor de acá adentro es donde se murió la toma?
+ *
+ * Los dos filtros y sus números están en la cabecera. Devuelve siempre un
+ * recorte del OUT: lo que hay detrás de la orden es la sala hablando, así que la
+ * toma que se conserva es la de antes.
+ *
+ * @param {Array} dentro palabras del bloque
+ * @param {number} i índice de la orden dentro de `dentro`
+ */
+function mirarLaOrden(words, block, dentro, i, options) {
+    const orden = dentro[i];
+    const previa = dentro[i - 1];
+    const detras = dentro.slice(i + 1);
+    if (!previa || !detras.length) return null;
+
+    // Sola, como su propia frase: lo de antes cerró y ella cierra.
+    if (!speech.endsSentence(previa) || !speech.endsSentence(orden)) return null;
+
+    // Y detrás sigue la charla. El silencio de cada palabra se mide contra la
+    // anterior de la propia cola, que es lo que `isChatter` necesita para saber
+    // si viene suelta o es parte de una frase.
+    const charla = detras.filter((w, j) =>
+        speech.isChatter(w, j > 0 ? w.start - detras[j - 1].end : 999, options, detras[j + 1])).length;
+    if (charla < opt(options, 'charlaDetrasMinima')) return null;
+
+    const cortaSec = orden.start;
+    const quedaSec = cortaSec - block.startSec;
+    const seVaSec = block.endSec - cortaSec;
+    if (quedaSec < opt(options, 'minimoQueQuedaSec')) return null;
+    if (seVaSec < opt(options, 'minimoQueSeVaSec')) return null;
+    // Y lo que queda tiene que cerrar. Si la toma se murió a mitad de frase,
+    // recortar cambia un defecto por otro: es la misma comprobación que la rama
+    // de arriba le hace a la toma nueva.
+    if (speech.quedaColgando(words, block.startSec, cortaSec)) return null;
+
+    return {
+        bloque: block.index,
+        senal: 'orden',
+        accion: 'recortar',
+        timeSec: cortaSec,
+        ordenSec: dec(cortaSec),
+        orden: speech.textOf(orden),
+        charlaDetras: charla,
+        seVaSec: dec(seVaSec),
+        quedaSec: dec(quedaSec),
+        texto: speech.textInside(words, cortaSec, block.endSec)
+    };
+}
+
+/**
  * La retoma interna de un bloque, con qué hacerle, o null.
  *
- * @returns {{bloque, accion, timeSec, cuentaSec, tomaSec, seVaSec, quedaSec, score, parecido, texto}|null}
+ * @returns {{bloque, senal, accion, timeSec, seVaSec, quedaSec, texto, …}|null}
  */
 function buscarEnBloque(words, block, options) {
     if (!block || block.startSec == null || block.endSec == null) return null;
@@ -144,6 +261,16 @@ function buscarEnBloque(words, block, options) {
     // confirmar, que es la regla de arriba puesta en un bucle.
     for (let i = cuentas.length - 1; i >= 0; i--) {
         const hallazgo = mirarLaCuenta(words, block, dentro, cuentas[i], options);
+        if (hallazgo) return hallazgo;
+    }
+
+    // Y si no hay ninguna cuenta que lo explique, la otra forma: la toma que se
+    // cortó y no volvió. Va después porque la cuenta trae la confirmación de que
+    // lo de los dos lados es lo mismo, y esto trae una señal más flaca; cuando
+    // las dos aparecen en el mismo bloque, manda la que puede probar más.
+    for (let i = 1; i < dentro.length - 1; i++) {
+        if (!speech.STRONG_CHATTER.test(speech.textOf(dentro[i]).trim())) continue;
+        const hallazgo = mirarLaOrden(words, block, dentro, i, options);
         if (hallazgo) return hallazgo;
     }
     return null;
@@ -209,11 +336,14 @@ function aplicar(params) {
     const colgabaAntes = speech.quedaColgando(words, block.startSec, block.endSec);
     const memoria = borde.recordar(block, kind);
 
-    const porque = kind === 'IN'
-        ? `el profesor rehace esta toma: se abre después de la cuenta de ${hallazgo.cuentaSec}s ` +
-          `y se van ${hallazgo.seVaSec}s que ya decían esto mismo`
-        : `lo que viene después de la cuenta de ${hallazgo.cuentaSec}s es el arranque de otra toma, ` +
-          'no una toma: se cierra antes';
+    const porque = hallazgo.senal === 'orden'
+        ? `la toma se corta acá: el profesor dice «${hallazgo.orden}» al editor y detrás quedan ` +
+          `${hallazgo.seVaSec}s de charla de rodaje`
+        : (kind === 'IN'
+            ? `el profesor rehace esta toma: se abre después de la cuenta de ${hallazgo.cuentaSec}s ` +
+              `y se van ${hallazgo.seVaSec}s que ya decían esto mismo`
+            : `lo que viene después de la cuenta de ${hallazgo.cuentaSec}s es el arranque de otra toma, ` +
+              'no una toma: se cierra antes');
 
     const nuevo = kind === 'IN'
         ? abrir(block, hallazgo.timeSec, { words, wav, options, reason: porque })
@@ -271,4 +401,4 @@ function quitarRetomas(params) {
     return alignResult.retomas;
 }
 
-module.exports = { buscar, buscarEnBloque, quitarRetomas, aplicar, abrir, DEFAULTS };
+module.exports = { buscar, buscarEnBloque, mirarLaOrden, quitarRetomas, aplicar, abrir, DEFAULTS };

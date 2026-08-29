@@ -11,26 +11,40 @@
  * Nada de acá le pregunta a ningún modelo: son reglas sobre el texto y sobre la
  * medición de onda que el motor ya guardó en cada borde.
  *
- * **Lo que esta vara todavía no ve**, y conviene saberlo antes de usar el total
- * para decidir algo: un bloque que abre sobre una toma abortada y arrastra
- * silencio no dispara nada. El bloque 4 de la clase 2 decidido con el reloj
- * crudo abre en 770,7 —28 s antes del marcador del CD—, se lleva adentro
- * «¿Recuerdas en la clase anterior que cuando hicimos una modificación,» de un
- * intento que el profesor rehizo, y de sus primeros treinta segundos solo suenan
- * nueve. Cero defectos. `retoma` no lo agarra porque entre las dos tomas no hay
- * conteo, y ninguna regla mira cuánto silencio quedó adentro.
+ * **El agujero que esta vara tenía, y cómo se tapó.** Acá estaba escrito que un
+ * bloque que abre sobre una toma abortada y arrastra silencio no disparaba nada:
+ * el bloque 4 de la clase 2 decidido con el reloj crudo abría 28 s antes del
+ * marcador del CD, de sus primeros treinta segundos solo sonaban nueve, y medía
+ * cero defectos. Eso volvió a pasar en el curso ENTREGADO, y no en un banco: los
+ * 170 bloques tienen catorce huecos de más de cinco segundos —2,1 minutos, uno de
+ * 23 s y uno de 15,9— y los catorce pasaban las nueve comprobaciones en verde.
+ * Así que las dos mitades del agujero ahora se miden:
+ *
+ *   - `aire`, el aire muerto que quedó adentro del bloque, EN CUALQUIER PARTE y no
+ *     solo al abrir: dos de los catorce están al abrir y doce en el medio, así que
+ *     una vara que mirara nada más el arranque volvía a dejar pasar los doce
+ *     (`aire.huecos`);
+ *   - y `retoma` pasó a ver también la toma que se cortó sin cuenta, por la orden
+ *     al editor que quedó adentro (`retoma.mirarLaOrden`).
+ *
+ * `aire` cuenta solo los bloques de cámara, y eso no es una comodidad para que el
+ * número dé bajo: en los de pantalla el hueco es la clase —el profesor tipeando o
+ * esperando a una herramienta— y contarlo pondría ocho defectos permanentes que
+ * nadie debería arreglar. Los ocho casos y los tres renders que lo comprueban
+ * están en la cabecera de `engine/aire.js`.
  */
 
 const edges = require('../engine/speech-edges');
 const repeticiones = require('../engine/repeticiones');
 const retoma = require('../engine/retoma');
+const aire = require('../engine/aire');
 // Reconocer la claqueta lo hace el motor, que la busca en el audio para
 // sincronizar: con una copia acá, la medición podía dejar de ver justo la que el
 // piso está impidiendo que entre.
 const clap = require('../engine/clap-detect');
 
 const TIPOS = ['claqueta', 'chatter', 'conteo', 'colgando', 'abriendo', 'conector',
-    'mitadPalabra', 'repetido', 'retoma'];
+    'mitadPalabra', 'repetido', 'retoma', 'aire'];
 
 /**
  * ¿El corte se metió dentro del sonido?
@@ -200,9 +214,38 @@ function revisarBloque(words, block, anterior, voz) {
     // defecto no sirve para decidir si el arreglo sirvió.
     const dentroDelBloque = retoma.buscarEnBloque(words, block, {});
     if (dentroDelBloque) {
-        fallas.push(['retoma',
-            `${dentroDelBloque.seVaSec}s de más: la toma se rehace tras la cuenta de ` +
-            `${dentroDelBloque.cuentaSec}s`]);
+        fallas.push(['retoma', dentroDelBloque.senal === 'orden'
+            ? `${dentroDelBloque.seVaSec}s de más: la toma se corta en «${dentroDelBloque.orden}» ` +
+              `(${dentroDelBloque.ordenSec}s) y detrás sigue la charla de rodaje`
+            : `${dentroDelBloque.seVaSec}s de más: la toma se rehace tras la cuenta de ` +
+              `${dentroDelBloque.cuentaSec}s`]);
+    }
+
+    // Aire: al alumno le quedaron segundos de nada mirando una cara quieta.
+    //
+    // Es el agujero de la cabecera, y no lo veía ninguna de las otras nueve
+    // porque todas miran PALABRAS. El bloque 1 de la clase 13 abría nueve segundos
+    // antes de la primera palabra de la clase, y sus palabras estaban todas "bien"
+    // puestas: el transcript había fusionado el ensayo de la frase con la toma
+    // buena, así que para el plan ahí se estaba dando clase. Lo único que lo puede
+    // contestar es la onda, y por eso pide el mapa de voz.
+    //
+    // Va sobre el bloque y no sobre el borde a propósito: `edge.audio` ya dice si
+    // el corte cayó encima de alguien hablando, que es la pregunta de al lado y la
+    // contesta bien; lo que faltaba es cuánto quedó DEL LADO DE ADENTRO.
+    //
+    // Un defecto por bloque y no uno por hueco, aunque haya bloques con dos: la
+    // unidad de esta vara es el bloque —el porcentaje se saca sobre los 170— y un
+    // bloque con dos huecos es un bloque para revisar, no dos.
+    const conAire = aire.huecos(block, voz);
+    if (conAire && conAire.length) {
+        const peor = conAire.reduce((a, h) => (h.largoSec > a.largoSec ? h : a));
+        const donde = peor.alAbrir ? 'al abrir' : `a los ${Math.round(peor.desdeSec - block.startSec)}s`;
+        const total = conAire.reduce((n, h) => n + h.largoSec, 0);
+        fallas.push(['aire',
+            `${Math.round(total * 10) / 10}s sin que se hable al micrófono` +
+            (conAire.length > 1 ? ` en ${conAire.length} huecos` : '') +
+            `: el peor son ${peor.largoSec}s ${donde}`]);
     }
 
     return fallas;
@@ -230,10 +273,10 @@ function contarClase(words, blocks, voz) {
         }
         anterior = block;
     }
-    // Sin mapa de voz, "abre partiendo una frase" no se pudo medir en esta
-    // clase y da cero. Es el mismo cuidado que `sinMedir`: un cero que sale de
-    // no haber mirado se lee igual que un cero que sale de no haber defectos, y
-    // son cosas opuestas.
+    // Sin mapa de voz, "abre partiendo una frase" y "aire muerto adentro" no se
+    // pudieron medir en esta clase y dan cero. Es el mismo cuidado que
+    // `sinMedir`: un cero que sale de no haber mirado se lee igual que un cero
+    // que sale de no haber defectos, y son cosas opuestas.
     return { cuenta, ejemplos, total, sinMedir, sinVoz: (voz && voz.tramos) ? 0 : total };
 }
 

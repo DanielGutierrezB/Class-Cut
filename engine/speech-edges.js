@@ -645,6 +645,130 @@ function suenaEntre(voz, desdeSec, hastaSec, fps) {
 }
 
 /**
+ * Cuánto tiene que durar un tramo del mapa para que sea voz y no un crujido.
+ *
+ * **Este número es la corrección de un error de medición, y sin él el arreglo del
+ * aire no arregla nada.** El mapa de `engine/voz.js` marca cualquier sonido de
+ * 40 ms (`voz.MINIMO_SEC`), y en una sala hay muchos: en los nueve segundos
+ * mudos del bloque 1 de la clase 13 el mapa reporta OCHO tramos —118,50 · 123,12
+ * · 123,24 · 124,60 · 125,18 · 125,30 · 127,12 · 127,84—, de 60 a 280 ms. Con
+ * ffmpeg esos mismos segundos miden entre −44 y −56 dB, o sea mudos. Preguntarle
+ * al mapa «¿suena algo?» contesta que sí a medio segundo del IN y no mueve nada;
+ * peor, esas migas parten el hueco en pedazos de menos de cinco segundos y una
+ * primera medición del curso ni lo encontró.
+ *
+ * La idea de exigir sonido SOSTENIDO ya está en el repo: `audio-onset.voiceRuns`
+ * descarta los tramos más cortos que `minRun` por esto mismo. Lo que cambia acá
+ * es el largo, porque el mapa de voz ya viene con el filtro de 40 ms de
+ * `audio-onset` puesto y hace falta uno más alto.
+ *
+ * **Dónde ponerlo, medido sobre los 19.427 tramos del curso.** Cruzando cada
+ * tramo con el transcript, la proporción que tiene una palabra encima sube con el
+ * largo sin saltos: 36% a los 40–60 ms, 51% a los 100–150, 70% a los 200–250,
+ * 88% a los 400–600, 98% al segundo. No hay valle donde cortar, así que el
+ * criterio no puede ser la forma de la curva: es que una sílaba de este curso
+ * dura 192 ms (40.744 palabras, 5,22 sílabas por segundo hablado), y algo más
+ * corto que una sílaba no es alguien hablando. Un cuarto de segundo es una sílaba
+ * con margen, y tirar todo lo que esté por debajo cuesta el 34% de los tramos
+ * pero solo el 8,9% del sonido: son migas.
+ *
+ * Y en el material se comprueba en la dirección que importa. Con 0,20 s los dos
+ * bloques cuyo defecto está confirmado por render —clase 7 bloque 8 y clase 11
+ * bloque 1— NO aparecen, porque una miga de 0,20–0,25 les parte el hueco al
+ * medio. Con 0,25 aparecen los dos.
+ */
+const VOZ_MINIMA_SEC = 0.25;
+
+/**
+ * Y un hueco tiene que durar esto para que sea aire muerto y no una pausa.
+ *
+ * Acá tampoco hay valle: los huecos del curso decaen parejo (82 de más de 2 s,
+ * 44 de 3, 26 de 4, 14 de 5, 8 de 6, 3 de 10). El listón es el del editor, que
+ * revisó el curso entregado con esta vara, y lo que lo sostiene es lo que se
+ * escucha a cada lado. De los 5 s para arriba los catorce huecos son o el
+ * profesor esperando a una herramienta o una toma que se abandonó; de los 5 para
+ * abajo entran sus pausas, incluido el hueco de 3,34 s con que abre el bloque 14
+ * de la clase 2, que renderizado suena «Déjamelo en los comentarios y luego le
+ * damos», o sea clase.
+ */
+const HUECO_MINIMO_SEC = 5;
+
+/**
+ * Los tramos del mapa que duran lo suficiente para ser voz.
+ *
+ * @param {object|null} voz mapa de voz de la clase (`engine/voz.js`)
+ * @param {number} [minimoSec] `VOZ_MINIMA_SEC` si no se dice
+ * @returns {Array<[number, number]>}
+ */
+function vozSostenida(voz, minimoSec) {
+    const minimo = minimoSec == null ? VOZ_MINIMA_SEC : minimoSec;
+    return ((voz && voz.tramos) || []).filter(([desde, hasta]) => hasta - desde >= minimo);
+}
+
+/**
+ * Desde dónde habla alguien al micrófono, mirando hacia adelante.
+ *
+ * @returns {number|null} el tiempo, o null sin mapa o si nadie habla en el tramo
+ */
+function arranqueDelSonido(voz, desdeSec, hastaSec, minimoSec) {
+    const tramos = vozSostenida(voz, minimoSec);
+    if (!tramos.length) return null;
+    for (const [desde, hasta] of tramos) {
+        if (hasta <= desdeSec) continue;
+        if (desde >= hastaSec) return null;
+        // Un tramo que arranca ANTES del borde y sigue después no deja hueco: se
+        // está hablando encima del corte, y el arranque es el corte mismo.
+        return Math.max(desde, desdeSec);
+    }
+    return null;
+}
+
+/**
+ * Los pedazos de aire muerto que hay entre dos tiempos, según el mapa de voz.
+ *
+ * **Qué mide el mapa, dicho con precisión, porque de eso depende que esto sea
+ * legítimo.** No mide silencio: mide si alguien habla ENTRANDO AL MICRÓFONO, con
+ * el umbral sacado de la clase entera. El ensayo y la charla de rodaje pasan a
+ * dos metros del micro y quedan 20 dB por debajo de la toma —en la clase 13 el
+ * ensayo pica entre −44 y −56 dB y la toma entre −25 y −35—, así que el mapa los
+ * deja afuera. Para un curso esa es exactamente la pregunta que hay que hacer: la
+ * clase se dice siempre al micrófono, y lo que se dice lejos es rodaje.
+ *
+ * Los bordes del tramo NO abren hueco por sí solos: un bloque bien cortado tiene
+ * diez cuadros de aire a cada lado por diseño (`borde.js`), así que el silencio
+ * que toca el borde solo cuenta si llega a `HUECO_MINIMO_SEC` por su cuenta.
+ *
+ * @param {object|null} voz mapa de voz; sin él no se puede afirmar nada
+ * @param {object} [options] `{minimoSec, huecoMinimoSec}`
+ * @returns {Array<{desdeSec, hastaSec, largoSec, alAbrir, alCerrar}>|null}
+ */
+function huecosDeAire(voz, desdeSec, hastaSec, options) {
+    if (!voz || !voz.tramos || !voz.tramos.length) return null;
+    const minimoHueco = (options && options.huecoMinimoSec) || HUECO_MINIMO_SEC;
+    const tramos = vozSostenida(voz, options && options.minimoSec)
+        .filter(([d, h]) => h > desdeSec && d < hastaSec);
+
+    const huecos = [];
+    let cursor = desdeSec;
+    const anotar = (d, h) => {
+        if (h - d < minimoHueco) return;
+        huecos.push({
+            desdeSec: Math.round(d * 100) / 100,
+            hastaSec: Math.round(h * 100) / 100,
+            largoSec: Math.round((h - d) * 100) / 100,
+            alAbrir: d - desdeSec < 0.05,
+            alCerrar: hastaSec - h < 0.05
+        });
+    };
+    for (const [d, h] of tramos) {
+        if (d > cursor) anotar(cursor, d);
+        cursor = Math.max(cursor, h);
+    }
+    if (cursor < hastaSec) anotar(cursor, hastaSec);
+    return huecos;
+}
+
+/**
  * ¿Y ABRE partiendo una frase por la mitad?
  *
  * Es la otra mitad de "queda colgando" y faltaba, que no es lo mismo que no
@@ -734,7 +858,17 @@ function abreAMitad(words, startSec, endSec, voz) {
     // bloques que se quedaron sin medir, como ya hace con los bordes sin la
     // medición de onda: contestar que sí con el reloj es lo que daba 7 en un
     // curso que tiene 2.
-    return suenaEntre(voz, previa.start, startSec) === true;
+    //
+    // Se pregunta sobre el mapa SIN MIGAS (`vozSostenida`), y no es un detalle de
+    // implementación: el piso de `suenaEntre` es un frame, y un crujido de sala de
+    // 60 ms lo pasa. Cuando la palabra de al lado está a cinco segundos del corte
+    // —porque el transcript la puso mal, que es justo la situación de estos
+    // bloques— en el medio hay sala de sobra: en el bloque 1 de la clase 13, entre
+    // «es» (121,64) y el corte hay cinco tramos de 60 a 100 ms y ni uno es nadie
+    // hablando. Contándolos, esta cuenta informaba dos frases partidas que no
+    // existen y las informaba justo en los dos bloques donde `aire` acababa de
+    // sacar el ensayo: el arreglo se veía como un empeoramiento.
+    return suenaEntre({ tramos: vozSostenida(voz) }, previa.start, startSec) === true;
 }
 
 /**
@@ -818,6 +952,11 @@ module.exports = {
     quedaColgando,
     abreAMitad,
     suenaEntre,
+    vozSostenida,
+    arranqueDelSonido,
+    huecosDeAire,
+    VOZ_MINIMA_SEC,
+    HUECO_MINIMO_SEC,
     spoken,
     textOf,
     esConteo,

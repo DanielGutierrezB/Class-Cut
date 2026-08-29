@@ -107,10 +107,18 @@ async function unaClase(scan, cls, cliente, modelo) {
     });
 
     const info = onset.wavInfo(cls.liveMixPath);
+    // El mapa de voz se pide una vez y se usa dos: el motor lo necesita para no
+    // abrir un bloque sobre silencio y la medición para contarlo. Con `asegurar`
+    // sale del cache del Backup, así que las dos veces es el mismo mapa —y no dos
+    // lecturas del Live-Mix que podrían discrepar si el archivo cambiara.
+    const mapa = voz.asegurar({
+        root: scan.root, sequenceName: cls.sequenceName, wavPath: cls.liveMixPath
+    });
     const decided = await decidir.decidirCortes({
         cls,
         words: transcript.words,
         wav: info ? { file: cls.liveMixPath, info } : null,
+        voz: mapa,
         ai: cliente,
         onStage: (etapa, i) => process.stdout.write(
             `\r  ${etapa}${i && i.percent != null ? ` ${i.percent}%` : ''}          `)
@@ -155,11 +163,10 @@ async function unaClase(scan, cls, cliente, modelo) {
         review: decided.review,
         // Con las palabras que el motor USÓ para decidir y no con las del
         // transcript: los defectos se cuentan mirando qué palabras caen dentro de
-        // cada bloque, así que medir con otro reloj mide otra cosa. Y con el mapa
-        // de voz, que el motor ya dejó en el Backup: "abre partiendo una frase"
-        // lo necesita y sin él da cero por no haber mirado.
-        cuenta: defectos.contarClase(decided.palabras, decided.alignResult.blocks,
-            voz.asegurar({ root: scan.root, sequenceName: cls.sequenceName, wavPath: cls.liveMixPath }))
+        // cada bloque, así que medir con otro reloj mide otra cosa. Y con el mismo
+        // mapa de voz con el que se decidió: "abre partiendo una frase" y "aire
+        // muerto adentro" lo necesitan, y sin él dan cero por no haber mirado.
+        cuenta: defectos.contarClase(decided.palabras, decided.alignResult.blocks, mapa)
     };
 }
 
@@ -201,8 +208,11 @@ async function unaClase(scan, cls, cliente, modelo) {
                 parte(`\r${etiqueta} ✓ ${hhmmss(r.msProceso)} · ${r.plan.totals.kept}/${r.plan.totals.segments} bloques · ` +
                     `${Math.round(r.plan.totals.keepSec / 60)}min de ${Math.round((cls.durationSec || 0) / 60)}min · ` +
                     `${r.transcript.wordCount} palabras · ${((p.ratio || 0) * 100).toFixed(1)}% cierran (pozo ${p.pozoSec}s)`);
-                parte(`         defectos: claqueta ${c.claqueta} · chatter ${c.chatter} · conteo ${c.conteo} · ` +
-                    `colgando ${c.colgando} · conector ${c.conector} · mitadPalabra ${c.mitadPalabra} · repetido ${c.repetido}`);
+                // De la lista de tipos y no a mano: escrito a mano se quedó sin
+                // `retoma` y sin `aire`, y el parte del lote decía "sin defectos"
+                // en clases que tenían uno de esos. Es el mismo cuidado que ya
+                // toma `medir-cortes.js` para armar su tabla.
+                parte(`         defectos: ${defectos.TIPOS.map(t => `${t} ${c[t]}`).join(' · ')}`);
                 for (const d of r.cuenta.ejemplos) parte(`           b${d.bloque} ${d.tipo}: ${d.texto}`);
                 for (const w of r.avisos) parte(`           ⚠ ${w.code}: ${w.message}`);
             } catch (err) {

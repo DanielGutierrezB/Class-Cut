@@ -224,6 +224,110 @@ module.exports = t => {
         t.eq(blocks[0].startSec, 0);
     });
 
+    t.group('la toma que se corta y no vuelve');
+
+    /** Palabras separadas por un silencio de verdad: apartes, no una frase. */
+    function sueltas(textos, desde, cada) {
+        return textos.map((text, i) => ({
+            text,
+            start: desde + i * (cada || 2),
+            end: desde + i * (cada || 2) + 0.3
+        }));
+    }
+
+    /**
+     * La forma del bloque 1 de la clase 11: la toma cierra, el profesor dice
+     * «Pausa.» y detrás quedan sesenta segundos de sala hablando suelto. La toma
+     * buena arranca DESPUÉS del OUT, así que no hay con qué comparar.
+     */
+    function bloqueConTomaMuerta() {
+        const words = [
+            ...decir('Podemos auditar el código versus nuestras especificaciones.', 0),
+            ...decir('Pausa.', 8),
+            ...sueltas(['Bueno.', 'Ok.', 'Listo.'], 10)
+        ];
+        return { words, blocks: [bloque(0, 0, 16)] };
+    }
+
+    t.test('la ve por la orden al editor, sin que nadie cuente', () => {
+        const { words, blocks } = bloqueConTomaMuerta();
+        t.eq(speech.conteosEn(words).length, 0, 'no hay cuenta en ninguna parte');
+        const hallado = retoma.buscarEnBloque(words, blocks[0], { fps: 30 });
+        t.ok(hallado, 'y la encuentra igual');
+        t.eq(hallado.senal, 'orden');
+        t.eq(hallado.accion, 'recortar', 'la toma buena es la de antes');
+        t.near(hallado.timeSec, 8, 0.1, 'el OUT retrocede hasta la orden');
+        t.eq(hallado.orden, 'Pausa.');
+    });
+
+    t.test('recortar deja la toma que cerró y se lleva la charla', () => {
+        const { words, blocks } = bloqueConTomaMuerta();
+        const res = retoma.quitarRetomas({
+            alignResult: { blocks }, words, wav: null, options: { fps: 30 }
+        });
+        t.eq(res.stats.encontradas, 1);
+        t.near(blocks[0].endSec, 8, 0.15, 'el OUT quedó en la orden');
+        t.eq(blocks[0].startSec, 0, 'y el IN no se movió');
+        t.eq(retoma.buscarEnBloque(words, blocks[0], { fps: 30 }), null, 'ya no queda nada');
+    });
+
+    t.test('una pausa de verdad no es una toma muerta', () => {
+        // El bloque 6 de la clase 1: «…nos permite corregir eso. Pausa.
+        // Entonces, aquí mostramos pantalla.» El profesor para y sigue con la
+        // clase. Cortar acá tiraría 6,5 s de material único, y lo único que lo
+        // distingue del caso de arriba es que detrás no hay charla de rodaje.
+        const words = [
+            ...decir('La especificación nos permite corregir eso.', 0),
+            ...decir('Pausa.', 6),
+            ...decir('Entonces, aquí mostramos la pantalla del editor y seguimos.', 8)
+        ];
+        t.eq(retoma.buscarEnBloque(words, bloque(0, 0, 16), { fps: 30 }), null);
+    });
+
+    t.test('una orden dicha DENTRO de una frase es la clase hablando', () => {
+        // El bloque 14 de la clase 2: «Pausa el video, termina de leer el PROM».
+        // Se lo dice al alumno, no al editor.
+        const words = [
+            ...decir('Ahora quiero que hagas esto.', 0),
+            ...decir('Pausa el video, termina de leer el PROM y volvé.', 2),
+            ...sueltas(['Bueno.', 'Ok.'], 8)
+        ];
+        t.eq(retoma.buscarEnBloque(words, bloque(0, 0, 12), { fps: 30 }), null,
+            'la orden no cierra su frase, así que no es un aparte');
+    });
+
+    t.test('si lo que queda no cierra su frase, no se recorta', () => {
+        // Recortar cambiaría un defecto por otro: el bloque terminaría colgando.
+        // Es la misma comprobación que la rama de la cuenta le hace a la toma
+        // nueva.
+        const words = [
+            ...decir('Podemos auditar el código versus nuestras', 0),
+            ...decir('Pausa.', 8),
+            ...sueltas(['Bueno.', 'Ok.', 'Listo.'], 10)
+        ];
+        t.eq(retoma.buscarEnBloque(words, bloque(0, 0, 16), { fps: 30 }), null);
+    });
+
+    t.test('y no se recorta si no queda bloque', () => {
+        const words = [
+            ...decir('Ya está.', 0),
+            ...decir('Pausa.', 1.5),
+            ...sueltas(['Bueno.', 'Ok.', 'Listo.'], 3)
+        ];
+        t.eq(retoma.buscarEnBloque(words, bloque(0, 0, 10), { fps: 30 }), null,
+            '1,5 s no es una toma');
+    });
+
+    t.test('la cuenta gana a la orden cuando están las dos', () => {
+        // La cuenta dice dónde ARRANCA la toma que el profesor quiere; la orden,
+        // dónde se murió la anterior. Con las dos, lo que hay que conservar es lo
+        // de después de la cuenta, y la orden es justo el aparte que la precede.
+        const { words, blocks } = bloqueConDosTomas();
+        const hallado = retoma.buscarEnBloque(words, blocks[0], { fps: 30 });
+        t.eq(hallado.senal, 'cuenta');
+        t.eq(hallado.accion, 'abrir');
+    });
+
     t.group('el suelo del colchón de aire');
 
     t.test('una palabra de duración cero en el corte no es la palabra anterior', () => {

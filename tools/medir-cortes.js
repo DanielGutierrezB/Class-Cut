@@ -64,7 +64,27 @@ const baseline = {
     // cuando se agregó el defecto ya no había con qué comparar hacia atrás, así
     // que es lo que había en el curso el día que se empezó a ver — 4 bloques de
     // 172, en las clases 1, 4, 7 y 11, con 137,8 s dichos dos veces.
+    //
+    // Los 4 se arreglaron y el renglón quedó en 0, y después el detector aprendió
+    // a ver la toma que se corta SIN cuenta (`retoma.mirarLaOrden`): sobre el
+    // curso entregado eso encontró 1 más, el bloque 1 de la clase 11, con 62,6 s
+    // de charla de rodaje adentro. La vara sigue siendo 4 porque es la única cifra
+    // con historia; lo que hay que mirar es que el renglón vuelva a 0.
     retoma: 4,
+    // "Aire muerto adentro" no tiene vara hacia atrás por la misma razón que
+    // `abriendo`: se agregó mirando estos 170 bloques. El 4 es lo que el curso
+    // entregado tenía el día que se empezó a medir —cuatro bloques de cámara con
+    // catorce huecos de más de cinco segundos entre todos, 2,1 minutos—, y los
+    // cuatro se escucharon uno por uno; están anotados con lo que suena en la
+    // cabecera de `engine/aire.js`.
+    //
+    // De los 4, tres los arregla el motor: dos moviendo el IN (`aire.quitarAire`)
+    // y uno moviendo el OUT (`retoma`, que ve la misma toma abandonada desde el
+    // transcript). El cuarto, el bloque 4 de la clase 2, son tres arrancadas
+    // fallidas en el medio del bloque y se avisa a propósito en vez de cortarlo:
+    // el razonamiento, con las tres opciones que se descartaron, está en esa misma
+    // cabecera.
+    aire: 4,
     total: 174
 };
 
@@ -170,12 +190,20 @@ console.log(`  cortado a mitad de palabra       ${fmt(cuenta.mitadPalabra, basel
     (sinMedir ? `   ⚠ ${sinMedir} bordes sin la medición: reprocesá para poder contarlo` : ''));
 console.log(`  repite el bloque anterior        ${fmt(cuenta.repetido, baseline.repetido)}`);
 console.log(`  la retoma quedó adentro          ${fmt(cuenta.retoma, baseline.retoma)}`);
+console.log(`  aire muerto adentro              ${fmt(cuenta.aire, baseline.aire)}` +
+    (sinVoz ? `   ⚠ ${sinVoz} bloques sin mapa de voz: no se pudo medir` : ''));
 
 const objetivos = [
     ['0 bloques terminando en chatter', cuenta.chatter === 0],
     ['0 cortes a mitad de palabra', cuenta.mitadPalabra === 0],
     ['finales a mitad de frase en una decena', cuenta.colgando <= 15],
-    ['0 retomas dentro de un bloque', cuenta.retoma === 0]
+    ['0 retomas dentro de un bloque', cuenta.retoma === 0],
+    // El objetivo es 0 y el motor llega a 1: el bloque 4 de la clase 2 son tres
+    // arrancadas fallidas en el medio del bloque, y las tres maneras de cortarlas
+    // dejan la clase peor que el hueco (el razonamiento y los números están en la
+    // cabecera de `engine/aire.js`). Queda en rojo a propósito, porque es un
+    // bloque para que lo mire el editor y no algo que el motor pueda resolver.
+    ['0 bloques con aire muerto adentro', cuenta.aire === 0]
 ];
 console.log('\nobjetivos del plan:');
 for (const [texto, ok] of objetivos) console.log(`  ${ok ? '✓' : '✗'} ${texto}`);

@@ -199,8 +199,11 @@ const volcarEn = arg('volcar');
         // `reloj: 'crudo'` porque los relojes los arma esta herramienta, que es la
         // que elige el brazo: sin eso el motor le pondría el suyo encima y los tres
         // brazos medirían lo mismo.
+        // `voz: mapa` para que el motor no lo vuelva a calcular del Live-Mix: es
+        // el mismo mapa con el que se mide unas líneas abajo, así que los dos
+        // brazos deciden y se miden con el mismo, que es de lo que se trata acá.
         const salida = await decidir.decidirCortes({
-            cls, words: paraDecidir, reloj: 'crudo', wav, ai: cliente,
+            cls, words: paraDecidir, reloj: 'crudo', wav, voz: mapa, ai: cliente,
             options: sinRepaso ? { repaso: 'no' } : null
         });
 

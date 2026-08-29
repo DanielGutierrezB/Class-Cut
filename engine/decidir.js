@@ -23,6 +23,8 @@ const speech = require('./speech-edges');
 const cutRefine = require('./cut-refine');
 const repeticiones = require('./repeticiones');
 const retoma = require('./retoma');
+const aire = require('./aire');
+const mapaDeVoz = require('./voz');
 const coherence = require('./coherence');
 const repasar = require('./repasar');
 
@@ -40,10 +42,11 @@ const repasar = require('./repasar');
  *   words    palabras del transcript, con tiempos
  *   reloj    `auto` (por defecto) | `crudo`, para el A/B de `tools/medir-repaso.js`
  *   wav      {file, info} del Live-Mix, o null si no hay
+ *   voz      mapa de voz de la clase (`engine/voz.js`); si no viene, se calcula
  *   ai       cliente del modelo local, o null para cortar solo con reglas
  *   signal   AbortSignal
  *   onStage  (etapa, {percent}) para el progreso
- * @returns {Promise<{alignResult, review, warnings, palabras, reloj}>}
+ * @returns {Promise<{alignResult, review, warnings, palabras, reloj, voz}>}
  */
 async function decidirCortes(params) {
     const { cls, wav, ai, signal } = params;
@@ -90,12 +93,31 @@ async function decidirCortes(params) {
 
     // Sin transcript no hay nada que afinar ni que leer: los marcadores se quedan
     // donde el CD los dejó, que ya se avisó al alinear.
-    if (!words.length) return { alignResult, review: null, warnings, palabras: words, reloj: puesto.como };
+    if (!words.length) {
+        return { alignResult, review: null, warnings, palabras: words, reloj: puesto.como, voz: null };
+    }
 
     // El suelo de la claqueta lo descubre el alineado (es quien la busca en el
     // audio) y de acá en adelante lo respeta todo el mundo: ningún IN puede
     // abrirse antes, ni por regla, ni por modelo, ni por repaso.
     if (alignResult.pisoSec != null) options.pisoSec = alignResult.pisoSec;
+
+    // El mapa de voz. Se calcula acá si nadie lo trajo, y no se saltea la etapa
+    // cuando falta: el aire muerto de adentro de un bloque es un defecto que
+    // ninguna otra regla puede ver —todas las demás miran palabras— y dejarlo
+    // dependiendo de que cada caller se acuerde de pasar el mapa es la manera de
+    // que un día deje de aplicarse sin que nada falle. Cuesta 0,3 s por clase;
+    // quien ya lo tenga —el lote, el medidor— lo pasa y no se relee el Live-Mix.
+    const voz = params.voz !== undefined
+        ? params.voz
+        : (wav && wav.file ? mapaDeVoz.deLaClase(wav.file) : null);
+    if (!voz) {
+        warnings.push({
+            code: 'sin_mapa_de_voz',
+            message: 'Sin el mapa de voz del Live-Mix no se puede saber si a un bloque le quedó ' +
+                'aire muerto adentro: esa comprobación queda sin hacer en esta clase.'
+        });
+    }
 
     // Las reglas ya dejaron cada borde en un sitio defendible; acá se miran solo
     // los que tienen más de una opción razonable, que es donde el criterio cambia
@@ -119,6 +141,33 @@ async function decidirCortes(params) {
     // problema pendiente algo que se puede quitar sin preguntarle a nadie.
     notify('despegar', {});
 
+    // Y antes que las dos: el arranque del bloque. Los otros dos detectores
+    // comparan lo que se DICE —la cola de un bloque contra la cabeza del
+    // siguiente, las dos tomas de una frase— y un bloque que abre nueve segundos
+    // antes de la toma les da a comparar el ensayo: en la clase 13 el transcript
+    // trae el ensayo y la toma fusionados en una sola frase. Corriendo el IN
+    // primero, lo que comparan después es lo que de verdad va a sonar. Es el mismo
+    // argumento por el que la retoma interna va antes que la que cruza el borde.
+    try {
+        aire.quitarAire({ alignResult, words, wav, voz, options });
+        // Los huecos que quedan se avisan, incluidos los que esta regla no toca
+        // por diseño. Mover el IN arregla el aire del arranque y nada más; el del
+        // medio es material para que lo mire una persona, y el aviso es la única
+        // manera de que llegue (`engine/aire.js` tiene por qué no se corta).
+        for (const q of alignResult.aire.quedan || []) {
+            const donde = q.peor.alAbrir
+                ? 'al abrir'
+                : `a los ${Math.round(q.peor.desdeSec - alignResult.blocks[q.bloque].startSec)}s`;
+            warnings.push({
+                code: 'aire',
+                message: `Bloque ${q.bloque + 1}: ${q.totalSec}s sin que se hable al micrófono ` +
+                    `(el peor son ${q.peor.largoSec}s ${donde}). Hay que mirarlo a mano.`
+            });
+        }
+    } catch (err) {
+        warnings.push({ code: 'aire_fallo', message: `No se pudo medir el aire muerto: ${err.message}` });
+    }
+
     // Las retomas internas van PRIMERO, antes de las que cruzan el borde entre
     // dos bloques. El detector de repeticiones compara la cola de un bloque
     // contra la CABEZA del siguiente, y cuando ese siguiente arranca con una
@@ -131,8 +180,11 @@ async function decidirCortes(params) {
         for (const h of retomas.hallazgos.filter(x => x.accion === 'no se pudo')) {
             warnings.push({
                 code: 'retoma',
-                message: `Bloque ${h.bloque + 1}: la explicación está dos veces adentro ` +
-                    `(el profesor la rehace en ${h.tomaSec}s) y no se pudo arreglar solo.`
+                message: h.senal === 'orden'
+                    ? `Bloque ${h.bloque + 1}: la toma se corta en «${h.orden}» (${h.ordenSec}s) y ` +
+                      `detrás quedan ${h.seVaSec}s de charla de rodaje que no se pudieron sacar solos.`
+                    : `Bloque ${h.bloque + 1}: la explicación está dos veces adentro ` +
+                      `(el profesor la rehace en ${h.tomaSec}s) y no se pudo arreglar solo.`
             });
         }
     } catch (err) {
@@ -190,7 +242,10 @@ async function decidirCortes(params) {
         }
     }
 
-    return { alignResult, review, warnings, palabras: words, reloj: puesto.como };
+    // El mapa sale con el resultado porque los defectos se miden con él: quien
+    // pida los cortes tiene que poder contarlos con el mismo mapa con el que se
+    // decidieron, igual que con las palabras y el reloj.
+    return { alignResult, review, warnings, palabras: words, reloj: puesto.como, voz };
 }
 
 module.exports = { decidirCortes };
