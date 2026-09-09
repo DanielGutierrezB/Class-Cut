@@ -23,6 +23,7 @@ const fs = require('fs');
 const path = require('path');
 
 const courseScan = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const mediaProbe = require('../engine/media-probe');
 const fcp = require('../engine/fcp-xml');
 const exporter = require('../engine/export');
@@ -112,7 +113,7 @@ function fmt(n) {
 function main() {
     const o = opciones(process.argv.slice(2));
 
-    const scan = courseScan.scan(o.curso);
+    const scan = courseScan.scan(o.curso, { notasDirs: ajustes.carpetasDeNotas() });
     const cls = (scan.classes || []).find(c =>
         c.sequenceName && c.sequenceName.startsWith(`${o.clase}_`));
     if (!cls) {

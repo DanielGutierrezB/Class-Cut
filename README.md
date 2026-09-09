@@ -10,24 +10,28 @@ dijo, calcula los cortes y escribe el XML. Nada del material original se toca.
 
 ## Cómo funciona
 
-1. **Carpetas** — el curso completo, un día o una sola clase, y **todas las que
+1. **Grabar** — las notas de rodaje se toman mientras la clase se graba, en vez
+   de a mano en otra herramienta: el profesor dice "3, 2, 1" y la toma se abre,
+   dice "Pausa" y se cierra. Sale el mismo XML de marcadores que lee el resto de
+   la app, en la carpeta del curso (ver **Dónde caen las notas en vivo**).
+2. **Carpetas** — el curso completo, un día o una sola clase, y **todas las que
    quieras a la vez**; la app reconoce las clases por su estructura (un XML del
    Rodecaster con `Audio/` y `Video/` al lado), no por el nombre de la carpeta.
-2. **Clases** — tabla con lo que encontró, agrupada por carpeta: número de clase
+3. **Clases** — tabla con lo que encontró, agrupada por carpeta: número de clase
    (sale del nombre de secuencia del XML), duración real medida con ffprobe,
    bloques del CD y avisos.
-3. **Procesar** — transcribe `Live-Mix.wav` con Whisper local, ubica la claqueta,
+4. **Procesar** — transcribe `Live-Mix.wav` con Whisper local, ubica la claqueta,
    alinea cada marcador con el audio y decide dónde el corte tiene sentido (ver
    **Cortes con criterio**). Cada clase escribe su XML en el `The Cutter/` de SU
    carpeta, así que una corrida puede mezclar carpetas sin que se cruce nada.
-4. **Revisar cortes** — waveform, bloques y transcript para ajustar antes de
+5. **Revisar cortes** — waveform, bloques y transcript para ajustar antes de
    exportar, con el tramo que se está editando reproducible para oír por dónde
    pasa cada borde (ver **Escuchar el tramo que se está cortando**); el **guion
    final**, que es la clase cortada leída de corrido con lo que no cierra marcado
    en su bloque; y **ver la clase**, que la reproduce montada (ver **El
    reproductor**).
 
-Los cuatro son sitios, no etapas: los del cabezal son botones y se entra y sale
+Los cinco son sitios, no etapas: los del cabezal son botones y se entra y sale
 en cualquier orden. Abrir una carpeta con clases ya procesadas y darle a
 **Revisar cortes** funciona sin volver a procesar nada — que era lo que antes
 obligaba a repetir una hora de trabajo para poder mirar lo que ya estaba hecho.
@@ -1256,6 +1260,38 @@ colores de clip desde FCP7, así que para eso va aparte
 [resolve/colorear-clips.py](resolve/colorear-clips.py), que se corre dentro de
 Resolve una vez importado.
 
+## Dónde caen las notas en vivo
+
+Tomar notas escribe en la carpeta que elige el editor —una por curso— y adentro
+la reparte así:
+
+```
+<la carpeta>/
+  xml/
+    01_curso_2026-09-08_13-01-47.xml     lo que se importa en Premiere
+    Audio/                               el WAV de cada grabación
+    Datos/                               el archivo con la hora del día
+```
+
+Antes caía todo suelto en la raíz, y con trece clases eso son trece XML, trece
+JSON y una carpeta de audio revueltos con lo que el editor ya tuviera ahí. Lo
+único que él abre a mano es el XML: por eso los XML quedan juntos y a la vista y
+lo demás baja un piso. `Audio` va con mayúscula porque es la del Rodecaster —el
+editor abre carpetas que se llaman así todo el día— y `Datos` la sigue; se llama
+`Datos` y no `Notas` porque las notas SON el XML, y ese nombre tiene que decir
+"acá no hay nada que importar".
+
+La forma la decide un solo archivo ([engine/workspace.js](engine/workspace.js)),
+que es donde también vive la de `The Cutter/`: esa ruta la arman cuatro archivos,
+y un `path.join` suelto en cualquiera de ellos escribe donde nadie va a buscar.
+
+Una carpeta de las de antes se muda sola la primera vez que se la lista, sin
+pisar nada y sin borrar nada que no haya movido. El orden importa: el archivo con
+la hora del día se mueve **último**, porque es lo que hace visible a una clase —
+si la mudanza se corta a la mitad, la clase sigue apareciendo en la lista donde
+está. Y los dos pisos se siguen leyendo, porque una carpeta de notas en un disco
+de solo lectura no se muda nunca.
+
 ## El trabajo viaja con la clase
 
 Todo lo que produce el pipeline vive en `The Cutter/Backup/`, y ese `The Cutter`
@@ -1346,10 +1382,12 @@ npx electron . --shot=/tmp/guion.png --js="$(node tools/ver-guion.js)"
 
 ```
 main.js · preload.js     Electron (el motor corre en el proceso principal)
+ipc/grabar.js            el puente de la toma de notas en vivo, aparte de main.js
 src/js/                  ventana: un módulo por paso, sin frameworks
   app.js                 solo el cableado: qué botón llama a qué
-  vista-carpeta · vista-clases · vista-corrida    pasos 1 a 3
-  visor/                 paso 4: onda, bordes, guion y reproductor
+  grabar/                paso 1: la toma de notas mientras la clase se graba
+  vista-carpeta · vista-clases · vista-corrida    pasos 2 a 4
+  visor/                 paso 5: onda, bordes, guion y reproductor
     pista.js             la clase cortada como una sola línea de tiempo
     reproductor.js       reproducirla saltando bloques y cambiando de cámara
     escucha.js           recorrer con el oído el tramo que se está editando
@@ -1379,6 +1417,11 @@ engine/
   cutplan.js · export.js · fcp-xml.js    plan de cortes y XML de salida
   media-server.js        sirve el video a la ventana, por rangos y con lista blanca
   paths.js               dónde están ffmpeg/ffprobe/whisper en esta máquina
+  grabacion.js           la sesión de notas en vivo: relojes, señales y claqueta
+  captura.js · oir.js    el WAV que se escribe mientras entra, y transcribir un tramo
+  golpe.js               el aplauso de la claqueta en el audio que va entrando
+  notas-vivo.js · notas-xml.js    qué es una toma, y cómo se escribe para Premiere
+  nombre-de-clase.js     cómo se llama su XML, y cómo se lee para emparejarlo
 resolve/                 script de color de clips para DaVinci (ver su README)
 tests/                   corredor propio: node tests/run.js
 ```
@@ -1406,6 +1449,13 @@ brew install ollama && ollama pull qwen3:4b
 Los modelos: `ggml-large-v3-turbo.bin` (1,5 GB) y `ggml-silero-v5.1.2.bin`
 (885 KB), de los repos `ggerganov/whisper.cpp` y `ggml-org/whisper-vad` en
 Hugging Face. Se pueden apuntar con `CLASSCUT_WHISPER_MODEL` y `CLASSCUT_VAD_MODEL`.
+
+Y uno más, opcional: `ggml-base.bin` (148 MB), para el ciclo de señales de la
+toma de notas en vivo. Ese ciclo escucha cada tres segundos buscando tres
+palabras conocidas —el conteo, "Retomamos", "Pausa"— y tira el texto, así que ahí
+importa cuánto tarda y no cuánto acierta. Sin él corre con el grande y funciona,
+pero gasta un segundo cada tres durante los cuarenta minutos de una clase.
+Diagnóstico dice si está. Se puede apuntar con `CLASSCUT_WHISPER_MODELO_LIVIANO`.
 
 ## Distribución
 

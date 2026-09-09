@@ -8,6 +8,7 @@
  */
 
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const workspace = require('../engine/workspace');
 const align = require('../engine/align');
 const onset = require('../engine/vendor/audio-onset');
@@ -37,7 +38,7 @@ if (!root) {
     process.exit(1);
 }
 
-const scan = scanner.scan(root);
+const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
 if (!scan.ok) {
     console.error(scan.error);
     process.exit(1);

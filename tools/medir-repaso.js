@@ -125,7 +125,7 @@ if (!RELOJES.includes(relojPedido)) {
 const volcarEn = arg('volcar');
 
 (async () => {
-    const scan = scanner.scan(root);
+    const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
     if (!scan.ok) { console.error(scan.error); process.exit(1); }
 
     const pedidas = arg('clases');

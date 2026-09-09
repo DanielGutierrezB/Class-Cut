@@ -283,7 +283,7 @@ code, .mono {
 .view { display: none; height: 100%; }
 .view.is-visible { display: flex; flex-direction: column; }
 
-/* Paso 1: soltar carpeta */
+/* Paso 2: soltar carpeta */
 
 .view-drop { align-items: center; justify-content: center; padding: 32px; }
 
@@ -350,7 +350,7 @@ code, .mono {
     color: #ffc9cc;
 }
 
-/* Paso 2: tabla de clases */
+/* Paso 3: tabla de clases */
 
 .subbar {
     display: flex;
@@ -759,7 +759,7 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
 .view-run .grid tbody tr { cursor: default; }
 .view-run .grid tbody tr:hover { background: var(--surface); }
 
-/* ── Paso 4: revisar cortes ──────────────────────────────────── */
+/* ── Paso 5: revisar cortes ──────────────────────────────────── */
 
 .picker {
     font: inherit;

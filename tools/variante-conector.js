@@ -35,6 +35,7 @@ const reloj = require('../engine/reloj');
 const borde = require('../engine/borde');
 const onset = require('../engine/vendor/audio-onset');
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const defectos = require('./defectos');
 
 const root = process.argv[2];
@@ -49,7 +50,7 @@ if (!fs.existsSync(dir)) {
     process.exit(1);
 }
 
-const scan = scanner.scan(root);
+const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
 const wavDe = {};
 for (const cls of (scan.ok ? scan.classes : [])) wavDe[cls.sequenceName] = cls.liveMixPath;
 

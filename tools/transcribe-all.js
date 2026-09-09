@@ -8,6 +8,7 @@
  */
 
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const transcribe = require('../engine/transcribe');
 
 const root = process.argv[2];
@@ -24,7 +25,7 @@ function fmt(seconds) {
 }
 
 (async () => {
-    const scan = scanner.scan(root);
+    const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
     if (!scan.ok) {
         console.error(scan.error);
         process.exit(1);

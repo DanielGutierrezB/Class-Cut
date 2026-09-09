@@ -9,3 +9,10 @@ vendor/whisper.cpp/
 *.log
 .DS_Store
 tests/tmp/
+# El material de relleno de la maqueta y las capturas que se sacan para mirar el
+# diseño. Se regeneran solas y pesan megas; lo que hay que revisar es la pantalla,
+# no el PNG. Van por prefijo porque cada arnés se arma la suya (`.cc-shot/`,
+# `.cc-ojo/`) y las que quedaron en el repo eran de sesiones ya terminadas.
+.maqueta/
+.capturas/
+.cc-*/

@@ -14,6 +14,7 @@
  */
 
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const probe = require('../engine/media-probe');
 const transcribe = require('../engine/transcribe');
 const onset = require('../engine/vendor/audio-onset');
@@ -37,7 +38,7 @@ if (!root) {
 const reloj = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 (async () => {
-    const scan = scanner.scan(root);
+    const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
     if (!scan.ok) { console.error(scan.error); process.exit(1); }
 
     const numeros = (arg('clases') || '').split(',').filter(Boolean).map(Number);

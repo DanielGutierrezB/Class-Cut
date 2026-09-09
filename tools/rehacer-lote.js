@@ -34,6 +34,7 @@ const fs = require('fs');
 const path = require('path');
 
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const probe = require('../engine/media-probe');
 const transcribe = require('../engine/transcribe');
 const decidir = require('../engine/decidir');
@@ -47,10 +48,7 @@ const voz = require('../engine/voz');
 const ia = require('../engine/ia');
 const defectos = require('./defectos');
 
-function arg(nombre, porDefecto) {
-    const i = process.argv.indexOf(nombre);
-    return i === -1 ? porDefecto : process.argv[i + 1];
-}
+const { arg, tardo: hhmmss } = require('./lib/cli');
 
 const root = process.argv[2];
 const force = process.argv.includes('--force');
@@ -77,19 +75,13 @@ function parte(linea) {
     try { fs.appendFileSync(parteEn, texto); } catch (e) { /* el lote no se cae por el parte */ }
 }
 
-function hhmmss(ms) {
-    const s = Math.round(ms / 1000);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    return (h ? `${h}h ` : '') + `${m}m ${String(s % 60).padStart(2, '0')}s`;
-}
-
 /**
  * Una clase, de la transcripción al XML.
  *
  * Es `pipeline.processClass` copiado a mano; ver la cabecera del archivo. Las
  * dos diferencias con él, las dos a propósito:
- *   - no pasa `viewMap`, porque el default `{PV:0, R:1}` es el del curso;
+ *   - no pasa `viewMap`, porque el default de `cutplan.js` —que sale de la lista
+ *     de vistas— es el del curso;
  *   - no llama a `hidratar`, que con `force` no tiene nada que hacer: traer el
  *     trabajo guardado de otra corrida es justo lo que no se quiere acá.
  */
@@ -189,7 +181,7 @@ async function unaClase(scan, cls, cliente, modelo) {
 }
 
 (async () => {
-    const scan = scanner.scan(root);
+    const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
     if (!scan.ok) { console.error(scan.error); process.exit(1); }
 
     let clases = scan.classes.filter(c => c.processable);

@@ -16,6 +16,7 @@
  */
 
 const scanner = require('../engine/course-scan');
+const ajustes = require('../engine/ajustes');
 const probe = require('../engine/media-probe');
 const transcribe = require('../engine/transcribe');
 const onset = require('../engine/vendor/audio-onset');
@@ -88,7 +89,7 @@ function compare(base, other) {
 }
 
 (async () => {
-    const scan = scanner.scan(root);
+    const scan = scanner.scan(root, { notasDirs: ajustes.carpetasDeNotas() });
     if (!scan.ok) {
         console.error(scan.error);
         process.exit(1);

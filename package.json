@@ -10,6 +10,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "maqueta": "node tools/maqueta.js --abrir",
     "test": "node tests/run.js",
     "build": "bash tools/build-pkg.sh",
     "publish": "bash tools/publish-release.sh"
@@ -20,14 +21,20 @@
     "files": [
       "main.js",
       "preload.js",
+      "dev-shot.js",
       "package.json",
       "version.json",
       "engine/**/*",
+      "ipc/**/*",
       "src/**/*"
     ],
     "mac": {
       "category": "public.app-category.video",
       "hardenedRuntime": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Class Cut escucha la entrada de audio para medir el nivel y para escribir las notas de la clase mientras se graba.",
+        "NSCameraUsageDescription": "Class Cut muestra en pantalla lo que está entrando por una cámara o por el Rodecaster Video, para ver qué se está filmando mientras se toman las notas. Ese video no se graba ni se guarda."
+      },
       "target": [
         {
           "target": "pkg",
