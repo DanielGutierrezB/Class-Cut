@@ -52,6 +52,33 @@ const DURACION_SEC = plan.DURACION_SEC;
 const CURSO = '/Cursos/2609_curso-de-prueba';
 const TALLER = '/Cursos/2610_taller-corto';
 
+/**
+ * Los ajustes de la maqueta, que se acuerdan de lo que se les guardó.
+ *
+ * Acá `ajustesLeer` armaba un literal nuevo en cada llamada y `ajustesGuardar`
+ * pegaba el cambio sobre una copia que se tiraba en la misma línea. El gesto que
+ * lo mostraba era «Quitar de la lista»: guarda la lista sin esa carpeta y
+ * enseguida relee (`cargar()` en `grabar/grabadas.js`), y la relectura devolvía
+ * el literal entero, con la carpeta de vuelta antes de que la pantalla llegara a
+ * pintarse sin ella. La app de verdad escribe el JSON en disco, así que ahí la
+ * carpeta se iba y se quedaba ida; en la maqueta el botón parecía no andar.
+ *
+ * Ojo con lo que esto significa: un mock que contesta siempre lo mismo no es un
+ * mock más simple, es uno que no puede reproducir ningún gesto que guarde.
+ */
+let ajustes = {
+    version: 1,
+    notasDir: CURSO,
+    notasDirs: [CURSO, TALLER],
+    ia: {
+        proveedor: 'cursor',
+        local: { modelo: null },
+        cursor: { modelo: 'claude-sonnet-5-thinking-high' },
+        anthropic: { modelo: 'claude-sonnet-4-5' }
+    },
+    secretos: { anthropic: false }
+};
+
 // Las vistas de verdad, servidas por `tools/maqueta.js` desde
 // `engine/notas-vivo.js`. Acá había una copia y se quedó vieja: la maqueta
 // seguía ofreciendo `SL` y `SR` cuando la app ya ofrecía `S`, así que el diseño
@@ -1334,13 +1361,15 @@ function volverEnMemoria(hacia) {
 }
 
 function grabadas() {
-    const hecha = (clase, hora, hacerTomas, comoSeLlama) => {
-        const nombre = comoSeLlama || `0${clase}_curso-de-prueba_2026-09-08_${hora}`;
+    const hecha = (clase, hora, hacerTomas, comoSeLlama, dir) => {
+        const donde = dir || CURSO;
+        const curso = donde.split('/').pop();
+        const nombre = comoSeLlama || `0${clase}_${curso.replace(/^\d+_/, '')}_2026-09-08_${hora}`;
         const ceroMs = Date.parse(`2026-09-08T${hora.replace(/-/g, ':')}`);
         const tomas = hacerTomas(ceroMs);
         return {
             secuencia: nombre,
-            clase, parte: 1, curso: '2609_curso-de-prueba',
+            clase, parte: 1, curso,
             ceroMs,
             claqueta: { ms: ceroMs + 6000, confirmada: true },
             vistas: VISTAS,
@@ -1348,12 +1377,12 @@ function grabadas() {
             // vivo quedó en el sidecar, así que se puede volver a mirar después.
             lengua: agregadoDeLengua(tomas),
             tomas,
-            carpeta: CURSO,
+            carpeta: donde,
             // El WAV que dejó la grabación. Sin esto el cartel de borrar decía
             // "ningún audio" en todas, o sea que tapaba justo lo que el cartel
             // existe para nombrar: los cientos de megas que no van a la papelera.
-            sesiones: [{ archivo: `${CURSO}/${nombre}.wav` }],
-            archivos: archivosDeNotas(CURSO, nombre)
+            sesiones: [{ archivo: `${donde}/${nombre}.wav` }],
+            archivos: archivosDeNotas(donde, nombre)
         };
     };
     return [
@@ -1363,7 +1392,15 @@ function grabadas() {
             comentarSobre(tomaDe(1, 80, 62, null, cero), 20, 27, 'Sacar un clip corto de acá'),
             tomaDe(2, 160, 45, { descartada: true }, cero)
         ]),
-        hecha(2, '10-30-00', cero => [tomaDe(3, 12, 70, null, cero), tomaDe(0, 95, 55, null, cero)])
+        hecha(2, '10-30-00', cero => [tomaDe(3, 12, 70, null, cero), tomaDe(0, 95, 55, null, cero)]),
+        // Una clase en la OTRA carpeta. La maqueta decía tener dos carpetas y una
+        // estaba siempre vacía, así que el agrupado nunca mostraba dos grupos con
+        // clases y «Por fecha» nunca mezclaba cursos — que es justo donde se ve
+        // si quitar una carpeta se lleva sus clases o si quedan colgadas.
+        hecha(1, '09-30-00', cero => [
+            tomaDe(0, 20, 60, null, cero),
+            tomaDe(2, 110, 40, null, cero)
+        ], null, TALLER)
     ];
 }
 
@@ -1742,12 +1779,16 @@ function borrarEnMemoria(json) {
     }
 
     yaGrabadas = listaGrabadas().filter(x => x !== clase);
+    // Lo que se fue de verdad, archivo por archivo, como contesta `borrar` en
+    // `engine/clases-grabadas.js`. Devolvía en cambio un `borrados: 2 + audios`
+    // que nadie leía, y sin `xml` ni `sidecar` el aviso de después se quedaba en
+    // «Borrada: 1 audio»: el cartel prometía tres archivos y el acuse nombraba
+    // uno, que es la mitad del gesto sin confirmar.
     return {
         secuencia: clase.secuencia,
-        // Lo que se fue de verdad, que es lo que el motor cuenta después de
-        // borrar: el cartel dijo cuántos decía tener la clase.
-        audios: (clase.sesiones || []).length,
-        borrados: 2 + (clase.sesiones || []).length
+        xml: true,
+        sidecar: true,
+        audios: new Set((clase.sesiones || []).map(s => s.archivo)).size
     };
 }
 
@@ -1918,19 +1959,23 @@ window.cc = {
         proveedor: 'cursor'
     }),
 
-    ajustesLeer: async () => ({
-        version: 1,
-        notasDir: CURSO,
-        notasDirs: [CURSO, TALLER],
-        ia: {
-            proveedor: 'cursor',
-            local: { modelo: null },
-            cursor: { modelo: 'claude-sonnet-5-thinking-high' },
-            anthropic: { modelo: 'claude-sonnet-4-5' }
-        },
-        secretos: { anthropic: false }
-    }),
-    ajustesGuardar: async datos => ({ ok: true, ajustes: Object.assign(await window.cc.ajustesLeer(), datos) }),
+    ajustesLeer: async () => structuredClone(ajustes),
+    /**
+     * Un PARCHE sobre lo que había, como `ajustes-guardar` del otro lado
+     * (`main.js`, que hace `guardar({...leer(), ...parche})`): cada pantalla
+     * manda solo lo suyo.
+     *
+     * Y con el único invariante que el motor impone al sanear: la carpeta en uso
+     * siempre está en la lista y va primera (`sanear` en `engine/ajustes.js`).
+     * Es lo que hace que quitar una carpeta no pueda dejar afuera la activa —por
+     * eso su cabecera dice «en uso» en vez de ofrecer el botón.
+     */
+    ajustesGuardar: async datos => {
+        ajustes = { ...ajustes, ...structuredClone(datos || {}) };
+        const otras = (ajustes.notasDirs || []).filter(d => d && d !== ajustes.notasDir);
+        ajustes.notasDirs = (ajustes.notasDir ? [ajustes.notasDir] : []).concat([...new Set(otras)]);
+        return { ok: true, ajustes: structuredClone(ajustes) };
+    },
     iaProbar: async () => { await espera(700); return { ok: true, mensaje: 'Contestó en 0,8 s.' }; },
     // `{ ok, modelos }` y no una lista suelta: la pantalla de ajustes distingue
     // "el CLI no contestó" de "contestó y no tiene modelos".
@@ -2171,9 +2216,20 @@ window.cc = {
     // se quedaba con el mismo objeto que la maqueta sigue tocando, así que un
     // cambio posterior aparecía solo en pantalla sin que nadie repintara nada —la
     // misma mentira que tenía `grabarEditar` antes de `porElPuente`.
-    grabarListar: async () => {
+    /**
+     * Las clases de LAS CARPETAS QUE SE PIDEN, como `clasesGrabadas.listar(dirs)`:
+     * el motor abre esas carpetas y no sabe de ninguna otra.
+     *
+     * Acá el argumento se ignoraba y volvía todo lo que hubiera en memoria, así
+     * que una carpeta quitada dejaba sus clases sueltas en la lista: escondidas
+     * en el modo por carpeta —no hay cabecera de la que colgarlas— y a la vista
+     * en «Por fecha», que es donde se nota que la carpeta se fue a medias.
+     */
+    grabarListar: async dirs => {
+        const donde = new Set(dirs || []);
         const sesion = sesionEnVivo();
         return porElPuente(listaGrabadas()
+            .filter(c => donde.has(c.carpeta))
             .filter(c => !sesion || c.secuencia !== sesion.secuencia));
     },
     /**

@@ -810,6 +810,95 @@ async function main() {
     despues = foto(curso);
     mostrarDiferencia(diferencia(antes, despues));
 
+    /* ── 6. Quitar una carpeta de la lista, y que se quede quitada ────────── */
+
+    // Es el otro gesto de esta pantalla que promete algo sobre el disco, y el
+    // único cuya promesa dura más que la sesión: quitar una carpeta escribe los
+    // ajustes, así que la única forma de saber si se fue de verdad es cerrar la
+    // app y volver a abrirla. Un `notasDirs` que se arregla en memoria y no en el
+    // archivo se ve idéntico hasta el próximo arranque.
+    console.log('\n6. quitar una carpeta de la lista');
+    const otro = path.join(raizTmp, 'otro-curso');
+    fs.mkdirSync(otro, { recursive: true });
+    const enElOtro = grabarClase(otro, 20, 'Otro Curso', audio);
+    console.log(`  y una clase suya, para ver si se va con ella: ${enElOtro}`);
+
+    const archivoDeAjustes = path.join(ajustes, 'ajustes.json');
+    const guardadasEnDisco = () => JSON.parse(fs.readFileSync(archivoDeAjustes, 'utf8')).notasDirs;
+
+    paso = enLaApp({
+        nombre: '6-quitar-carpeta',
+        js: guion(`
+            await cableada();
+            // La segunda carpeta se suma por el puente, como la suma «Elegir
+            // carpeta…». Lo que se prueba es sacarla, y eso es un clic.
+            await window.cc.ajustesGuardar({
+                notasDirs: [${JSON.stringify(curso)}, ${JSON.stringify(otro)}]
+            });
+            const antes = await abrirLaLista();
+            const cabezas = () => [...document.querySelectorAll('#grabar-grabadas .carpeta-cabeza')];
+            const rutas = () => cabezas().map(h => (h.querySelector('.mono') || {}).textContent);
+            const cual = cabezas().find(h =>
+                (h.querySelector('.mono') || {}).textContent === ${JSON.stringify(otro)});
+            if (!cual) throw new Error('la segunda carpeta no aparece: ' + rutas().join(' | '));
+            boton(cual, 'Quitar de la lista').click();
+            await pausa(1500);
+            return {
+                antes,
+                rutas: rutas(),
+                guardadas: (await window.cc.ajustesLeer()).notasDirs,
+                despues: enLaLista(),
+                diario: await elDiario()
+            };
+        `)
+    }, casa, capturas);
+    r = paso.respuesta;
+    if (r && r.ok) {
+        console.log(`    quedaron en la lista: ${r.rutas.join(' | ')}`);
+        comprobar('la clase de la otra carpeta estaba antes de quitarla',
+            r.antes.some(c => c.json.startsWith(otro)), r.antes.map(c => c.titulo).join(' | '));
+        comprobar('la cabecera de la carpeta quitada se fue de la pantalla',
+            !r.rutas.includes(otro), r.rutas.join(' | '));
+        comprobar('y sus clases se fueron con ella',
+            !r.despues.some(c => c.json.startsWith(otro)), r.despues.map(c => c.json).join(' | '));
+        comprobar('la carpeta en uso siguió ahí, que es donde va a caer la próxima clase',
+            r.rutas.includes(curso) && r.guardadas.includes(curso), r.rutas.join(' | '));
+    } else {
+        comprobar('el paso corrió', false, r ? r.error : paso.salida.slice(-1500));
+    }
+    comprobar('el archivo de ajustes ya no la nombra',
+        !guardadasEnDisco().includes(otro), JSON.stringify(guardadasEnDisco()));
+    comprobar('quitarla de la lista no borró nada del disco',
+        fs.existsSync(workspace.notasArchivos(otro, enElOtro).xml),
+        'se llevó archivos de una carpeta que solo se dejó de mostrar');
+
+    console.log('\n7. y sigue quitada después de reiniciar la app');
+    paso = enLaApp({
+        nombre: '7-tras-reiniciar',
+        js: guion(`
+            const antes = await abrirLaLista();
+            return {
+                antes,
+                rutas: [...document.querySelectorAll('#grabar-grabadas .carpeta-cabeza .mono')]
+                    .map(e => e.textContent),
+                guardadas: (await window.cc.ajustesLeer()).notasDirs,
+                diario: await elDiario()
+            };
+        `)
+    }, casa, capturas);
+    r = paso.respuesta;
+    if (r && r.ok) {
+        console.log(`    al abrir de nuevo: ${r.rutas.join(' | ')}`);
+        comprobar('la carpeta quitada no volvió al arrancar', !r.rutas.includes(otro),
+            r.rutas.join(' | '));
+        comprobar('ni volvió a los ajustes', !r.guardadas.includes(otro),
+            JSON.stringify(r.guardadas));
+        comprobar('ni volvieron sus clases', !r.antes.some(c => c.json.startsWith(otro)),
+            r.antes.map(c => c.json).join(' | '));
+    } else {
+        comprobar('el paso corrió', false, r ? r.error : paso.salida.slice(-1500));
+    }
+
     /* ── Cómo quedó la carpeta ────────────────────────────────────────────── */
 
     console.log('\nLo que quedó en la carpeta, como lo ve la app:');

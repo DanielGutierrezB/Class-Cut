@@ -241,6 +241,71 @@ const COMO_ESTA_EL_FORMULARIO = `(() => {
     };
 })()`;
 
+/**
+ * Las carpetas de la lista, qué ofrece cada cabecera, y qué quedó guardado.
+ *
+ * Las tres cosas juntas a propósito: quitar una carpeta se rompe de dos maneras
+ * distintas —se va de la pantalla y sigue guardada, o se va de lo guardado y la
+ * pantalla no se entera— y con una sola de las dos lecturas cualquiera de las dos
+ * mitades pasa en verde.
+ */
+const COMO_ESTAN_LAS_CARPETAS = `(async () => {
+    const cabezas = [...document.querySelectorAll('#grabar-grabadas .carpeta-cabeza')];
+    const ruta = h => (h.querySelector('.mono') || {}).textContent || '?';
+    const quita = h => [...h.querySelectorAll('button')]
+        .some(b => b.textContent.trim() === 'Quitar de la lista');
+    return {
+        rutas: cabezas.map(ruta),
+        quitables: cabezas.filter(quita).map(ruta),
+        enUso: cabezas.filter(h => /en uso/.test(h.textContent)).map(ruta),
+        tarjetas: document.querySelectorAll('#grabar-grabadas .clase').length,
+        // Lo que se relee en el repintado siguiente (\`cargar()\`), que es de donde
+        // la carpeta volvía.
+        guardadas: (await window.cc.ajustesLeer()).notasDirs
+    };
+})()`;
+
+/** Marca la cabecera de una carpeta que se pueda quitar, y dice cuál es. */
+function laCarpetaQuitable(wc) {
+    return mirar(wc, `(() => {
+        for (const e of document.querySelectorAll('[data-arnes-carpeta]')) {
+            e.removeAttribute('data-arnes-carpeta');
+        }
+        const cual = [...document.querySelectorAll('#grabar-grabadas .carpeta-cabeza')]
+            .find(h => [...h.querySelectorAll('button')]
+                .some(b => b.textContent.trim() === 'Quitar de la lista'));
+        if (!cual) return null;
+        cual.dataset.arnesCarpeta = '1';
+        return (cual.querySelector('.mono') || {}).textContent || null;
+    })()`);
+}
+
+/**
+ * Los títulos de las tarjetas dibujadas, la cuenta de arriba, y en qué modo.
+ *
+ * El modo va incluido porque sin él la pregunta del modo por fecha se contesta
+ * sola: en el modo por carpeta los títulos no dicen de qué curso son, así que
+ * "ninguno nombra la carpeta quitada" sale verde sin haber mirado nada.
+ */
+const LO_QUE_SE_LISTA = `(() => ({
+    titulos: [...document.querySelectorAll('#grabar-grabadas .clase-titulo')]
+        .map(t => t.textContent.trim()),
+    cuenta: (document.getElementById('grabadas-cuantas') || {}).textContent || '',
+    modo: [...document.querySelectorAll('.grabadas-modo')]
+        .filter(b => b.getAttribute('aria-checked') === 'true')
+        .map(b => b.dataset.modo).join(',')
+}))()`;
+
+/** Mirar la lista del otro modo y volver, para dejarla como estaba. */
+async function comoSeVePorFecha(wc) {
+    await clic(wc, '.grabadas-modo[data-modo="fecha"]');
+    await dormir(700);
+    const visto = await mirar(wc, LO_QUE_SE_LISTA);
+    await clic(wc, '.grabadas-modo[data-modo="carpetas"]');
+    await dormir(700);
+    return visto;
+}
+
 /* ─── El recorrido ───────────────────────────────────────────────────────── */
 
 /**
@@ -289,6 +354,10 @@ function casos(wc) {
     /** La primera tarjeta de la lista, que es sobre la que se trabaja. */
     const primera = '#grabar-grabadas .clase';
     let alEmpezar = null;
+    let antesDeQuitar = null;
+    let trasQuitar = null;
+    let laQuitada = null;
+    let porFecha = null;
 
     return [
         {
@@ -545,6 +614,74 @@ function casos(wc) {
                     : `la lista quedó en ${c.cuantas} y tenía que volver a ${alEmpezar.cuantas}`;
             },
             shot: 'borrada'
+        },
+        {
+            que: 'la carpeta en uso no ofrece quitarse: dice «en uso»',
+            // Si se pudiera, la lista quedaría sin carpeta donde grabar — y los
+            // ajustes la devolverían igual al sanear (`engine/ajustes.js`), o sea
+            // que el botón mentiría. Que no esté es la mitad de por qué quitar
+            // funciona.
+            hacer: async () => {
+                await clic(wc, '.grabadas-modo[data-modo="carpetas"]');
+                await dormir(700);
+                antesDeQuitar = await mirar(wc, COMO_ESTAN_LAS_CARPETAS);
+            },
+            ademas: async () => {
+                const c = antesDeQuitar;
+                if (c.rutas.length < 2) return `hay ${c.rutas.length} carpeta(s) y con una sola no se prueba nada`;
+                if (c.enUso.length !== 1) return `dicen «en uso» ${c.enUso.length} carpetas`;
+                if (c.quitables.includes(c.enUso[0])) return `la carpeta en uso ofrece quitarse`;
+                return c.quitables.length === c.rutas.length - 1 ? null
+                    : `${c.quitables.length} botones para ${c.rutas.length} carpetas`;
+            }
+        },
+        {
+            que: '«Quitar de la lista» saca la ruta, y no vuelve en el repintado siguiente',
+            hacer: async () => {
+                laQuitada = await laCarpetaQuitable(wc);
+                await clicTexto(wc, '[data-arnes-carpeta="1"]', 'Quitar de la lista');
+                await dormir(900);
+                trasQuitar = await mirar(wc, COMO_ESTAN_LAS_CARPETAS);
+                // Y un repintado que rehace la lista de cero releyendo los
+                // ajustes, que es exactamente donde la carpeta volvía.
+                await mirar(wc, 'window.dev.abrirGrabar()');
+                await dormir(900);
+                porFecha = await comoSeVePorFecha(wc);
+            },
+            ademas: async () => {
+                if (!laQuitada) return 'ninguna carpeta ofrecía quitarse';
+                const c = await mirar(wc, COMO_ESTAN_LAS_CARPETAS);
+                if (trasQuitar.rutas.includes(laQuitada)) return `la cabecera de «${laQuitada}» se quedó ahí`;
+                if (c.rutas.includes(laQuitada)) return `volvió al repintar: ${c.rutas.join(' | ')}`;
+                if (c.guardadas.includes(laQuitada)) {
+                    return `se fue de la pantalla y quedó guardada: ${c.guardadas.join(' | ')}`;
+                }
+                return c.rutas.length === antesDeQuitar.rutas.length - 1 ? null
+                    : `quedaron ${c.rutas.length} carpetas de ${antesDeQuitar.rutas.length}`;
+            },
+            shot: 'carpeta-quitada'
+        },
+        {
+            que: 'y sus clases se van con ella, también en «Por fecha», que es donde no hay cabecera que las tape',
+            hacer: async () => {},
+            ademas: async () => {
+                if (!porFecha) return 'no se llegó a mirar el modo por fecha';
+                if (porFecha.modo !== 'fecha') return `se miró en modo «${porFecha.modo}»`;
+                const curso = String(laQuitada).split('/').pop();
+                if (!porFecha.titulos.some(t => t.includes('·'))) {
+                    return `en este modo cada título dice su curso y ninguno lo dice: ${porFecha.titulos.join(' | ')}`;
+                }
+                // En este modo cada tarjeta dice de qué curso es, así que una
+                // clase huérfana de la carpeta quitada se ve por su nombre.
+                const huerfanas = porFecha.titulos.filter(t => t.includes(curso));
+                if (huerfanas.length) return `quedaron clases de la carpeta quitada: ${huerfanas.join(' | ')}`;
+                // Y la cuenta de arriba tiene que contar lo mismo que se dibuja:
+                // si sobrara una clase invisible, sería la que quedó colgada.
+                const dice = Number((porFecha.cuenta.match(/\d+/) || [])[0]);
+                return dice === porFecha.titulos.length ? null
+                    : `arriba dice «${porFecha.cuenta}» y hay ${porFecha.titulos.length} tarjetas`;
+            },
+            shot: 'por-fecha-sin-la-quitada'
         },
         {
             que: 'las teclas de las vistas no hacen nada desde la lista',
