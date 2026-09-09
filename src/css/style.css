@@ -340,6 +340,91 @@ code, .mono {
     color: var(--text-dim);
 }
 
+/* Las últimas carpetas abiertas. Ancho de la zona de soltar y ni un pixel más:
+   es lo de al lado del gesto principal, no una segunda pantalla. */
+.drop-recientes {
+    width: min(620px, 100%);
+    margin-top: 22px;
+}
+.drop-recientes-titulo {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    margin-bottom: 8px;
+}
+.drop-recientes-lista {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.reciente {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: var(--radius-sm);
+}
+.reciente:hover { background: var(--surface); }
+
+/* La fila entera es el botón: el blanco entre el nombre y la ruta también
+   abre, que es lo que uno espera de una lista de recientes. */
+.reciente-abrir {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 10px;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.reciente-abrir:hover .reciente-nombre { color: var(--accent); }
+.reciente-nombre {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+/* La ruta cede primero: ya viene plegada por el medio (`rutaPlegada`), y si
+   aun así no entra, lo que se pierde es la cola y no el nombre del curso. */
+.reciente-donde {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reciente-marca {
+    flex: none;
+    font-size: 11px;
+    color: var(--warn);
+}
+/* La que no está sigue legible y sigue apretable: se apaga el nombre, no la
+   fila. Apagarla entera diría "esto ya no sirve" de algo que vuelve en cuanto
+   se enchufa el disco. */
+.es-perdida .reciente-nombre { color: var(--text-dim); font-weight: 500; }
+
+/* El "Quitar" está siempre puesto, como en la lista de Grabar, y apagado hasta
+   que el mouse llega a su fila: esconderlo del todo haría que la única manera de
+   limpiar la lista fuera adivinar que existe. */
+.reciente-quitar {
+    flex: none;
+    margin-right: 6px;
+    opacity: .35;
+    transition: opacity .12s;
+}
+.reciente:hover .reciente-quitar,
+.reciente-quitar:focus-visible { opacity: 1; }
+
 .drop-error {
     margin-top: 18px;
     padding: 11px 15px;

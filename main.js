@@ -512,6 +512,13 @@ ipcMain.handle('scan', async (event, folder) => {
 
     for (const vieja of plan.reemplaza) carpetas.delete(vieja);
     carpetas.set(result.root, result);
+    // Se anota acá y no del lado de la ventana porque este es el único sitio por
+    // el que pasa TODA carpeta aceptada, venga del botón o de un arrastre, y
+    // porque recién acá se sabe que tenía clases adentro: recordar una carpeta
+    // que dio error sería ofrecerle al editor volver al mismo error de un clic.
+    // Y se recuerda `result.root`, la raíz normalizada que quedó cargada, no lo
+    // que llegó escrito.
+    ajustes.recordarCarpeta(result.root);
     anotar('carpeta.agregada', {
         carpeta: result.root,
         tipo: result.kind,
@@ -522,6 +529,47 @@ ipcMain.handle('scan', async (event, folder) => {
         ms: Date.now() - desde
     });
     return { ...result, accion: plan.accion, reemplaza: plan.reemplaza };
+});
+
+/**
+ * Las últimas carpetas de material, para volver a entrar de un clic.
+ *
+ * No toca el disco: contesta lo que dicen los ajustes y nada más. Está separado
+ * de `carpetas-en-disco` a propósito —son dos preguntas con dos precios— para que
+ * la pantalla pueda pintar la lista entera antes de saber cuáles siguen ahí. Un
+ * volumen de red montado y colgado tarda lo que quiera en contestar un `stat`, y
+ * si eso estuviera acá adentro la pantalla de entrada de la app arrancaría en
+ * blanco esperándolo.
+ */
+ipcMain.handle('carpetas-recientes', () => ajustes.leer().carpetasRecientes);
+
+/**
+ * Cuáles de esas rutas están ahora mismo en el disco.
+ *
+ * Se pregunta y no se guarda: un disco externo se enchufa y se desenchufa varias
+ * veces por semana, así que la respuesta caduca sola y anotarla en el JSON sería
+ * escribir una mentira con fecha. Lo que NO hace es borrar la ruta que no está:
+ * desenchufar un disco no es pedir que se olvide el curso.
+ *
+ * Cada `stat` va con su propio plazo. Sin eso, una sola ruta colgada —el clásico
+ * montaje de red que no contesta ni falla— dejaría la lista entera sin marcar.
+ */
+ipcMain.handle('carpetas-en-disco', async (event, rutas) => {
+    const plazo = 1500;
+    const mirar = async ruta => {
+        try {
+            const info = await Promise.race([
+                fs.promises.stat(ruta),
+                new Promise((_, mal) => setTimeout(() => mal(new Error('tardó')), plazo))
+            ]);
+            return info.isDirectory();
+        } catch (err) {
+            return false;
+        }
+    };
+    const lista = (Array.isArray(rutas) ? rutas : []).filter(r => typeof r === 'string' && r);
+    const hay = await Promise.all(lista.map(mirar));
+    return Object.fromEntries(lista.map((ruta, i) => [ruta, hay[i]]));
 });
 
 ipcMain.handle('quitar-carpeta', (event, root) => {

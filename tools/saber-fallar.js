@@ -228,6 +228,49 @@ const REVERSIONES = [
         a: '',
         filtro: 'maqueta',
         caen: ['el índice carga el vigía, detrás de las vistas y delante de la app']
+    },
+    {
+        que: 'las últimas carpetas crecen sin tope',
+        archivo: 'engine/ajustes.js',
+        de: '[...new Set(recientes)].slice(0, RECIENTES)',
+        a: '[...new Set(recientes)]',
+        filtro: 'recientes',
+        caen: [
+            'el tope lo pone el saneado, así que nadie lo puede pasar por arriba',
+            'pasado el tope se cae la que hace más que nadie abre'
+        ]
+    },
+    {
+        que: 'la lista se ordena por cuándo se agregó y no por el último uso',
+        archivo: 'engine/ajustes.js',
+        de: 'carpetasRecientes: [ruta].concat(antes.carpetasRecientes.filter(d => d !== ruta))',
+        a: 'carpetasRecientes: antes.carpetasRecientes.filter(d => d !== ruta).concat(ruta)',
+        filtro: 'recientes',
+        caen: [
+            'la última abierta va primera',
+            'volver a abrir una que ya estaba la sube, no la duplica',
+            'pasado el tope se cae la que hace más que nadie abre'
+        ]
+    },
+    {
+        que: 'recordar una carpeta se lleva puesto el resto de los ajustes',
+        archivo: 'engine/ajustes.js',
+        de: '    return guardar({\n        ...antes,\n        carpetasRecientes:',
+        a: '    return guardar({\n        carpetasRecientes:',
+        filtro: 'recientes',
+        caen: ['recordar una carpeta no toca lo demás de los ajustes']
+    },
+    {
+        que: 'la ruta se muestra entera y que la corte el navegador por donde caiga',
+        archivo: 'src/js/formato.js',
+        de: "    return raiz + [...partes.slice(0, cabeza), '…', ...partes.slice(-cola)].join('/');",
+        a: '    return raiz + partes.join(\'/\');',
+        filtro: 'recientes',
+        caen: [
+            'se pliega por el medio, que es donde no dice nada',
+            'plegada mide menos que entera: si no, no sirvió de nada',
+            'no inventa una barra donde no había'
+        ]
     }
 ];
 

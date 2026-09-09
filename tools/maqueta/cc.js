@@ -53,6 +53,16 @@ const CURSO = '/Cursos/2609_curso-de-prueba';
 const TALLER = '/Cursos/2610_taller-corto';
 
 /**
+ * Una carpeta reciente que vive en un disco que no está enchufado.
+ *
+ * Está a propósito y con una ruta larga: es el caso que no aparece nunca cuando
+ * uno mira el diseño con material propio —el disco está enchufado, siempre— y es
+ * justo el que hay que poder mirar. De paso muestra la ruta plegada haciendo su
+ * trabajo, que con `/Cursos/xxx` no se ve.
+ */
+const AFUERA = '/Volumes/Rushes 2026/Clientes/Fundación Norte/Cursos/2508_taller-de-guion';
+
+/**
  * Los ajustes de la maqueta, que se acuerdan de lo que se les guardó.
  *
  * Acá `ajustesLeer` armaba un literal nuevo en cada llamada y `ajustesGuardar`
@@ -70,6 +80,7 @@ let ajustes = {
     version: 1,
     notasDir: CURSO,
     notasDirs: [CURSO, TALLER],
+    carpetasRecientes: [CURSO, AFUERA, TALLER],
     ia: {
         proveedor: 'cursor',
         local: { modelo: null },
@@ -1974,6 +1985,10 @@ window.cc = {
         ajustes = { ...ajustes, ...structuredClone(datos || {}) };
         const otras = (ajustes.notasDirs || []).filter(d => d && d !== ajustes.notasDir);
         ajustes.notasDirs = (ajustes.notasDir ? [ajustes.notasDir] : []).concat([...new Set(otras)]);
+        // Y el otro invariante del saneado: sin repetidas y hasta el tope
+        // (`RECIENTES` en `engine/ajustes.js`). Un mock que no recorta deja pasar
+        // en la maqueta una lista que en la app no puede existir.
+        ajustes.carpetasRecientes = [...new Set(ajustes.carpetasRecientes || [])].slice(0, 6);
         return { ok: true, ajustes: structuredClone(ajustes) };
     },
     iaProbar: async () => { await espera(700); return { ok: true, mensaje: 'Contestó en 0,8 s.' }; },
@@ -2012,7 +2027,27 @@ window.cc = {
 
     scan: async folder => {
         await espera(400);
-        return CARPETAS.find(c => c.root === folder) || CARPETAS[0];
+        const hallada = CARPETAS.find(c => c.root === folder) || CARPETAS[0];
+        // Como `main.js`, que recuerda la raíz recién después de que el escaneo
+        // salió bien. Sin esto la maqueta ofrecía una lista de recientes que
+        // nunca crecía, o sea la mitad del gesto.
+        const otras = (ajustes.carpetasRecientes || []).filter(d => d !== hallada.root);
+        ajustes.carpetasRecientes = [hallada.root, ...otras].slice(0, 6);
+        return hallada;
+    },
+    carpetasRecientes: async () => structuredClone(ajustes.carpetasRecientes || []),
+    /**
+     * Qué carpetas están en el disco. En la maqueta no hay disco: está la de
+     * afuera, que nunca está, y todas las demás, que siempre están.
+     *
+     * Y contesta tarde a propósito. La pantalla pinta la lista antes de saberlo
+     * (`cargarRecientes` en `src/js/vista-carpeta.js`), y con una respuesta
+     * instantánea los dos tiempos se ven como uno: el medio segundo es lo que
+     * hace visible que la lista NO espera al disco para aparecer.
+     */
+    carpetasEnDisco: async rutas => {
+        await espera(500);
+        return Object.fromEntries((rutas || []).map(r => [r, r !== AFUERA]));
     },
     quitarCarpeta: async () => ({ ok: true }),
 

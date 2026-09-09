@@ -14,6 +14,7 @@ const FILES = [
     'rodecaster-xml.test.js',
     'course-scan.test.js',
     'carpetas.test.js',
+    'recientes.test.js',
     'estado-clase.test.js',
     'transcribe.test.js',
     'align.test.js',

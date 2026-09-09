@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('cc', {
     confirmar: payload => ipcRenderer.invoke('confirmar', payload),
     preguntar: payload => ipcRenderer.invoke('preguntar', payload),
     scan: folder => ipcRenderer.invoke('scan', folder),
+    // Las últimas carpetas abiertas y, aparte, cuáles siguen en el disco: la
+    // lista se pinta con la primera y se marca con la segunda, que es la que
+    // puede tardar (ver `carpetas-en-disco` en `main.js`).
+    carpetasRecientes: () => ipcRenderer.invoke('carpetas-recientes'),
+    carpetasEnDisco: rutas => ipcRenderer.invoke('carpetas-en-disco', rutas),
     quitarCarpeta: root => ipcRenderer.invoke('quitar-carpeta', root),
     process: payload => ipcRenderer.invoke('process', payload),
     cancelProcess: () => ipcRenderer.invoke('cancel-process'),

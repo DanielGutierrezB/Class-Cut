@@ -72,6 +72,35 @@ export function claseDeVista(nombre) {
 }
 
 /**
+ * Dónde está una carpeta, en una línea que se pueda leer de un vistazo:
+ * "/Volumes/Trabajo/…/2026".
+ *
+ * Se pliega por el MEDIO y no por el final, que es lo que hace un `text-overflow`
+ * y es justo al revés de lo que sirve. Los dos extremos son los que dicen algo:
+ * la cabeza es de qué disco se trata —el externo que hay que enchufar, o la Mac—
+ * y la cola es el nido en el que está. El medio es lo repetido: todos los cursos
+ * de alguien viven abajo de las mismas cuatro carpetas, así que una lista cortada
+ * por el final son seis renglones que empiezan igual y no terminan nunca.
+ *
+ * Dos de cabeza y UNO de cola, no dos y dos. Con dos de cola la línea le seguía
+ * ganando al ancho que tiene en la fila y el navegador la recortaba por el final
+ * otra vez, o sea que se plegaba por el medio para después perder igual la cola:
+ * lo peor de las dos. Plegar de más y que entre es mejor que plegar de menos y
+ * que lo corte otro, porque el que corta no elige por dónde.
+ *
+ * El último tramo —el nombre del curso, que es lo que distingue dos— no va acá:
+ * se muestra aparte y entero, porque es lo único que nunca se puede plegar.
+ */
+export function rutaPlegada(ruta, cabeza = 2, cola = 1) {
+    const texto = String(ruta || '');
+    const partes = texto.split('/').filter(Boolean);
+    if (!partes.length) return texto;
+    const raiz = texto.startsWith('/') ? '/' : '';
+    if (partes.length <= cabeza + cola) return raiz + partes.join('/');
+    return raiz + [...partes.slice(0, cabeza), '…', ...partes.slice(-cola)].join('/');
+}
+
+/**
  * Cuánto tardó algo, en milisegundos: "8,4 s", "4:12", "1:12:03".
  *
  * Aparte de `fmtDur` porque abajo del minuto la diferencia importa: una etapa

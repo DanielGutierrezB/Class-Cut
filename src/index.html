@@ -220,6 +220,13 @@
                     Podés sumar todas las carpetas que quieras.
                 </p>
             </div>
+            <!-- Las últimas carpetas: DEBAJO de la zona de soltar y no encima.
+                 Lo que esta pantalla enseña es que acá se suelta una carpeta, y
+                 una lista arriba lo convertiría en un menú de lo de siempre. -->
+            <div class="drop-recientes" id="drop-recientes" hidden>
+                <h2 class="drop-recientes-titulo">Las últimas que abriste</h2>
+                <ul class="drop-recientes-lista" id="drop-recientes-lista"></ul>
+            </div>
             <p class="drop-error" id="drop-error" hidden></p>
             <div class="drop-cargadas" id="drop-cargadas" hidden>
                 <span id="drop-cargadas-info"></span>

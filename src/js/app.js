@@ -9,7 +9,7 @@
 
 import { $, showView, anotar } from './chrome.js';
 import { state, clases, findClass, quitarCarpeta } from './estado.js';
-import { addFolder, dropError, wireCarpeta, renderCargadas } from './vista-carpeta.js';
+import { addFolder, cargarRecientes, dropError, wireCarpeta, renderCargadas } from './vista-carpeta.js';
 import {
     renderScan, renderAlerts, renderRows, renderFoot, wireClases, openDrawer, closeDrawer,
     actualizarDuracion
@@ -42,6 +42,10 @@ function irAPaso(n) {
             cerrarReproductor();
             dropError('');
             renderCargadas();
+            // Se relee al entrar y no una sola vez al arrancar: la lista cambia
+            // cada vez que se agrega una carpeta, y un disco se puede haber
+            // enchufado mientras se miraba la tabla.
+            cargarRecientes();
             showView('drop');
             marcarPaso(PASOS.carpetas);
             return;
@@ -96,6 +100,25 @@ async function init() {
         const folder = await window.cc.pickFolder();
         if (folder) addFolder(folder);
     };
+
+    /*
+     * La app abre en el paso "Carpetas" con las últimas ofrecidas, y NO abre
+     * sola la última.
+     *
+     * Se ofrecen, no se cargan, y no es timidez. Abrir una carpeta acá no es
+     * mostrar una lista: es recorrer el árbol y medir con ffprobe clase por clase
+     * (`escanearYMedir` en `main.js`), o sea segundos o minutos de disco girando
+     * por algo que nadie pidió todavía. Y este paso es también la puerta de
+     * Grabar: quien abre la app para grabar una clase nueva no tiene nada que ver
+     * con el curso que estaba cortando anoche, y le llegaría con la ventana
+     * ocupada. El caso peor manda: si la última carpeta estaba en un disco
+     * desenchufado, arrancar sola convierte "abrí la app" en "la app abrió con un
+     * error" por algo que el editor no hizo.
+     *
+     * Lo que se pedía era no volver a navegar el selector, y eso ya está resuelto
+     * con un clic. Un clic es el precio justo de poner un disco a girar.
+     */
+    cargarRecientes();
     $('btn-add-folder').onclick = () => irAPaso(PASOS.carpetas);
     $('btn-ver-clases').onclick = () => irAPaso(PASOS.clases);
 
