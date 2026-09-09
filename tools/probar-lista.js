@@ -296,6 +296,42 @@ const LO_QUE_SE_LISTA = `(() => ({
         .map(b => b.dataset.modo).join(',')
 }))()`;
 
+/**
+ * Cuántos comentarios hay guardados, contados donde viven.
+ *
+ * Del lado de los datos y no de los que están abiertos al margen: el botón cierra
+ * el margen ANTES de mandar el cambio (`margen.js`), así que la caja se va de la
+ * pantalla lo mismo si el cambio se hizo que si se canceló. Contar cajas abiertas
+ * daría por borrado un comentario que sigue entero.
+ */
+const LOS_COMENTARIOS = `(async () => {
+    const dirs = (await window.cc.ajustesLeer()).notasDirs || [];
+    const clases = await window.cc.grabarListar(dirs);
+    return clases.reduce((n, c) => n + (c.tomas || [])
+        .reduce((m, t) => m + (t.comentarios || []).length, 0), 0);
+})()`;
+
+/**
+ * Deja a la vista un comentario de una clase ya terminada, y dice qué dice.
+ *
+ * Las tarjetas se abren por código porque abrirlas no es lo que se prueba —son
+ * `details`, y cuál de las cuatro tiene el comentario no se sabe hasta abrirlas—.
+ * Los dos gestos que sí se prueban, el clic sobre la palabra comentada y el del
+ * botón, van con el mouse.
+ */
+async function conUnComentarioALaVista(wc) {
+    const hay = await mirar(wc, `(async () => {
+        for (const d of document.querySelectorAll('#grabar-grabadas details.clase')) d.open = true;
+        await new Promise(r => setTimeout(r, 500));
+        return Boolean(document.querySelector('#grabar-grabadas .toma-palabra.es-comentada'));
+    })()`);
+    if (!hay) return null;
+    await clic(wc, '#grabar-grabadas .toma-palabra.es-comentada');
+    await dormir(500);
+    return mirar(wc, `((document.querySelector('#grabar-grabadas .toma-com .toma-com-texto')
+        || {}).textContent || '').trim() || null`);
+}
+
 /** Mirar la lista del otro modo y volver, para dejarla como estaba. */
 async function comoSeVePorFecha(wc) {
     await clic(wc, '.grabadas-modo[data-modo="fecha"]');
@@ -358,6 +394,8 @@ function casos(wc) {
     let trasQuitar = null;
     let laQuitada = null;
     let porFecha = null;
+    let elComentario = null;
+    let comentariosAntes = 0;
 
     return [
         {
@@ -614,6 +652,49 @@ function casos(wc) {
                     : `la lista quedó en ${c.cuantas} y tenía que volver a ${alEmpezar.cuantas}`;
             },
             shot: 'borrada'
+        },
+        {
+            que: 'borrar un comentario de una clase terminada también pregunta, y dice qué texto se va',
+            // El otro «Borrar» de esta pantalla, y el que se pasa por alto: no se
+            // lleva archivos, se lleva lo escrito. Reescribe el XML en el acto y
+            // desde acá no hay Cmd-Z —el historial es de la clase que se graba—,
+            // así que por el criterio de la casa tiene que preguntar igual que el
+            // de la clase.
+            hacer: async () => {
+                elComentario = await conUnComentarioALaVista(wc);
+                comentariosAntes = await mirar(wc, LOS_COMENTARIOS);
+                await contestar(wc, false);
+                await clicTexto(wc, '#grabar-grabadas .toma-com', 'Borrar');
+                await dormir(900);
+            },
+            ademas: async () => {
+                if (!elComentario) return 'ninguna clase de la lista trae un comentario que mirar';
+                const pregunta = await loUltimoQueSePregunto(wc);
+                if (!pregunta) return 'no preguntó nada';
+                if (!pregunta.includes(elComentario.slice(0, 20))) {
+                    return `el cartel no dice cuál se va: «${pregunta}»`;
+                }
+                if (!/Cmd-Z/.test(pregunta)) return `no avisa que de acá no vuelve: «${pregunta}»`;
+                const ahora = await mirar(wc, LOS_COMENTARIOS);
+                return ahora === comentariosAntes ? null
+                    : `dijo que no y se fue igual: había ${comentariosAntes} y quedaron ${ahora}`;
+            },
+            shot: 'cartel-del-comentario'
+        },
+        {
+            que: 'y diciendo que sí, ese comentario se va del XML',
+            hacer: async () => {
+                await conUnComentarioALaVista(wc);
+                await contestar(wc, true);
+                await clicTexto(wc, '#grabar-grabadas .toma-com', 'Borrar');
+                await dormir(1200);
+            },
+            ademas: async () => {
+                if (!elComentario) return 'ninguna clase de la lista trae un comentario que mirar';
+                const ahora = await mirar(wc, LOS_COMENTARIOS);
+                return ahora === comentariosAntes - 1 ? null
+                    : `había ${comentariosAntes} comentarios y quedaron ${ahora}`;
+            }
         },
         {
             que: 'la carpeta en uso no ofrece quitarse: dice «en uso»',

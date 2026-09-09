@@ -216,6 +216,35 @@ module.exports = async t => {
         t.ok(/ningún audio/.test(cartel.mensaje), `no dijo nada del audio: ${cartel.mensaje}`);
     });
 
+    t.group('borrar un comentario · el otro cartel de la misma pantalla');
+
+    t.test('dice el texto que se va y sobre qué palabras estaba', () => {
+        // Una toma puede tener varios comentarios y se borran de a uno por su
+        // índice: sin el texto a la vista, la respuesta sería a cualquiera.
+        const cartel = gestionar.queSeBorraElComentario(
+            { clase: 3, parte: 1, curso: 'fisica' },
+            { texto: 'la derivada de x', comentario: 'Sacar un clip corto de acá' }
+        );
+        t.ok(/Clase 3/.test(cartel.titulo), 'el título nombra la clase');
+        t.ok(/Sacar un clip corto de acá/.test(cartel.mensaje), 'dice lo que estaba escrito');
+        t.ok(/la derivada de x/.test(cartel.mensaje), 'y sobre qué palabras estaba');
+        t.ok(/XML se reescribe/.test(cartel.mensaje), 'avisa que el archivo se reescribe ahora');
+        t.ok(/Cmd-Z/.test(cartel.mensaje), 'y que de acá no lo devuelve nada');
+    });
+
+    t.test('un comentario largo se recorta, para que el cartel siga siendo legible', () => {
+        const largo = `Empieza así ${'y sigue '.repeat(40)}y termina acá`;
+        const cartel = gestionar.queSeBorraElComentario({ clase: 1 }, { comentario: largo });
+        t.ok(/Empieza así/.test(cartel.mensaje), 'se ve por dónde empezaba');
+        t.ok(cartel.mensaje.includes('…'), 'y se dice que hay más');
+        t.eq(cartel.mensaje.length < 400, true, `el cartel salió de ${cartel.mensaje.length}`);
+    });
+
+    t.test('sin texto no se calla: dice que el comentario estaba vacío', () => {
+        const cartel = gestionar.queSeBorraElComentario({ clase: 1 }, { comentario: '   ' });
+        t.ok(/sin texto/.test(cartel.mensaje), `no dijo nada: ${cartel.mensaje}`);
+    });
+
     t.group('el número que se escribe en el campo');
 
     t.test('lo que no es número se limpia, y vacío es 1', () => {

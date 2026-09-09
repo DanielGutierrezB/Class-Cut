@@ -114,6 +114,48 @@ export function horaDeCaptura(clase) {
  * movido uno a mano. Lo que se fue de verdad lo cuenta el motor y se dice después
  * (ver `borrar` allá), que es el único que puede saberlo.
  */
+/** Un texto para un cartel: entero si es corto, y con puntos si no. */
+function recortado(texto, hasta = 120) {
+    const limpio = String(texto || '').trim().replace(/\s+/g, ' ');
+    return limpio.length > hasta ? `${limpio.slice(0, hasta - 1)}…` : limpio;
+}
+
+/**
+ * El cartel de borrar un comentario de una clase que ya terminó.
+ *
+ * **Por qué este gesto pregunta y el mismo gesto en vivo no.** Mientras se graba,
+ * borrar un comentario es un paso más del historial: Cmd-Z lo repone, y el botón
+ * de deshacer está a la vista arriba. En una clase de la lista no hay ninguna de
+ * las dos cosas — el historial es de la sesión que corre (`volver` en
+ * `engine/cambios-toma.js` contesta que no hay nada con la sesión en nulo), y el
+ * botón vive en la pantalla de la toma, que no es esta. El cambio reescribe el XML
+ * en el acto, así que lo escrito se va sin nada que lo devuelva: es la misma
+ * pérdida sin vuelta que borrar la clase, y pide la misma pregunta.
+ *
+ * Es lo que lo separa de «Descartar», que está al lado y no pregunta: esa deja la
+ * toma donde estaba y «Recuperar» la trae de vuelta ahí mismo. Acá no hay botón
+ * que traiga el texto.
+ *
+ * **Y dice lo que estaba escrito, no "un comentario".** Una toma puede tener
+ * varios y se borran de a uno por su índice: sin el texto a la vista, la respuesta
+ * sería a cualquiera de ellos.
+ */
+export function queSeBorraElComentario(clase, comentario) {
+    const dicho = recortado((comentario || {}).comentario);
+    const sobre = recortado((comentario || {}).texto);
+    const lineas = [
+        dicho ? `· «${dicho}»` : '· el comentario, que quedó sin texto',
+        sobre ? `· escrito sobre «${sobre}»` : null
+    ].filter(Boolean);
+    return {
+        titulo: `Borrar un comentario de ${comoSeLlama(clase)}`,
+        mensaje: `Se va del XML lo que dice:\n\n${lineas.join('\n')}\n\n` +
+            'El XML se reescribe ahora. Esta clase ya terminó, así que acá no hay ' +
+            'Cmd-Z: el historial es de la clase que se está grabando.',
+        ok: 'Borrar'
+    };
+}
+
 export function queSeBorra(clase) {
     const archivos = clase.archivos || {};
     const audios = new Set((clase.sesiones || []).map(s => s.archivo).filter(Boolean)).size;

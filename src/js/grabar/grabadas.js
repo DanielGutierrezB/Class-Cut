@@ -48,7 +48,7 @@ import { pintarLeida } from './tomas.js';
 import { tramosPorToma } from './empalme.js';
 import {
     comoSeLlama, dosDigitos, horaDeCaptura, nombreDeCarpeta,
-    numeroLeido, parteQueQueda, queSeBorra
+    numeroLeido, parteQueQueda, queSeBorra, queSeBorraElComentario
 } from './gestionar.js';
 import { mostrador } from './turnos.js';
 
@@ -552,10 +552,33 @@ const DICHO = {
 };
 
 /**
+ * Lo único de esta pantalla que se pregunta antes de cambiar una clase terminada.
+ *
+ * Los otros cambios se deshacen apretando lo de al lado —«Descartar» tiene
+ * «Recuperar», una vista se cambia por otra, un borde se vuelve a correr— y por
+ * eso van directo. Borrar un comentario se lleva lo escrito y no deja nada en la
+ * pantalla que lo traiga: la única vuelta atrás sería el historial, que es de la
+ * clase que se está grabando. Ver `queSeBorraElComentario`.
+ *
+ * La pregunta va acá y no en el botón (`margen.js`) porque el botón es el mismo en
+ * las dos pantallas y en la de la toma NO tiene que preguntar: lo que cambia no es
+ * el gesto, es que de este lado no hay Cmd-Z. Este es el camino de una clase ya
+ * cerrada, y por lo tanto el único sitio donde se sabe eso.
+ */
+async function seAnimaABorrarElComentario(clase, cambio) {
+    const toma = (clase.tomas || []).find(t => t.id === cambio.toma);
+    const comentario = toma ? (toma.comentarios || [])[cambio.indice] : null;
+    return window.cc.confirmar(queSeBorraElComentario(clase, comentario));
+}
+
+/**
  * Cambiar una clase que ya terminó. El motor reescribe su XML en el mismo gesto,
  * así que acá solo hay que releer la lista para que la tarjeta muestre lo nuevo.
  */
 async function editar(clase, cambio) {
+    if (cambio.tipo === 'borrar-comentario' && !await seAnimaABorrarElComentario(clase, cambio)) {
+        return;
+    }
     const r = await window.cc.grabarEditarGrabada(clase.archivos.json, cambio);
     if (!r.ok) { toast(r.error); return; }
     anotar('grabar.edita-grabada', { clase: clase.clase, tipo: cambio.tipo });
