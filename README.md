@@ -1436,7 +1436,7 @@ Para desarrollo alcanza con Homebrew:
 
 ```bash
 brew install ffmpeg whisper-cpp
-mkdir -p bin/mac/models   # y dejar ahí ggml-large-v3-turbo.bin y el modelo de VAD
+mkdir -p bin/mac/models   # y dejar ahí ggml-large-v3-turbo.bin, ggml-small.bin y el de VAD
 ```
 
 La IA es opcional y también local. Para desarrollo, cualquier Ollama con un
@@ -1450,12 +1450,38 @@ Los modelos: `ggml-large-v3-turbo.bin` (1,5 GB) y `ggml-silero-v5.1.2.bin`
 (885 KB), de los repos `ggerganov/whisper.cpp` y `ggml-org/whisper-vad` en
 Hugging Face. Se pueden apuntar con `CLASSCUT_WHISPER_MODEL` y `CLASSCUT_VAD_MODEL`.
 
-Y uno más, opcional: `ggml-base.bin` (148 MB), para el ciclo de señales de la
-toma de notas en vivo. Ese ciclo escucha cada tres segundos buscando tres
-palabras conocidas —el conteo, "Retomamos", "Pausa"— y tira el texto, así que ahí
-importa cuánto tarda y no cuánto acierta. Sin él corre con el grande y funciona,
-pero gasta un segundo cada tres durante los cuarenta minutos de una clase.
-Diagnóstico dice si está. Se puede apuntar con `CLASSCUT_WHISPER_MODELO_LIVIANO`.
+Y uno más, `ggml-small.bin` (488 MB), que hace dos trabajos que en el fondo son
+el mismo: **cuál es el modelo más chico que igual sirve.**
+
+El primero es el **ciclo de señales** de la toma de notas en vivo, que escucha
+cada tres segundos buscando tres palabras conocidas —el conteo, "Retomamos",
+"Pausa"— y tira el texto, así que ahí importa cuánto tarda y no cuánto acierta.
+Medido con nuestro binario sobre 4 s de una clase: 317 ms por pasada contra los
+815 ms del grande. Sin él el ciclo corre con el grande y funciona, pero ocupa un
+cuarto de cada ciclo durante los cuarenta minutos de una clase. También sirve
+`ggml-base.bin` (148 MB), que es más rápido todavía.
+
+El segundo es el **escalón al que bajar si el sistema se lleva a whisper-cli** en
+medio de una toma (`engine/insistir.js`). Ese escalón se elige por peso y no por
+la lista de preferencia, que va de mejor a peor para transcribir y cuyo segundo
+renglón pesa el doble que el primero: lo que hay que bajar es la memoria. De los
+modelos que se pueden bajar, `small` es el primero que pesa menos que el turbo.
+
+Que los dos trabajos los haga el mismo archivo sale gratis dos veces: el escalón
+al que se baja es uno que el ciclo de señales ya viene mapeando cada tres
+segundos, así que sus páginas están calientes y bajar no cuesta leer medio giga
+de disco con la máquina justo en el peor momento.
+
+**Qué tan peor escribe.** Sobre tres ventanas de un minuto de una clase real,
+contra el mismo tramo leído con el turbo: 14 % y 17 % de palabras distintas donde
+habla una sola persona —la frase se entiende igual, se pierden muletillas y algún
+nombre— y 63 % donde dos personas se pisan, que es donde `small` se come tramos
+enteros. Alcanza para lo que tiene que alcanzar: la toma sale con texto en vez de
+en silencio, queda marcada en el sidecar y "Regenerar" la vuelve a leer con el
+grande y la máquina libre. `tools/sonda-escalon.js` lo ejercita.
+
+Diagnóstico dice si está, en los dos renglones. Se puede apuntar con
+`CLASSCUT_WHISPER_MODELO_LIVIANO`.
 
 ## Distribución
 

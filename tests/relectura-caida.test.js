@@ -85,11 +85,16 @@ async function grabar(dir, params) {
     const p = params || {};
     const antes = oir.escuchar;
     let releidas = 0;
+    // Con qué modelo se pidió cada pasada grande, en orden. Lo trae el pedido que
+    // arma `oir-toma`, así que es lo que la política eligió de verdad y no lo que
+    // la prueba supone: es el único lugar desde donde se ve la bajada de modelo.
+    const conQue = [];
     oir.escuchar = async pedido => {
         if (pedido.liviano) {
             return { palabras: palabrasDelGuion(pedido), colapsadas: 0, rellenadas: 0 };
         }
         releidas++;
+        conQue.push(pedido.modelo ? pedido.modelo.name : null);
         const que = p.alReleer(releidas, pedido);
         if (que instanceof Error) throw que;
         return que || { palabras: palabrasDelGuion(pedido), colapsadas: 0, rellenadas: 0 };
@@ -103,7 +108,7 @@ async function grabar(dir, params) {
             grabacion.pcm(silencio(30));
             await grabacion.buscarSenales();
             const salida = await grabacion.terminar();
-            return { secuencia: salida.secuencia, veces: releidas };
+            return { secuencia: salida.secuencia, veces: releidas, conQue };
         });
     } finally {
         oir.escuchar = antes;
@@ -117,6 +122,12 @@ function sidecarDe(dir, secuencia) {
 
 function temporal() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'cc-relectura-'));
+}
+
+/** Lo que pesa un modelo de esta máquina, para mirar que la bajada baje. */
+function pesoDe(nombre) {
+    const suyo = paths.modelosInstalados().find(m => m.name === nombre);
+    return suyo ? suyo.bytes : 0;
 }
 
 /** Corre el cuerpo con un escalón de abajo puesto, y devuelve el que había. */
@@ -144,10 +155,24 @@ module.exports = async t => {
         // siguiente, con la app cerrada, no había forma de saber cuál era.
         const dir = temporal();
         try {
-            const { secuencia, veces } = await grabar(dir, { alReleer: () => muerto('codigo') });
-            // En esta Mac no hay ningún modelo más liviano que el grande, así que
-            // un código se rinde en un solo intento: no se reintenta lo idéntico.
-            t.eq(veces, 1, 'un código no se repite con el mismo modelo');
+            const { secuencia, conQue } = await grabar(dir, { alReleer: () => muerto('codigo') });
+
+            // **Cuántos intentos gasta esto depende de qué haya bajado la máquina,
+            // así que lo que se afirma es la invariante y no el número.** Escrito
+            // como `veces === 1` valía mientras esta Mac no tuviera ningún modelo
+            // más liviano que el grande; el día que apareció `small` se puso en
+            // rojo sin que nada estuviera roto. Lo que no puede pasar nunca es que
+            // un código —que es determinista— se reintente con el mismo modelo, ni
+            // que la bajada se detenga antes del último escalón.
+            t.eq(new Set(conQue).size, conQue.length,
+                `ningún modelo dos veces: ${conQue.join(' → ')}`);
+            t.eq(conQue[0], paths.whisperModel().name, 'se empieza por el bueno');
+            for (let i = 1; i < conQue.length; i++) {
+                t.ok(pesoDe(conQue[i]) < pesoDe(conQue[i - 1]),
+                    `${conQue[i]} tiene que pesar menos que ${conQue[i - 1]}`);
+            }
+            t.eq(paths.escalonDebajo({ name: conQue[conQue.length - 1] }), null,
+                `se bajó hasta el último escalón: ${conQue[conQue.length - 1]}`);
 
             const sidecar = sidecarDe(dir, secuencia);
             const toma = sidecar.tomas[0];

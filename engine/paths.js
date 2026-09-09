@@ -255,9 +255,16 @@ function elDeAbajo(suyo, instalados) {
 }
 
 /**
+ * En esta Mac, hoy, el escalón del turbo de 1,5 GB es `ggml-small.bin` (488 MB),
+ * y de él ya no se baja a ninguna parte. Estuvo en null un tiempo —no había
+ * ningún modelo instalado más liviano que el grande— y por eso la rama de bajar
+ * se probó entera contra un whisper-cli de mentira. Ejercitada contra los ggml de
+ * verdad está en `tools/sonda-escalon.js`, que mata las pasadas del grande con el
+ * binario de la app y mira que el chico levante y escriba.
+ *
  * @param {{name:string, path:string}|string} modelo el que se está usando
  * @returns {{name:string, path:string, bytes:number}|null} null si no hay ninguno
- *   más liviano, que es el caso de esta Mac y tiene que poder decirse
+ *   más liviano, que sigue siendo un resultado y tiene que poder decirse
  */
 function escalonDebajo(modelo) {
     const pedido = typeof modelo === 'string' ? { name: modelo } : (modelo || {});
@@ -293,6 +300,17 @@ function vadModel() {
  * Los usa el ciclo de señales de la toma de notas en vivo (`engine/oir.js`), que
  * solo busca tres palabras conocidas y tira el texto: ahí lo que importa es
  * cuánto tarda, no cuánto acierta.
+ *
+ * **En esta Mac el liviano y el escalón de abajo son el mismo archivo**, y no es
+ * casualidad ni desprolijidad: las dos preguntas son la misma —cuál es el modelo
+ * más chico que igual sirve— vistas desde el tiempo y desde la memoria. Que
+ * coincidan sale gratis dos veces. Una, medida con nuestro binario sobre 4 s de
+ * la clase 02: el ciclo pasa de 815 ms por pasada con el turbo a 317 ms con
+ * `small`, o sea de ocupar un cuarto de cada ciclo a ocupar un noveno. Y la otra,
+ * que es la que importa el día que el sistema se lleve al grande: el escalón al
+ * que se baja es un archivo que el ciclo de señales ya viene mapeando cada tres
+ * segundos, así que sus páginas están calientes y bajar no cuesta leer 488 MB de
+ * disco con la máquina justo en el peor momento.
  */
 const MODELOS_LIVIANOS = ['ggml-base.bin', 'ggml-small.bin', 'ggml-medium.bin'];
 

@@ -68,7 +68,21 @@ OLLAMA_MODELS="bin/mac/ollama-models"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/payload"
+# Qué modelos viajan, uno por uno y con lo que pesa cada uno.
+#
+# El total no alcanza para decidir nada, y acá hay algo que decidir: los modelos
+# son casi todo el instalador, así que agregar o sacar uno se ve en el número que
+# el editor descarga. El que más fácil se saca por parecer un extra es
+# `ggml-small.bin`, y es justo el que no conviene sacar: son 426 MiB que le dan a
+# CUALQUIER máquina las dos cosas que esta Mac no tuvo hasta que se bajó —el
+# modelo del ciclo de señales y el escalón al que bajar si el sistema se lleva al
+# grande en medio de una toma (`engine/insistir.js`)—. Sin él el instalador pesa
+# menos y la toma que se pierda no se puede recuperar hasta después de la clase.
 echo "→ juntando los modelos ($(du -shc "$MODELS" "$OLLAMA_MODELS" | tail -1 | cut -f1))"
+for m in "$MODELS"/* "$OLLAMA_MODELS"/*; do
+    [ -e "$m" ] || continue
+    echo "    $(du -sh "$m" | cut -f1)  $(basename "$m")"
+done
 # `ditto` y no `cp`: sin `--norsrc` cada archivo viaja con un `._` al lado, que
 # son 16 archivos de basura dentro de un instalador de 3.8 GB.
 ditto --norsrc --noextattr --noacl "$MODELS" "$STAGE/payload/models"
