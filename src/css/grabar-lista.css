@@ -88,17 +88,23 @@
 .carpeta-cabeza .clase-dato.es-en-uso { color: var(--accent); font-weight: 600; }
 .carpeta-quitar { margin-left: auto; }
 
-/* «Generar .prproj» abre la fila, antes del nombre del curso: es lo que se le
-   hace a ESTE curso, mientras que lo de la derecha —«en uso», «Quitar de la
-   lista»— es lo que se le hace a la fila. El separador marca esa frontera sin
-   gastar una palabra. */
+/* «Generar .prproj», que está en las dos tablas: el encabezado de carpeta de
+   Grabar y el de Clases. El estilo es uno solo porque es el mismo botón y el
+   mismo trabajo; lo único que cambia es dónde cae en la fila. */
 .carpeta-prproj {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+}
+/* En Grabar abre la fila, antes del nombre del curso: es lo que se le hace a
+   ESTE curso, mientras que lo de la derecha —«en uso», «Quitar de la lista»— es
+   lo que se le hace a la fila. El separador marca esa frontera sin gastar una
+   palabra. En Clases no hace falta, porque ahí ya cae del lado de las acciones. */
+.carpeta-cabeza .carpeta-prproj {
     padding-right: 10px;
     border-right: 1px solid var(--border);
 }
+.grupo-acciones .carpeta-prproj { margin-right: 10px; }
 /* Armando: el botón queda apagado pero no se lee como roto, y el ancho lo fija
    el texto más largo para que la cuenta al subir no corra el nombre del curso. */
 .carpeta-prproj .btn[disabled] {

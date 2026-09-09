@@ -752,7 +752,7 @@ export function cablear(deps) {
     // El botón del curso guarda su propio avance porque el cabezal se rehace
     // entero en cada relectura; lo único que necesita de acá es poder pedir que
     // se redibuje (ver `prproj.js`).
-    prproj.cablear({ pintar });
+    prproj.cablear(pintar);
 
     for (const boton of document.querySelectorAll('.grabadas-modo')) {
         boton.onclick = () => {

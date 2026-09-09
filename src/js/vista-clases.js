@@ -4,6 +4,7 @@
 import { $, alertsHtml, anotar } from './chrome.js';
 import { claseDeVista, esc, fmtDur, fmtClock, fmtMs, fmtTokens, plural } from './formato.js';
 import { state, clases, findClass, marcadas, estaColapsada, alternarCarpeta } from './estado.js';
+import * as prproj from './grabar/prproj.js';
 
 const KIND_LABEL = {
     course: 'Curso',
@@ -148,6 +149,10 @@ function statusBadges(cls) {
  * Existe para poder tener varias cargadas sin perderse: dice de dónde salen las
  * filas que siguen, y lleva lo que antes vivía en la barra de arriba y valía
  * para una sola carpeta —verla en el Finder, quitarla, marcarla entera—.
+ *
+ * Y «Generar .prproj», que solo aparece cuando hay algo cortado. Acá el botón
+ * vale más que en Grabar: allá los XML son marcadores tomados en vivo, y los de
+ * esta pestaña son los cortados, con sus clips y sus tiempos.
  */
 function grupoHtml(scan, conDia) {
     const suyas = scan.classes;
@@ -180,6 +185,7 @@ function grupoHtml(scan, conDia) {
                 <span class="grupo-meta">${resumen}</span>
             </td>
             <td colspan="2" class="grupo-acciones">
+                ${prproj.botonHtml(scan.root, suyas.filter(c => c.alreadyProcessed).length)}
                 <button class="btn btn-ghost btn-inline" data-quitar="${esc(scan.root)}"
                         title="Saca esta carpeta de la lista. No borra nada del disco.">Quitar</button>
             </td>
@@ -330,6 +336,9 @@ export function renderFoot() {
 export function wireClases(callbacks) {
     const host = $('class-rows');
     const alQuitar = (callbacks && callbacks.alQuitarCarpeta) || (() => {});
+    // Armar un proyecto tarda, y su avance se cuenta en el encabezado: sin esto,
+    // la cuenta solo subiría si algo más mandara a redibujar la tabla.
+    prproj.cablear(renderRows);
 
     host.addEventListener('change', e => {
         const id = e.target.dataset.check;
@@ -363,6 +372,14 @@ export function wireClases(callbacks) {
 
         const quitar = e.target.closest('[data-quitar]');
         if (quitar) { await alQuitar(quitar.dataset.quitar); return; }
+
+        // Los dos del proyecto de Premiere, antes de `data-plegar` por lo mismo
+        // que los de arriba: viven adentro del encabezado.
+        const verProyecto = e.target.closest('[data-prproj-ver]');
+        if (verProyecto) { window.cc.reveal(verProyecto.dataset.prprojVer); return; }
+
+        const armar = e.target.closest('[data-prproj]');
+        if (armar) { await prproj.pedir(armar.dataset.prproj); return; }
 
         // Va después de los dos botones que viven adentro del encabezado y antes
         // de abrir el detalle: el `data-plegar` está en la celda entera, así que
