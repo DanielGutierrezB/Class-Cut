@@ -1,17 +1,22 @@
 'use strict';
 /**
- * grabadas.js — Las clases que ya se grabaron, debajo de la que se está grabando.
+ * grabadas.js — La pantalla de la lista: qué clases hay en las carpetas y qué se
+ * les puede hacer.
  *
- * Terminar una clase no la saca de la pantalla: en un día de rodaje se graban
- * varias, y quien toma las notas quiere ver que la 1 y la 2 quedaron antes de
- * arrancar la 3. Cada una es una tarjeta plegada con lo que importa de un
- * vistazo —cuándo fue, cuántas tomas quedaron, cómo se llama su XML— y se
- * despliega para leer las tomas.
+ * Es por donde se entra al paso. Antes esto era una lista colgada debajo de la
+ * clase en curso —"Ya grabadas", plegable— y se fue a su propia pantalla cuando
+ * quedó claro que las dos mitades no cabían juntas (el por qué está en
+ * `pantallas.js`). Al salir de abajo dejó de ser un apéndice y pasó a ser lo
+ * primero que se ve, y eso trajo lo que le faltaba: **desde acá se gestiona la
+ * carpeta.** Hasta ahora la app sabía crear clases y no sabía arreglarlas, y la
+ * única salida para una clase con el número equivocado era entrar a la carpeta y
+ * mover archivos a mano, que es exactamente donde el XML y su archivo de datos se
+ * separan.
  *
  * Se ven de dos maneras. **Por carpeta**: una carpeta de notas es un curso, así
  * que agrupadas por carpeta son las clases de cada curso, con la carpeta en uso
- * primero. **Por fecha**: todas juntas, de la más nueva a la más vieja, que es
- * lo que sirve para ver qué se grabó hoy sin importar de qué curso.
+ * primero. **Por fecha**: todas juntas, de la más nueva a la más vieja, que es lo
+ * que sirve para ver qué se grabó hoy sin importar de qué curso.
  *
  * Lo que se muestra sale del archivo con la hora del día que cada clase dejó en
  * su carpeta (`grabacion.listar`), no de la memoria de la ventana: la lista son
@@ -27,32 +32,73 @@
  * de un rango más ancho que cada toma quedó guardado al lado del XML, así que
  * correr el IN o el OUT ahí adentro es repartir de nuevo palabras que ya están
  * (ver `moverBordeGuardado` en `engine/notas-vivo.js`). Lo único que pide volver
- * a oír es irse más lejos que ese rango, y para eso está **regenerar**, que
- * relee las tomas con el modelo grande y deja orillas nuevas alrededor de los
- * bordes de ahora.
+ * a oír es irse más lejos que ese rango, y para eso está **regenerar**, que relee
+ * las tomas con el modelo grande y deja orillas nuevas alrededor de los bordes de
+ * ahora.
+ *
+ * Esta pantalla habla con el motor y las de al lado no, y es por dónde pasa la
+ * frontera: las reglas de qué le pasa a una clase al renombrarla viven aparte y
+ * sin pantalla (`gestionar.js`), el dibujo de una toma vive en `tomas.js`, y lo
+ * que queda acá es el cableado — pedir, avisar y volver a leer.
  */
 
+import { $, toast, anotar, recordar, recordado } from '../chrome.js';
 import { fmtDur, fmtHora, plural } from '../formato.js';
 import { pintarLeida } from './tomas.js';
 import { tramosPorToma } from './empalme.js';
+import {
+    comoSeLlama, dosDigitos, horaDeCaptura, nombreDeCarpeta,
+    numeroLeido, parteQueQueda, queSeBorra
+} from './gestionar.js';
 
-export const MODOS = ['carpetas', 'fecha'];
-
-/** El nombre de una carpeta, que es el del curso. */
-export function nombreDeCarpeta(ruta) {
-    return String(ruta || '').split('/').filter(Boolean).pop() || ruta || '';
-}
+/** Cómo se puede ver la lista, y con qué clave se recuerda la elección. */
+const MODOS = ['carpetas', 'fecha'];
+const MODO_RECORDADO = 'cc.grabar.modo';
 
 /**
- * Cómo se lee una clase: "Clase 3", o "Clase 3 · parte 2" si se grabó en tandas.
+ * Lo que la pantalla de la lista sabe.
  *
- * La parte solo aparece cuando la hay. La mayoría de las clases son una sola
- * grabación, y un "parte 1" en todas taparía justo el caso que importa ver.
+ * La carpeta en uso y las que se usaron NO se guardan acá: viven en los ajustes,
+ * porque las necesita también el escáner de post cuando una clase llega sin su
+ * XML adentro. Acá está la copia con la que se dibuja, releída en cada `cargar`.
  */
-export function comoSeLlama(clase) {
-    const n = clase.clase || '?';
-    return `Clase ${n}${clase.parte > 1 ? ` · parte ${clase.parte}` : ''}`;
+const suyo = {
+    carpeta: null,
+    carpetas: [],
+    // Las clases de esas carpetas, de la más nueva a la más vieja.
+    clases: [],
+    modo: MODOS.includes(recordado(MODO_RECORDADO)) ? recordado(MODO_RECORDADO) : 'carpetas',
+    // Las clases que se están regenerando: json → {hechas, total}.
+    regenerando: new Map(),
+    /**
+     * La clase con el formulario de renombre abierto, y lo que se lleva escrito.
+     *
+     * Lo escrito se guarda acá y no solo en el campo porque la lista se puede
+     * repintar por debajo —una clase terminando de regenerarse— y rehacer el
+     * formulario con los valores del archivo tiraría el nombre a medio escribir.
+     * Es la misma regla que protege la nota de una toma en `tomas.js`, en su
+     * versión chica: lo que alguien escribió y todavía no guardó no se rehace.
+     */
+    renombrando: null,
+    // Las vistas que se le pueden poner a una toma, y lo que hay que preguntar
+    // antes de mover un borde: las dos las pone la ventana al cablear.
+    vistas: () => [],
+    preguntarBorde: null,
+    alComenzar: null,
+    cableada: false
+};
+
+/** La carpeta en uso, que es el curso donde va a caer la clase que se grabe. */
+export function carpeta() {
+    return suyo.carpeta;
 }
+
+/** Las clases de la carpeta en uso, que es contra las que se numera la próxima. */
+export function deLaCarpeta() {
+    return suyo.clases.filter(c => c.carpeta === suyo.carpeta);
+}
+
+/* ─── Las piezas de una tarjeta ───────────────────────────────────────────── */
 
 /**
  * Hasta cuándo grabó una clase: el cierre del audio, y si no quedó escrito
@@ -88,24 +134,8 @@ function botonChico(texto, titulo, alClic) {
     return boton;
 }
 
-/**
- * @param {object} clase de `grabacion.listar`
- * @param {object} vista { conCurso, vistas, regenerando: Map json → {hechas,total},
- *   alRegenerar(clase), alEditar(clase, cambio) }
- */
-function tarjeta(clase, vista) {
-    const caja = document.createElement('details');
-    caja.className = 'clase es-hecha';
-    caja.dataset.json = clase.archivos ? clase.archivos.json : '';
-
-    const cabeza = document.createElement('summary');
-    cabeza.className = 'clase-cabeza';
-
-    const titulo = document.createElement('strong');
-    titulo.textContent = comoSeLlama(clase)
-        + (vista.conCurso && clase.curso ? ` · ${clase.curso}` : '');
-    cabeza.append(titulo);
-
+/** Lo que va en la cabecera de una clase, de un vistazo y sin abrirla. */
+function datosDe(cabeza, clase) {
     const fin = finDe(clase);
     cabeza.append(dato(fin
         ? `${fmtHora(clase.ceroMs)} → ${fmtHora(fin)} · ${fmtDur((fin - clase.ceroMs) / 1000)}`
@@ -128,18 +158,62 @@ function tarjeta(clase, vista) {
     xml.textContent = clase.archivos ? nombreDeCarpeta(clase.archivos.xml) : clase.secuencia;
     xml.title = clase.archivos ? clase.archivos.xml : '';
     cabeza.append(xml);
+}
 
-    const marcha = vista.regenerando.get(caja.dataset.json);
+/**
+ * Los tres botones de gestión, en el orden en que se usan: releer, arreglar el
+ * nombre, y tirarla.
+ *
+ * "Borrar" va último y no primero por lo mismo por lo que va apagado y no rojo
+ * pleno (ver `grabar-lista.css`): es el único de los tres que no tiene vuelta, y
+ * el sitio de un botón es parte de lo difícil que es apretarlo sin querer.
+ */
+function botonesDe(cabeza, clase) {
+    const marcha = suyo.regenerando.get(clase.archivos ? clase.archivos.json : '');
     if (marcha) {
         cabeza.append(dato(`Regenerando ${marcha.hechas} de ${marcha.total}…`, 'es-marcha'));
-    } else if (tomas.length) {
+    } else if ((clase.tomas || []).length) {
         cabeza.append(botonChico('Regenerar',
             'Volver a leer todas las tomas del audio con el modelo grande y reescribir el XML',
-            () => vista.alRegenerar(clase)));
+            () => regenerar(clase)));
     }
+    if (!clase.archivos) return;
+
+    cabeza.append(botonChico('Renombrar',
+        'Cambiar el número de clase y el nombre del curso. La hora de captura no se toca: ' +
+        'es con la que post empareja esta clase con la carpeta del Rodecaster.',
+        () => empezarRenombre(clase)));
+
+    const borrar = botonChico('Borrar',
+        'Borra del disco el XML, el archivo de datos y el audio. No va a la papelera y no se deshace.',
+        () => borrarClase(clase));
+    borrar.classList.add('btn-tirar');
+    cabeza.append(borrar);
+}
+
+/**
+ * @param {object} clase de `grabacion.listar`
+ * @param {boolean} conCurso si hay que decir de qué curso es (el modo por fecha)
+ */
+function tarjeta(clase, conCurso) {
+    const caja = document.createElement('details');
+    caja.className = 'clase es-hecha';
+    caja.dataset.json = clase.archivos ? clase.archivos.json : '';
+
+    const cabeza = document.createElement('summary');
+    cabeza.className = 'clase-cabeza';
+
+    const titulo = document.createElement('strong');
+    titulo.className = 'clase-titulo';
+    titulo.textContent = comoSeLlama(clase) + (conCurso && clase.curso ? ` · ${clase.curso}` : '');
+    cabeza.append(titulo);
+
+    datosDe(cabeza, clase);
+    botonesDe(cabeza, clase);
 
     const lista = document.createElement('div');
     lista.className = 'grabar-tomas';
+    const tomas = clase.tomas || [];
     if (!tomas.length) {
         const vacio = document.createElement('p');
         vacio.className = 'toma-vacio';
@@ -153,8 +227,8 @@ function tarjeta(clase, vista) {
     // tarjeta ofrece los dos y no una versión recortada.
     const acciones = clase.archivos
         ? {
-            alCambiar: cambio => vista.alEditar(clase, cambio),
-            alBorde: donde => vista.alBorde(clase, donde)
+            alCambiar: cambio => editar(clase, cambio),
+            alBorde: donde => bordeDe(clase, donde)
         }
         : null;
     // El empalme de una clase terminada se mira igual: `grabacion.listar` lo
@@ -162,58 +236,211 @@ function tarjeta(clase, vista) {
     // que el ajuste que se ofrece acá es tan aplicable como el de la que corre.
     // Los tramos se arman con las tomas EN ORDEN, antes de darlas vuelta para
     // dibujarlas: cuál es la anterior lo decide la clase, no la lista.
-    const conVistas = { vistas: vista.vistas || [], repetidos: tramosPorToma(tomas) };
+    const conVistas = { vistas: suyo.vistas() || [], repetidos: tramosPorToma(tomas) };
     for (const toma of [...tomas].reverse()) lista.append(pintarLeida(toma, conVistas, acciones));
 
     caja.append(cabeza, lista);
     return caja;
 }
 
+/* ─── Renombrar: el formulario ────────────────────────────────────────────── */
+
+/**
+ * La tarjeta de la clase que se está renombrando: la cabecera y el formulario, y
+ * nada más.
+ *
+ * Sin sus tomas y sin el triangulito de abrir, o sea que deja de ser un
+ * `<details>` mientras el formulario está puesto. Es a propósito: lo que se está
+ * haciendo con esta clase ahora es ponerle nombre, y las veinte tomas debajo del
+ * campo son la parte que no importa en este momento. Cancelar la devuelve tal
+ * como estaba, abierta o cerrada, porque el pliegue se anota aparte (`pintar`).
+ */
+function tarjetaEnRenombre(clase, conCurso) {
+    const caja = document.createElement('section');
+    caja.className = 'clase es-hecha es-renombrando';
+    caja.dataset.json = clase.archivos.json;
+
+    const cabeza = document.createElement('header');
+    cabeza.className = 'clase-cabeza';
+    const titulo = document.createElement('strong');
+    titulo.className = 'clase-titulo';
+    titulo.textContent = comoSeLlama(clase) + (conCurso && clase.curso ? ` · ${clase.curso}` : '');
+    cabeza.append(titulo);
+    datosDe(cabeza, clase);
+
+    caja.append(cabeza, formularioDeRenombre(clase));
+    return caja;
+}
+
+/** Un campo con su rótulo, que es lo único que estos dos comparten. */
+function campo(rotulo, valor, clase) {
+    const caja = document.createElement('label');
+    caja.className = 'clase-renombre-campo';
+    const nombre = document.createElement('span');
+    nombre.textContent = rotulo;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = clase;
+    input.value = valor;
+    input.autocomplete = 'off';
+    caja.append(nombre, input);
+    return { caja, input };
+}
+
+/**
+ * El formulario: el número, el curso, y la hora que se muestra y no se toca.
+ *
+ * Los dos campos que se pueden cambiar son los dos que el editor se equivocó al
+ * grabar —el rodaje se dio vuelta y la 7 salió antes que la 6, o el curso quedó
+ * mal escrito—, y son exactamente los dos que el motor deja mover. La hora está
+ * en el medio, escrita como dato, porque no alcanza con no ofrecerla: sin
+ * mostrarla, "renombrar" parecería que rehace el nombre entero, y lo primero que
+ * alguien haría es preguntarse dónde quedó la hora.
+ *
+ * Mientras se escribe el número, la marca de la parte dice qué va a pasar si ese
+ * número ya está usado. Es la misma marca y el mismo aviso que la barra de la
+ * toma de notas (`.grabar-parte`), y a propósito: es la misma regla —reusar un
+ * número abre la tanda siguiente— y verla escrita igual en los dos sitios es lo
+ * que la vuelve una sola regla en vez de dos coincidencias.
+ */
+function formularioDeRenombre(clase) {
+    const escrito = suyo.renombrando;
+    const forma = document.createElement('form');
+    forma.className = 'clase-renombre';
+
+    const campos = document.createElement('div');
+    campos.className = 'clase-renombre-campos';
+    const numero = campo('Clase', escrito.clase, 'grabar-num');
+    numero.input.inputMode = 'numeric';
+    numero.input.maxLength = 3;
+    const parte = document.createElement('span');
+    parte.className = 'grabar-parte';
+    const curso = campo('Curso', escrito.curso, 'clase-renombre-curso');
+    campos.append(numero.caja, parte, curso.caja);
+
+    const { hora, aviso } = horaDeCaptura(clase);
+    const cuando = document.createElement('p');
+    cuando.className = aviso ? 'clase-renombre-hora es-duda' : 'clase-renombre-hora';
+    cuando.textContent = aviso
+        || `Se grabó a las ${hora}, y esa hora no se cambia: es con la que post encuentra ` +
+            'a qué carpeta del Rodecaster corresponde esta clase.';
+
+    // Lo que el motor contestó que no se pudo. Va acá y se queda: un aviso que se
+    // va solo a los tres segundos no sirve cuando lo que hay que hacer es
+    // corregir el campo que está justo arriba.
+    const mal = document.createElement('p');
+    mal.className = 'clase-renombre-mal';
+    mal.hidden = true;
+
+    const acciones = document.createElement('div');
+    acciones.className = 'clase-renombre-acciones';
+    const guardar = document.createElement('button');
+    guardar.type = 'submit';
+    guardar.className = 'btn btn-primary btn-inline';
+    guardar.textContent = 'Guardar';
+    const cancelar = document.createElement('button');
+    cancelar.type = 'button';
+    cancelar.className = 'btn btn-ghost btn-inline';
+    cancelar.textContent = 'Cancelar';
+    cancelar.onclick = () => { suyo.renombrando = null; pintar(); };
+    acciones.append(guardar, cancelar);
+
+    /** La marca de la parte, recalculada en el sitio y sin repintar la lista. */
+    const decirLaParte = () => {
+        const n = numeroLeido(numero.input.value);
+        const cual = parteQueQueda(clase, deLaCarpeta(), n);
+        const hoy = Number(clase.parte) || 1;
+        parte.hidden = cual === hoy && n === Number(clase.clase);
+        parte.textContent = `parte ${cual}`;
+        parte.title = cual > 1
+            ? `Ya hay ${cual - 1} grabación de la clase ${dosDigitos(n)} en esta carpeta: ` +
+                'esta queda como una tanda más, con su propio XML.'
+            : 'Es la primera grabación de esa clase en la carpeta.';
+    };
+    numero.input.oninput = () => {
+        suyo.renombrando.clase = numero.input.value;
+        decirLaParte();
+    };
+    curso.input.oninput = () => { suyo.renombrando.curso = curso.input.value; };
+    decirLaParte();
+
+    forma.onsubmit = e => {
+        e.preventDefault();
+        renombrar(clase, numero.input.value, curso.input.value, { guardar, mal });
+    };
+    forma.append(campos, cuando, mal, acciones);
+    return forma;
+}
+
+/* ─── La carpeta ─────────────────────────────────────────────────────────── */
+
 /**
  * La cabecera de una carpeta en el modo por carpeta: el curso, dónde está y
  * cuántas clases tiene. La que está en uso lo dice; las demás se pueden sacar de
  * la lista (no del disco).
  */
-function cabeceraDeCarpeta(ruta, cuantas, vista) {
+function cabeceraDeCarpeta(ruta, cuantas) {
     const cabeza = document.createElement('header');
     cabeza.className = 'carpeta-cabeza';
-    cabeza.classList.toggle('es-activa', ruta === vista.carpetaActiva);
+    cabeza.classList.toggle('es-activa', ruta === suyo.carpeta);
 
     const nombre = document.createElement('strong');
     nombre.textContent = nombreDeCarpeta(ruta);
-    const ruta_ = document.createElement('span');
-    ruta_.className = 'clase-dato mono';
-    ruta_.textContent = ruta;
-    ruta_.title = ruta;
-    cabeza.append(nombre, ruta_, dato(plural(cuantas, 'clase', 'clases')));
+    const donde = document.createElement('span');
+    donde.className = 'clase-dato mono';
+    donde.textContent = ruta;
+    donde.title = ruta;
+    cabeza.append(nombre, donde, dato(plural(cuantas, 'clase', 'clases')));
 
-    if (ruta === vista.carpetaActiva) {
+    if (ruta === suyo.carpeta) {
         cabeza.append(dato('en uso', 'es-en-uso'));
     } else {
         const quitar = botonChico('Quitar de la lista',
             'Deja de mostrarla acá. No borra nada del disco.',
-            () => vista.alQuitarCarpeta(ruta));
+            () => quitarCarpeta(ruta));
         quitar.classList.add('carpeta-quitar');
         cabeza.append(quitar);
     }
     return cabeza;
 }
 
-/**
- * @param {Element} donde
- * @param {Array} clases de `grabacion.listar`, de la más nueva a la más vieja
- * @param {object} vista {
- *   modo: 'carpetas'|'fecha', carpetas: string[] (la activa primera),
- *   carpetaActiva, vistas, regenerando: Map, alRegenerar(clase),
- *   alEditar(clase, cambio), alBorde(clase, {toma, paredMs}), alQuitarCarpeta(ruta) }
- */
-export function pintar(donde, clases, vista) {
+/** Lo que se dice cuando no hay ninguna carpeta todavía, que es cómo se abre. */
+function sinCarpetas() {
+    const vacio = document.createElement('p');
+    vacio.className = 'grabar-vacio';
+    vacio.textContent = 'Todavía no hay ninguna carpeta de curso. Apretá «Elegir carpeta…»: ' +
+        'ahí van a caer las notas de sus clases, y no puede ser la tarjeta del Rodecaster, ' +
+        'que no está en la Mac hasta que la grabación termina.';
+    return vacio;
+}
+
+/* ─── Dibujar ─────────────────────────────────────────────────────────────── */
+
+/** Si alguien está escribiendo en el formulario de renombre. */
+function enElFormulario() {
+    const foco = document.activeElement;
+    return Boolean(foco && foco.tagName === 'INPUT' && foco.closest('.clase-renombre'));
+}
+
+export function pintar() {
+    $('grabadas-cuantas').textContent = suyo.carpetas.length
+        ? plural(suyo.clases.length, 'clase', 'clases')
+        : '';
+    for (const boton of document.querySelectorAll('.grabadas-modo')) {
+        const elegido = boton.dataset.modo === suyo.modo;
+        boton.classList.toggle('is-elegido', elegido);
+        boton.setAttribute('aria-checked', String(elegido));
+    }
+    // Sin carpeta no se puede empezar nada: la clase tiene que caer en alguna.
+    $('grabar-comenzar').disabled = !suyo.carpeta;
+
+    const donde = $('grabar-grabadas');
     // Con una línea de borde en la mano no se repinta, igual que en la lista de
-    // la clase en curso (`tomas.pintar`). Acá hace falta por lo mismo y por un
-    // camino distinto: mientras se graba, el estado del motor llega cada tres
-    // segundos y repinta la pantalla entera, esta lista incluida. Rehacerla en
-    // medio del gesto cambia la línea por otra y el arrastre se corta solo.
-    if (donde.querySelector('.toma-borde.es-arrastrando')) return;
+    // la clase en curso (`tomas.pintar`): rehacerla en medio del gesto cambia la
+    // línea por otra y el arrastre se corta solo. Y con el formulario de renombre
+    // en uso tampoco, por lo mismo que allá no se rehace la tarjeta donde alguien
+    // escribe: sacar el campo del documento se lleva el foco a media palabra.
+    if (donde.querySelector('.toma-borde.es-arrastrando') || enElFormulario()) return;
 
     // Qué tarjetas estaban desplegadas, para volver a dejarlas así. Comentar una
     // clase reescribe su XML y relee la lista, y sin esto la tarjeta que se
@@ -221,32 +448,244 @@ export function pintar(donde, clases, vista) {
     const abiertas = new Set([...donde.querySelectorAll('details.clase[open]')]
         .map(d => d.dataset.json).filter(Boolean));
     donde.textContent = '';
-    const lista = clases || [];
-    const conEstado = clase => {
-        const caja = tarjeta(clase, { ...vista, conCurso: vista.modo === 'fecha' });
-        caja.open = abiertas.has(caja.dataset.json);
+
+    const conCurso = suyo.modo === 'fecha';
+    const dibujar = clase => {
+        const json = clase.archivos ? clase.archivos.json : '';
+        if (suyo.renombrando && suyo.renombrando.json === json) {
+            return tarjetaEnRenombre(clase, conCurso);
+        }
+        const caja = tarjeta(clase, conCurso);
+        caja.open = abiertas.has(json);
         return caja;
     };
 
-    if (vista.modo === 'fecha') {
-        for (const clase of lista) donde.append(conEstado(clase));
+    if (!suyo.carpetas.length) {
+        donde.append(sinCarpetas());
         return;
     }
 
-    for (const ruta of vista.carpetas || []) {
-        const suyas = lista.filter(c => c.carpeta === ruta);
+    if (conCurso) {
+        for (const clase of suyo.clases) donde.append(dibujar(clase));
+        return;
+    }
+
+    for (const ruta of suyo.carpetas) {
+        const suyas = suyo.clases.filter(c => c.carpeta === ruta);
         const grupo = document.createElement('section');
         grupo.className = 'carpeta';
-        grupo.append(cabeceraDeCarpeta(ruta, suyas.length, vista));
+        grupo.append(cabeceraDeCarpeta(ruta, suyas.length));
         if (!suyas.length) {
             const vacio = document.createElement('p');
             vacio.className = 'toma-vacio carpeta-vacia';
-            vacio.textContent = ruta === vista.carpetaActiva
+            vacio.textContent = ruta === suyo.carpeta
                 ? 'Todavía no hay clases grabadas acá: la próxima cae en esta carpeta.'
                 : 'No quedó ninguna clase en esta carpeta.';
             grupo.append(vacio);
         }
-        for (const clase of suyas) grupo.append(conEstado(clase));
+        for (const clase of suyas) grupo.append(dibujar(clase));
         donde.append(grupo);
     }
+}
+
+/* ─── Lo que se le pide al motor ─────────────────────────────────────────── */
+
+/**
+ * Relee de los ajustes las carpetas, y del disco las clases que hay en ellas.
+ *
+ * @returns {Promise<boolean>} si la carpeta en uso cambió, que es lo que decide
+ *   si hay que proponer un número de clase nuevo del otro lado
+ */
+export async function cargar() {
+    const ajustes = await window.cc.ajustesLeer();
+    const cambioDeCarpeta = ajustes.notasDir !== suyo.carpeta;
+    suyo.carpeta = ajustes.notasDir;
+    suyo.carpetas = ajustes.notasDirs || [];
+    suyo.clases = await window.cc.grabarListar(suyo.carpetas);
+    pintar();
+    return cambioDeCarpeta;
+}
+
+/** Lo que le pasó a la toma, para decirlo en el aviso. */
+const DICHO = {
+    vista: 'la vista',
+    nota: 'la nota',
+    descartar: 'el descarte',
+    comentar: 'el comentario',
+    'borrar-comentario': 'el comentario quitado',
+    'descartar-ajuste': 'el ajuste de empalme descartado',
+    borde: 'el borde movido'
+};
+
+/**
+ * Cambiar una clase que ya terminó. El motor reescribe su XML en el mismo gesto,
+ * así que acá solo hay que releer la lista para que la tarjeta muestre lo nuevo.
+ */
+async function editar(clase, cambio) {
+    const r = await window.cc.grabarEditarGrabada(clase.archivos.json, cambio);
+    if (!r.ok) { toast(r.error); return; }
+    anotar('grabar.edita-grabada', { clase: clase.clase, tipo: cambio.tipo });
+    toast(`Clase ${clase.clase}: XML reescrito con ${DICHO[cambio.tipo] || 'el cambio'}.`);
+    await cargar();
+}
+
+/** El clic derecho sobre una palabra de una clase ya grabada. */
+async function bordeDe(clase, { toma, paredMs, abierta }) {
+    const borde = await suyo.preguntarBorde(toma, paredMs, abierta);
+    if (!borde) return;
+    await editar(clase, { tipo: 'borde', toma, borde, paredMs });
+}
+
+/**
+ * Releer las tomas de una clase terminada con el modelo grande.
+ *
+ * No decide nada: mejora el texto y no toca ningún borde. Y es lo que hay que
+ * apretar cuando un borde se quedó sin lugar, porque relee cada toma con orillas
+ * nuevas alrededor de los bordes de ahora: después de eso el IN y el OUT vuelven
+ * a tener segundos de texto por delante para seguir corriéndose.
+ */
+async function regenerar(clase) {
+    const json = clase.archivos.json;
+    suyo.regenerando.set(json, { hechas: 0, total: (clase.tomas || []).length });
+    pintar();
+    const r = await window.cc.grabarRegenerar(json);
+    suyo.regenerando.delete(json);
+    if (!r.ok) {
+        toast(r.error);
+        pintar();
+        return;
+    }
+    toast(r.sinAudio
+        ? `Clase ${clase.clase}: ${plural(r.tomas - r.sinAudio, 'toma releída', 'tomas releídas')}; ` +
+            `${r.sinAudio} sin audio para releer.`
+        : `Clase ${clase.clase}: ${plural(r.tomas, 'toma releída', 'tomas releídas')} y XML reescrito.`);
+    await cargar();
+}
+
+/** El avance que manda el motor mientras relee una clase. */
+export function avanceDeRegenerado(aviso) {
+    if (!suyo.regenerando.has(aviso.json)) return;
+    suyo.regenerando.set(aviso.json, { hechas: aviso.hechas, total: aviso.total });
+    pintar();
+}
+
+/** Sacar una carpeta de la lista. No borra nada: solo deja de mostrarse acá. */
+async function quitarCarpeta(ruta) {
+    const r = await window.cc.ajustesGuardar({ notasDirs: suyo.carpetas.filter(d => d !== ruta) });
+    if (!r.ok) { toast(r.error); return; }
+    await cargar();
+}
+
+/** Abre el formulario, con lo que la clase dice hoy. */
+function empezarRenombre(clase) {
+    suyo.renombrando = {
+        json: clase.archivos.json,
+        clase: dosDigitos(Number(clase.clase) || 1),
+        curso: clase.curso || nombreDeCarpeta(clase.carpeta)
+    };
+    pintar();
+    const campo = $('grabar-grabadas').querySelector('.clase-renombre .grabar-num');
+    if (campo) campo.select();
+}
+
+/**
+ * Guardar el nombre nuevo.
+ *
+ * **Lo que el motor niega se muestra en el formulario y no en un aviso que se
+ * va.** Se puede negar por tres cosas que solo él sabe —el nombre choca con otra
+ * clase, la clase se está grabando ahora, no hay hora de captura recuperable— y
+ * las tres piden hacer algo con el campo que está justo arriba. Un `toast` de dos
+ * segundos y medio deja la pregunta "¿y ahora qué?" sin respuesta en pantalla.
+ *
+ * Y el formulario se queda con lo escrito: no se repinta la lista al fallar, así
+ * que el cursor no se mueve y el nombre a medio corregir sigue ahí.
+ */
+async function renombrar(clase, numero, curso, donde) {
+    donde.guardar.disabled = true;
+    donde.guardar.textContent = 'Guardando…';
+    donde.mal.hidden = true;
+    const r = await window.cc.grabarRenombrar(clase.archivos.json, {
+        clase: numeroLeido(numero),
+        curso
+    });
+    if (!r.ok) {
+        donde.guardar.disabled = false;
+        donde.guardar.textContent = 'Guardar';
+        donde.mal.textContent = r.error;
+        donde.mal.hidden = false;
+        anotar('grabar.renombrar-negado', { error: r.error });
+        return;
+    }
+    anotar('grabar.renombra', { secuencia: r.secuencia, audios: r.audios });
+    suyo.renombrando = null;
+    toast(r.movida
+        ? `Quedó como «${r.secuencia}»${r.audios ? `, con su audio` : ''}.`
+        : 'El nombre quedó igual: no había nada que mover.');
+    await cargar();
+}
+
+/**
+ * Borrar una clase, con el cartel que dice qué se va a borrar.
+ *
+ * La confirmación es de acá y no del motor: cuando el gesto llega al motor ya
+ * está decidido, y él borra. Lo que hace falta antes es que la pregunta nombre
+ * los tres archivos, porque la respuesta a "¿seguro?" no significa nada y la
+ * respuesta a "se van el XML, los datos y dos audios de la carpeta tal" sí.
+ */
+async function borrarClase(clase) {
+    const ok = await window.cc.confirmar(queSeBorra(clase));
+    if (!ok) return;
+    const r = await window.cc.grabarBorrar(clase.archivos.json);
+    if (!r.ok) { toast(r.error); return; }
+    anotar('grabar.borra', { secuencia: r.secuencia, audios: r.audios });
+    // Lo que se fue de verdad, que puede ser menos de lo que el cartel anunciaba:
+    // un audio que alguien ya había movido a mano no estaba para borrar.
+    const fue = [r.xml && 'el XML', r.sidecar && 'sus datos',
+        r.audios && plural(r.audios, 'audio', 'audios')].filter(Boolean);
+    toast(fue.length
+        ? `Borrada: ${fue.join(', ')}.`
+        : 'No quedaba ningún archivo de esa clase para borrar.');
+    // Si la que se borró era la que se estaba renombrando, el formulario se va con
+    // ella: apunta a un archivo que ya no está.
+    if (suyo.renombrando && suyo.renombrando.json === clase.archivos.json) suyo.renombrando = null;
+    await cargar();
+}
+
+/* ─── El cableado ────────────────────────────────────────────────────────── */
+
+/**
+ * @param {object} deps {
+ *   vistas() — las que se le pueden poner a una toma, que las pide la ventana,
+ *   preguntarBorde(toma, paredMs, abierta) — el diálogo de cuál de los dos bordes,
+ *   alComenzar() — entrar a la toma de notas }
+ */
+export function cablear(deps) {
+    if (suyo.cableada) return;
+    suyo.cableada = true;
+    suyo.vistas = deps.vistas;
+    suyo.preguntarBorde = deps.preguntarBorde;
+    suyo.alComenzar = deps.alComenzar;
+
+    for (const boton of document.querySelectorAll('.grabadas-modo')) {
+        boton.onclick = () => {
+            suyo.modo = boton.dataset.modo;
+            recordar(MODO_RECORDADO, suyo.modo);
+            pintar();
+        };
+    }
+    $('grabar-carpeta').onclick = async () => {
+        const elegida = await window.cc.pickFolder({
+            titulo: 'Elegí la carpeta del curso: ahí caen las notas de sus clases',
+            boton: 'Usar esta carpeta'
+        });
+        if (!elegida) return;
+        // A los ajustes, que es donde la va a buscar el escáner cuando la clase
+        // llegue sin su XML adentro: las notas y el material nacen en carpetas
+        // distintas, y alguien tiene que recordar dónde quedó cada mitad. Los
+        // ajustes la suman solos a la lista de carpetas usadas.
+        const r = await window.cc.ajustesGuardar({ notasDir: elegida });
+        if (!r.ok) { toast(r.error); return; }
+        await cargar();
+    };
+    $('grabar-comenzar').onclick = () => suyo.alComenzar();
 }

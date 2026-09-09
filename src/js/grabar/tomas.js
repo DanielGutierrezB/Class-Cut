@@ -270,18 +270,39 @@ function dibujar(toma, estado, acciones, enVivo, mirada) {
         // Descartar es explícito: "Retomamos" no descarta la anterior sola,
         // porque a veces se retoma para agregar y no para repetir.
         () => acciones.alCambiar({ tipo: 'descartar', toma: toma.id, descartada: !toma.descartada }));
+    // Una clase propia, para que quien lo busque no lo busque por su sitio en la
+    // fila: el orden de estos botones acaba de cambiar, y un selector que decía
+    // "el primer botón de la cabecera" pasó de recuperar una toma a eliminarla sin
+    // que nada se rompiera. Eso vale para el arnés y vale para el que lea.
+    tirar.classList.add('toma-descartar');
 
     if (toma.descartada) {
-        cabeza.append(marcaDeDescartada(), tirar);
+        // **Eliminar a la izquierda y Recuperar a la derecha**, al revés de como
+        // estaban. Los dos son la respuesta a la misma pregunta —"esta toma no va,
+        // ¿la guardo o la tiro?"— y de las dos, la que se aprieta casi siempre es
+        // Recuperar; Eliminar es la excepción. Con Recuperar primero, el gesto
+        // frecuente y el irreversible caían uno al lado del otro en el orden en
+        // que la mano los encuentra, y el irreversible quedaba al final, que es
+        // donde el dedo va cuando ya dejó de leer.
+        //
         // Eliminar solo acá, colgando de una toma que ya está descartada: son dos
         // decisiones y no una, y por eso esto no pregunta nada. La otra mitad de
         // por qué no hay cartel es que se deshace con Cmd-Z como todo lo demás
-        // (ver `eliminar` en `engine/grabacion.js`).
+        // (ver `eliminar` en `engine/grabacion.js`) — y es lo que lo separa del
+        // "Borrar" de la lista, que se lleva archivos del disco y sí pregunta.
+        cabeza.append(marcaDeDescartada());
         if (enVivo) {
-            cabeza.append(botonChico('Eliminar',
+            const eliminar = botonChico('Eliminar',
                 'La borra de la sesión: no queda ni descartada. Se deshace con Cmd-Z.',
-                () => acciones.alCambiar({ tipo: 'eliminar', toma: toma.id })));
+                () => acciones.alCambiar({ tipo: 'eliminar', toma: toma.id }));
+            // El rojo apagado vive en `grabar-lista.css`, junto al del "Borrar" de
+            // una clase: son la misma promesa —"esto saca algo"— y no pueden verse
+            // de dos maneras. Por qué es un relleno y no la letra, y contra qué
+            // fondos se midió, está allá.
+            eliminar.classList.add('btn-tirar');
+            cabeza.append(eliminar);
         }
+        cabeza.append(tirar);
         caja.append(cabeza);
         return caja;
     }

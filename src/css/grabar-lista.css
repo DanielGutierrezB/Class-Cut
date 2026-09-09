@@ -1,0 +1,249 @@
+/**
+ * grabar-lista.css — La pantalla de la lista: las carpetas, la tarjeta de una
+ * clase terminada, y gestionarla.
+ *
+ * Salió de `grabar.css` cuando esa hoja volvió a llegar al techo de mil renglones
+ * que el proyecto se puso, y la frontera es la que la pantalla ya tenía: allá lo
+ * que se ve mientras se graba —la barra, la clase en curso, las tomas—, acá lo
+ * que se ve antes y después. Es la misma partición que ya se hizo con
+ * `grabar-analisis.css`, `grabar-teclas.css` y `grabar-empalme.css`.
+ *
+ * Detrás de `grabar.css` y no antes: las reglas salieron de ahí tal cual y varias
+ * se apoyan en las de allá —`.clase`, `.clase-cabeza`, `.clase-dato`, `.grabar-num`
+ * y los botones de la cabecera de una toma—, así que moverlas de orden cambiaría
+ * una cascada que ya está aprobada.
+ */
+
+/* ── La barra de la lista ─────────────────────────────────────────────── */
+
+/* Sin la línea de "dónde se guarda" ni el medidor: acá no hay nada entrando por
+   un cable. Lo que hay es qué carpeta se está mirando y cómo, así que la barra es
+   el título a la izquierda y las acciones a la derecha, con la misma caja que la
+   barra de la toma de notas para que las dos pantallas se lean como el mismo
+   paso. */
+.grabar-barra-lista { align-items: center; }
+
+.grabar-titulo {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* La lista es lo único que scrollea de esta pantalla: la barra se queda arriba.
+   `min-height: 0` porque sin él un hijo de flex no se deja encoger y la página
+   entera crece en vez de aparecer la barra de desplazamiento. */
+.grabadas-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.grabadas-modos {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.grabadas-modo {
+    padding: 4px 10px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 0;
+    border-right: 1px solid var(--border);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.grabadas-modo:last-child { border-right: 0; }
+.grabadas-modo:hover { color: var(--text); background: var(--surface-3); }
+.grabadas-modo.is-elegido { color: var(--text); background: var(--surface-3); font-weight: 600; }
+
+/* ── Una carpeta, que es un curso ─────────────────────────────────────── */
+
+/* Por carpeta: cada curso con su cabecera y sus clases debajo, un poco metidas. */
+.carpeta {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.carpeta-cabeza {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.carpeta-cabeza.es-activa { border-bottom-color: var(--accent-dim); }
+.carpeta-cabeza strong { font-weight: 600; }
+.carpeta-cabeza .mono { font-size: 11px; }
+.carpeta-cabeza .clase-dato.es-en-uso { color: var(--accent); font-weight: 600; }
+.carpeta-quitar { margin-left: auto; }
+.carpeta > .clase,
+.carpeta > .carpeta-vacia { margin-left: 12px; }
+
+/* ── La tarjeta de una clase terminada ────────────────────────────────── */
+
+.clase-dato.es-marcha { color: var(--accent); }
+
+.clase.es-hecha > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.clase.es-hecha > summary::-webkit-details-marker { display: none; }
+
+.clase.es-hecha > summary::before {
+    content: '▸';
+    color: var(--text-mute);
+    font-size: 11px;
+}
+
+.clase.es-hecha[open] > summary::before { content: '▾'; }
+
+.clase.es-hecha > .grabar-tomas {
+    margin-left: 10px;
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+}
+
+/* Las tomas de una clase terminada no se tocan, y se ve: sin el borde que
+   pulsa y con la nota como texto. */
+.toma-nota-leida {
+    margin: 10px 0 0;
+    font-size: 13px;
+    color: var(--text);
+    padding-left: 10px;
+    border-left: 2px solid var(--accent-dim);
+}
+
+/* ── Borrar: el rojo apagado ──────────────────────────────────────────────
+ *
+ * Lo que hacía falta era "un rojo oscurecido, para que no resalte pero se sepa lo
+ * que hace", y el camino obvio —la letra de `var(--err)` sobre un botón fantasma—
+ * no daba. La tarjeta de una toma descartada va con `opacity: .7`, así que TODO lo
+ * que se dibuje encima se compone contra el fondo de la app y pierde contraste:
+ * `--err` pleno (#f2646b) sobre esa banda ya compuesta llega a 2,8:1, y cualquier
+ * rojo más oscuro —que es lo que se pedía— baja de ahí. O sea que la única forma
+ * de tener el rojo en la LETRA era un rojo claro, que es justo lo contrario del
+ * pedido.
+ *
+ * Así que el rojo va en el RELLENO y la letra se queda clara. El relleno es
+ * `--err` al 28% sobre lo que haya detrás, o sea el rojo mezclado hacia el fondo
+ * oscuro: literalmente el rojo oscurecido. Y medido contra los dos fondos donde
+ * este botón aparece de verdad, que son dos y no uno:
+ *
+ *   · la banda de una toma descartada (`--border`, y la tarjeta al 70%): el
+ *     relleno queda en #633f48 y la letra en 4,97:1 encima;
+ *   · la cabecera de una clase de la lista (`--surface`, sin atenuación): el
+ *     relleno queda en #563037 y la letra en 9,30:1.
+ *
+ * Y no resalta, que era la otra mitad: el relleno contra su banda es 1,45:1 —se ve
+ * que hay un botón y no grita—, mientras que un `--err` pleno ahí sería una placa
+ * roja peleándole la mirada al guion de la toma.
+ *
+ * La letra va de `--text` y no de `--tinta`: el relleno es oscuro siempre, así que
+ * la letra tiene que ser clara siempre. Heredar la tinta de la banda funcionaría
+ * hoy —una descartada la deja en `--text`— y se rompería el día que este botón
+ * cuelgue de una cabecera de color, donde tres de las cinco tintas son oscuras. */
+.btn-tirar,
+.toma-cabeza .btn-tirar {
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--err) 42%, transparent);
+    background: color-mix(in srgb, var(--err) 28%, transparent);
+}
+
+.btn-tirar:hover,
+.toma-cabeza .btn-tirar:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--err) 40%, transparent);
+}
+
+/* ── Renombrar ────────────────────────────────────────────────────────────
+ *
+ * Con el formulario puesto, la tarjeta se queda en la cabecera y los campos, y
+ * lleva el acento en el borde: es la clase sobre la que se está trabajando, la
+ * misma marca que usa la clase en curso del otro lado. */
+.clase.es-renombrando > .clase-cabeza { border-color: var(--accent-dim); }
+
+.clase-renombre {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-left: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent-dim);
+    border-radius: var(--radius);
+}
+
+.clase-renombre-campos {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+}
+
+.clase-renombre-campo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+/* El del curso, con la misma caja que el del número (`.grabar-num`) y más ancho:
+   lo que se escribe acá es "2609_curso-de-prueba", no dos dígitos. */
+.clase-renombre-curso {
+    width: 260px;
+    padding: 7px 9px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: 13px;
+}
+
+/* La hora, que se muestra y no se edita. Como texto y no como un campo apagado:
+   un campo que no se deja escribir invita a intentarlo, y lo que hay que entender
+   acá es que esa hora no es del nombre sino de la grabación. */
+.clase-renombre-hora {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-mute);
+}
+
+.clase-renombre-hora.es-duda { color: var(--warn); }
+
+/* Lo que el motor no dejó hacer. Se queda puesto —no es un aviso que pasa— porque
+   lo que hay que hacer con él es corregir el campo que está justo arriba. */
+.clase-renombre-mal {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--err);
+    background: color-mix(in srgb, var(--err) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--err) 35%, transparent);
+    border-radius: var(--radius-sm);
+}
+
+.clase-renombre-acciones {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* En un flex con `gap` el margen suelto de `.btn-inline` se suma y sobra. */
+.clase-renombre-acciones .btn-inline { margin-left: 0; }

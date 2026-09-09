@@ -20,21 +20,23 @@ import * as oido from './oido.js';
 import * as ojo from './ojo.js';
 import * as tomas from './tomas.js';
 import * as grabadas from './grabadas.js';
+import * as pantallas from './pantallas.js';
 import * as analisis from './analisis.js';
 import * as pegado from './pegado.js';
 import * as plegado from './plegado.js';
 import * as margen from './margen.js';
+import { comoSeLlama, dosDigitos, nombreDeCarpeta, numeroLeido } from './gestionar.js';
 import { queHace, tomaDeLasTeclas, puedeElegirse } from './teclas.js';
 import { mostrador } from './turnos.js';
 
 /**
- * Lo que la ventana recuerda por su cuenta: la última entrada de audio elegida
- * —el id del dispositivo lo da el navegador— y cómo se quiere ver la lista de
- * lo grabado. La carpeta de notas NO: esa la necesita también el escáner de
- * post, así que vive en los ajustes (`ajustes.notasDir`) y tiene un solo dueño.
+ * Lo que la ventana recuerda por su cuenta: la última entrada de audio elegida,
+ * que el id del dispositivo lo da el navegador. La carpeta de notas NO: esa la
+ * necesita también el escáner de post, así que vive en los ajustes
+ * (`ajustes.notasDir`) y tiene un solo dueño. Y cómo se quiere ver la lista de lo
+ * grabado se guarda del lado de la lista, que es de quien es (`grabadas.js`).
  */
 const ENTRADA_RECORDADA = 'cc.grabar.entrada';
-const MODO_RECORDADO = 'cc.grabar.modo';
 /**
  * La clave de siempre, y se hereda.
  *
@@ -66,21 +68,10 @@ const TRANSCRIPT_VIEJO = 'cc.grabar.transcript';
 const DESCARTADAS_RECORDADAS = 'cc.grabar.descartadas';
 
 const vista = {
-    // La carpeta en uso y todas las que se usaron, la activa primera (ajustes).
-    carpeta: null,
-    carpetas: [],
     estado: null,
-    // Las clases ya grabadas en esas carpetas, de la más nueva a la más vieja.
-    grabadas: [],
     // Las vistas que se le pueden poner a una toma. Vienen con el estado mientras
     // se graba, pero una clase terminada también las cambia y ahí no hay estado.
     vistas: [],
-    // Cómo se ve la lista: 'carpetas' o 'fecha'.
-    modo: grabadas.MODOS.includes(recordado(MODO_RECORDADO)) ? recordado(MODO_RECORDADO) : 'carpetas',
-    // Si la lista de lo ya grabado está desplegada, y si se estaba grabando la
-    // última vez que se miró: la lista se pliega sola al empezar (`plegarSegunGrabe`).
-    grabadasAbiertas: true,
-    grababa: false,
     // Si el texto se ve compacto: sin las palabras de orilla, o sea sin el gris de
     // antes del IN y después del OUT. Apagado por defecto —las orillas se ven—
     // porque es contra ese gris que se arrastra un borde: sin él, correr el IN es
@@ -97,8 +88,6 @@ const vista = {
     sinDescartadas: recordado(DESCARTADAS_RECORDADAS) === 'si',
     // El scroll pegado al fondo, cableado al entrar (`pegado.js`).
     fondo: null,
-    // Las clases que se están regenerando: json → {hechas, total}.
-    regenerando: new Map(),
     // El golpe que se oyó y todavía no se leyó.
     aplauso: null,
     // "Terminar" apretado y esperando a que el motor relea las últimas tomas.
@@ -108,17 +97,12 @@ const vista = {
 
 /** El curso es la carpeta: una carpeta de notas por curso. */
 function curso() {
-    return grabadas.nombreDeCarpeta(vista.carpeta);
-}
-
-/** Las clases ya grabadas en la carpeta en uso, que es contra las que se numera. */
-function lasDeLaCarpeta() {
-    return vista.grabadas.filter(c => c.carpeta === vista.carpeta);
+    return nombreDeCarpeta(grabadas.carpeta());
 }
 
 /** El número que está escrito en el campo. */
 function claseElegida() {
-    return Number(String($('grabar-clase').value).replace(/\D/g, '')) || 1;
+    return numeroLeido($('grabar-clase').value);
 }
 
 /**
@@ -131,13 +115,9 @@ function claseElegida() {
  * arrancar (ver `parteQueSigue` en `engine/grabacion.js`).
  */
 function proponerClase() {
-    const numeros = lasDeLaCarpeta().map(c => Number(c.clase) || 0);
+    const numeros = grabadas.deLaCarpeta().map(c => Number(c.clase) || 0);
     $('grabar-clase').value = dosDigitos(numeros.length ? Math.max(...numeros) + 1 : 1);
     pintarParte();
-}
-
-function dosDigitos(n) {
-    return String(Math.max(1, Math.min(999, Math.round(n)))).padStart(2, '0');
 }
 
 /**
@@ -150,7 +130,7 @@ function dosDigitos(n) {
  * decide el motor.
  */
 function pintarParte() {
-    const cuantas = lasDeLaCarpeta().filter(c => Number(c.clase) === claseElegida()).length;
+    const cuantas = grabadas.deLaCarpeta().filter(c => Number(c.clase) === claseElegida()).length;
     const marca = $('grabar-parte');
     marca.hidden = cuantas === 0;
     marca.textContent = `parte ${cuantas + 1}`;
@@ -158,13 +138,29 @@ function pintarParte() {
         'esta queda como una tanda más, con su propio XML.';
 }
 
+/**
+ * Volver a la lista, y por qué no se puede todavía.
+ *
+ * El motivo va en el `title` y el botón queda apagado, que es la forma de esta
+ * pantalla de decir "no ahora": el mismo par de "Cerrar acá" cuando no hay toma
+ * abierta. Apagado y muDo sería lo único inaceptable — quien aprieta y no ve nada
+ * no tiene de dónde deducir que le falta terminar (ver `pantallas.js`).
+ */
+function refrescarVolver() {
+    const boton = $('grabar-volver');
+    const porque = pantallas.porQueNoSeVuelve(vista.estado, vista.terminando);
+    boton.disabled = Boolean(porque);
+    boton.title = porque || 'Volver a la lista de clases de la carpeta';
+}
+
 /** Se puede arrancar cuando hay entrada abierta y carpeta elegida. */
 function refrescarBotones() {
     const grabando = Boolean(vista.estado && vista.estado.grabando);
+    refrescarVolver();
     // Cerrar la toma a mano: solo si hay una abierta que cerrar.
     $('grabar-cerrar-toma').hidden = !grabando;
     $('grabar-cerrar-toma').disabled = !(vista.estado && vista.estado.abierta) || vista.terminando;
-    $('grabar-iniciar').disabled = grabando || !oido.escuchando() || !vista.carpeta;
+    $('grabar-iniciar').disabled = grabando || !oido.escuchando() || !grabadas.carpeta();
     $('grabar-iniciar').hidden = grabando;
     $('grabar-terminar').hidden = !grabando;
     $('grabar-terminar').disabled = vista.terminando;
@@ -179,8 +175,7 @@ function refrescarBotones() {
     // Refrescar tampoco es de mitad de grabación: reabriría la entrada.
     $('grabar-entrada').disabled = grabando || !$('grabar-entrada').value;
     $('grabar-entradas').disabled = grabando;
-    $('grabar-carpeta').disabled = grabando;
-    $('grabar-curso').textContent = vista.carpeta ? curso() : '—';
+    $('grabar-curso').textContent = grabadas.carpeta() ? curso() : '—';
 }
 
 /**
@@ -199,15 +194,17 @@ function refrescarBotones() {
  */
 function decirDonde() {
     const donde = $('grabar-donde');
-    if (!vista.carpeta) {
-        donde.textContent = 'Elegí la carpeta del curso: ahí caen las notas. No puede ser la tarjeta ' +
-            'del Rodecaster, que no está en la Mac hasta que la grabación termina.';
+    const carpeta = grabadas.carpeta();
+    if (!carpeta) {
+        donde.textContent = 'Volvé a la lista y elegí la carpeta del curso: ahí caen las notas. ' +
+            'No puede ser la tarjeta del Rodecaster, que no está en la Mac hasta que la ' +
+            'grabación termina.';
         donde.className = 'grabar-donde es-falta';
         return;
     }
     const xml = vista.estado && vista.estado.archivos ? vista.estado.archivos.xml : '';
-    const archivo = xml ? ` · ${colgandoDe(vista.carpeta, xml)}` : '';
-    donde.textContent = `Se guarda en ${vista.carpeta}${archivo}`;
+    const archivo = xml ? ` · ${colgandoDe(carpeta, xml)}` : '';
+    donde.textContent = `Se guarda en ${carpeta}${archivo}`;
     donde.className = 'grabar-donde';
 }
 
@@ -246,58 +243,11 @@ function pintarEnCurso() {
     if (cabeza.hidden) return;
     cabeza.textContent = '';
     const titulo = document.createElement('strong');
-    titulo.textContent = grabadas.comoSeLlama(e) + (e.curso ? ` · ${e.curso}` : '');
+    titulo.textContent = comoSeLlama(e) + (e.curso ? ` · ${e.curso}` : '');
     const desde = document.createElement('span');
     desde.className = 'clase-dato';
     desde.textContent = `grabando desde ${fmtHora(e.ceroMs)} · ${plural(e.tomas.length, 'toma', 'tomas')}`;
     cabeza.append(titulo, desde);
-}
-
-/**
- * Mientras se graba, lo de antes se pliega.
- *
- * Lo que importa con una clase en curso es la clase en curso, y con seis clases
- * viejas desplegadas la toma que está pasando queda debajo del pliegue. Se pliega
- * al empezar y se despliega al terminar, y SOLO en esos dos momentos: el estado
- * llega cada tres segundos y repintar no puede volver a cerrar lo que alguien
- * acaba de abrir a mano.
- */
-function plegarSegunGrabe() {
-    const grabando = Boolean(vista.estado && vista.estado.grabando);
-    if (grabando === vista.grababa) return;
-    vista.grababa = grabando;
-    vista.grabadasAbiertas = !grabando;
-}
-
-function pintarGrabadas() {
-    $('grabadas-barra').hidden = !vista.carpetas.length;
-
-    const abierta = vista.grabadasAbiertas;
-    const plegar = $('grabadas-plegar');
-    plegar.setAttribute('aria-expanded', String(abierta));
-    plegar.classList.toggle('es-plegada', !abierta);
-    // Plegada dice cuántas hay: si no, plegarla parece haberlas perdido.
-    $('grabadas-cuantas').textContent = abierta ? '' : plural(vista.grabadas.length, 'clase', 'clases');
-    $('grabadas-modos').hidden = !abierta;
-    $('grabar-grabadas').hidden = !abierta;
-    if (!abierta) return;
-
-    for (const boton of document.querySelectorAll('.grabadas-modo')) {
-        const elegido = boton.dataset.modo === vista.modo;
-        boton.classList.toggle('is-elegido', elegido);
-        boton.setAttribute('aria-checked', String(elegido));
-    }
-    grabadas.pintar($('grabar-grabadas'), vista.grabadas, {
-        modo: vista.modo,
-        carpetas: vista.carpetas,
-        carpetaActiva: vista.carpeta,
-        regenerando: vista.regenerando,
-        vistas: vista.vistas,
-        alRegenerar: regenerar,
-        alEditar: editarGrabada,
-        alBorde: bordeDeGrabada,
-        alQuitarCarpeta: quitarCarpeta
-    });
 }
 
 /**
@@ -449,11 +399,9 @@ function marcarElegida() {
 }
 
 function pintar() {
-    plegarSegunGrabe();
     pintarEnCurso();
     tomas.pintar($('grabar-tomas'), vista.estado, acciones, mirada());
     marcarElegida();
-    pintarGrabadas();
     pintarCompacto();
     pintarDescartadas();
     pintarHistoria();
@@ -466,56 +414,16 @@ function pintar() {
     if (vista.fondo) vista.fondo.alPintar();
 }
 
-/** Relee de los ajustes las carpetas, y del disco las clases que hay en ellas. */
-async function cargarGrabadas() {
-    const ajustes = await window.cc.ajustesLeer();
-    const cambioDeCarpeta = ajustes.notasDir !== vista.carpeta;
-    vista.carpeta = ajustes.notasDir;
-    vista.carpetas = ajustes.notasDirs || [];
-    vista.grabadas = await window.cc.grabarListar(vista.carpetas);
-    pintarGrabadas();
-    // El número sale de lo que hay en la carpeta, así que se propone cuando se
-    // elige una y cuando termina una clase; escribir uno a mano no se pisa.
-    if (cambioDeCarpeta) proponerClase();
+/**
+ * Relee la lista y deja propuesto el número que sigue.
+ *
+ * El número sale de lo que hay en la carpeta, así que se propone cuando se elige
+ * una y cuando termina una clase; escribir uno a mano no se pisa.
+ */
+async function releerLaLista() {
+    if (await grabadas.cargar()) proponerClase();
     else pintarParte();
 }
-
-/**
- * Releer las tomas de una clase terminada con el modelo grande.
- *
- * No decide nada: mejora el texto y no toca ningún borde. Y es lo que hay que
- * apretar cuando un borde se quedó sin lugar, porque relee cada toma con orillas
- * nuevas alrededor de los bordes de ahora: después de eso el IN y el OUT vuelven
- * a tener segundos de texto por delante para seguir corriéndose.
- */
-async function regenerar(clase) {
-    const json = clase.archivos.json;
-    vista.regenerando.set(json, { hechas: 0, total: (clase.tomas || []).length });
-    pintarGrabadas();
-    const r = await window.cc.grabarRegenerar(json);
-    vista.regenerando.delete(json);
-    if (!r.ok) {
-        toast(r.error);
-        pintarGrabadas();
-        return;
-    }
-    toast(r.sinAudio
-        ? `Clase ${clase.clase}: ${plural(r.tomas - r.sinAudio, 'toma releída', 'tomas releídas')}; ` +
-            `${r.sinAudio} sin audio para releer.`
-        : `Clase ${clase.clase}: ${plural(r.tomas, 'toma releída', 'tomas releídas')} y XML reescrito.`);
-    await cargarGrabadas();
-}
-
-/** Lo que se le hizo a la toma, para decirlo en el aviso. */
-const DICHO = {
-    vista: 'la vista',
-    nota: 'la nota',
-    descartar: 'el descarte',
-    comentar: 'el comentario',
-    'borrar-comentario': 'el comentario quitado',
-    'descartar-ajuste': 'el ajuste de empalme descartado',
-    borde: 'el borde movido'
-};
 
 /**
  * Clic derecho sobre una palabra: cuál de los dos bordes va ahí.
@@ -546,32 +454,6 @@ async function preguntarBorde(toma, paredMs, abierta) {
     });
     if (cual < 0) return null;
     return cual === 0 ? 'out' : 'in';
-}
-
-/**
- * Cambiar una clase que ya terminó. El motor reescribe su XML en el mismo gesto,
- * así que acá solo hay que releer la lista para que la tarjeta muestre lo nuevo.
- */
-async function editarGrabada(clase, cambio) {
-    const r = await window.cc.grabarEditarGrabada(clase.archivos.json, cambio);
-    if (!r.ok) { toast(r.error); return; }
-    anotar('grabar.edita-grabada', { clase: clase.clase, tipo: cambio.tipo });
-    toast(`Clase ${clase.clase}: XML reescrito con ${DICHO[cambio.tipo] || 'el cambio'}.`);
-    await cargarGrabadas();
-}
-
-/** El clic derecho sobre una palabra de una clase ya grabada. */
-async function bordeDeGrabada(clase, { toma, paredMs, abierta }) {
-    const borde = await preguntarBorde(toma, paredMs, abierta);
-    if (!borde) return;
-    await editarGrabada(clase, { tipo: 'borde', toma, borde, paredMs });
-}
-
-/** Sacar una carpeta de la lista. No borra nada: solo deja de mostrarse acá. */
-async function quitarCarpeta(ruta) {
-    const r = await window.cc.ajustesGuardar({ notasDirs: vista.carpetas.filter(d => d !== ruta) });
-    if (!r.ok) { toast(r.error); return; }
-    await cargarGrabadas();
 }
 
 /**
@@ -760,7 +642,7 @@ async function abrirEntrada(deviceId) {
 async function iniciar() {
     const como = oido.comoSuena();
     const r = await window.cc.grabarIniciar({
-        dir: vista.carpeta,
+        dir: grabadas.carpeta(),
         clase: claseElegida(),
         curso: curso(),
         sampleRate: como.sampleRate,
@@ -775,6 +657,48 @@ async function iniciar() {
     oido.empezarAMandar();
     toast('Grabando. El XML ya está en la carpeta y se va escribiendo.');
     pintar();
+}
+
+/* ─── Entrar a la toma de notas, y volver ────────────────────────────────── */
+
+/**
+ * "Comenzar clase": entrar a la interfaz de toma de notas.
+ *
+ * **No arranca ninguna toma y no escribe nada.** Abre el micrófono para que el
+ * medidor empiece a moverse y propone el número que sigue en la carpeta;
+ * comprometer el archivo es "Iniciar grabación", ahí adentro. Que sean dos gestos
+ * es lo que deja ver que el Rodecaster está llegando ANTES de empezar, que es
+ * justo lo que el medidor existe para mostrar.
+ *
+ * El micrófono se pide acá y no al entrar al paso, y eso cambió con las dos
+ * pantallas: mirar la lista de lo que hay en la carpeta no es motivo para
+ * encender el micrófono de nadie, y antes entrar a "Grabar" lo pedía siempre.
+ */
+async function comenzar() {
+    pantallas.mostrar(pantallas.TOMA);
+    proponerClase();
+    pintar();
+    anotar('grabar.comienza', { carpeta: grabadas.carpeta() });
+    if (!oido.escuchando()) await cargarEntradas();
+    // Las cámaras se miran al entrar acá, pero no se abre ninguna salvo que la
+    // vista hubiera quedado desplegada: pedir la cámara por entrar sería
+    // encenderla sin que nadie la haya pedido.
+    await ojo.alEntrar();
+    pintar();
+}
+
+/**
+ * Volver a la lista, con la clase que se acaba de grabar ya en ella.
+ *
+ * Se relee antes de mostrarla y no después: la lista es lo que se va a mirar, y
+ * verla un instante sin la clase que se acaba de terminar —para que aparezca sola
+ * medio segundo más tarde— es la clase de parpadeo que hace dudar de si se
+ * guardó.
+ */
+async function volver() {
+    if (pantallas.porQueNoSeVuelve(vista.estado, vista.terminando)) return;
+    await releerLaLista();
+    pantallas.mostrar(pantallas.LISTA);
 }
 
 async function terminar() {
@@ -796,14 +720,16 @@ async function terminar() {
     vista.terminando = false;
     vista.estado = null;
     vista.aplauso = null;
-    // La clase que terminó pasa a la lista de abajo, y la siguiente ya tiene su
-    // número: en un día de rodaje se graban varias seguidas. Sale de la carpeta,
-    // que ya incluye la que se acaba de escribir.
-    await cargarGrabadas();
+    // La clase que terminó pasa a la lista, y la siguiente ya tiene su número: en
+    // un día de rodaje se graban varias seguidas. Sale de la carpeta, que ya
+    // incluye la que se acaba de escribir.
+    await grabadas.cargar();
     proponerClase();
     pintar();
     if (final && final.archivos) {
-        toast(`Listo. El XML quedó en ${final.archivos.xml}`);
+        // Y se dice que ya se puede volver, porque es el momento en que el botón de
+        // arriba se enciende y nada más en la pantalla lo señala.
+        toast(`Listo. El XML quedó en ${final.archivos.xml} y la clase ya está en la lista.`);
     }
 }
 
@@ -823,6 +749,13 @@ async function terminar() {
  */
 function teclas(e) {
     if (!$('view-grabar').classList.contains('is-visible')) return;
+    // Y solo en la toma de notas. Desde la lista no hay nada a qué apuntarlas: las
+    // de vista actúan sobre una toma de la sesión, que allá no se ve; Cmd-Z
+    // desharía un cambio de esa misma sesión sin que nadie pueda ver qué cambió; y
+    // Escape no tiene ninguna caja de comentario que cerrar. Escribir en el
+    // renombrado ya está cubierto por `estaEscribiendo`, que es la regla de
+    // siempre y sirve igual acá.
+    if (pantallas.cual() !== pantallas.TOMA) return;
     const gesto = queHace(e, {
         // El mismo `estaEscribiendo(evento.target)` del reproductor y de la
         // pestaña de cortes, sin agregarle nada: con el oyente en el documento, el
@@ -891,25 +824,17 @@ export function wireGrabar() {
         $('grabar-clase').value = dosDigitos(claseElegida());
         pintarParte();
     };
-    $('grabar-carpeta').onclick = async () => {
-        const elegida = await window.cc.pickFolder({
-            titulo: 'Elegí la carpeta del curso: ahí caen las notas de sus clases',
-            boton: 'Usar esta carpeta'
-        });
-        if (!elegida) return;
-        // A los ajustes, que es donde la va a buscar el escáner cuando la clase
-        // llegue sin su XML adentro: las notas y el material nacen en carpetas
-        // distintas, y alguien tiene que recordar dónde quedó cada mitad. Los
-        // ajustes la suman solos a la lista de carpetas usadas.
-        const r = await window.cc.ajustesGuardar({ notasDir: elegida });
-        if (!r.ok) { toast(r.error); return; }
-        await cargarGrabadas();
-        pintar();
-    };
-    $('grabadas-plegar').onclick = () => {
-        vista.grabadasAbiertas = !vista.grabadasAbiertas;
-        pintarGrabadas();
-    };
+    // La pantalla de la lista se cablea sola y con lo suyo. Lo que necesita de acá
+    // son tres cosas que no son de ella: las vistas que la ventana ya pidió una
+    // vez, la pregunta de cuál de los dos bordes va donde se hizo clic derecho
+    // —que tiene que ser la MISMA en las dos pantallas—, y adónde ir al apretar
+    // "Comenzar clase".
+    grabadas.cablear({
+        vistas: () => vista.vistas,
+        preguntarBorde,
+        alComenzar: comenzar
+    });
+    $('grabar-volver').onclick = volver;
     $('grabar-compact').onclick = () => {
         vista.compacto = !vista.compacto;
         recordar(ORILLAS_RECORDADAS, vista.compacto ? 'no' : 'si');
@@ -930,13 +855,6 @@ export function wireGrabar() {
     // esperando, y para eso tiene que estar siempre en el mismo pixel: es el mismo
     // motivo por el que "Claqueta" está al lado y no dentro de una tarjeta.
     $('grabar-cerrar-toma').onclick = () => acciones.alCerrar();
-    for (const boton of document.querySelectorAll('.grabadas-modo')) {
-        boton.onclick = () => {
-            vista.modo = boton.dataset.modo;
-            recordar(MODO_RECORDADO, vista.modo);
-            pintarGrabadas();
-        };
-    }
     $('grabar-iniciar').onclick = iniciar;
     $('grabar-terminar').onclick = terminar;
     $('grabar-claqueta-ahora').onclick = async () => {
@@ -958,11 +876,9 @@ export function wireGrabar() {
     window.cc.onGrabarAviso(aviso => {
         if (aviso.tipo === 'error') { toast(aviso.mensaje); return; }
         if (aviso.tipo === 'regenerando') {
-            // Una clase terminada que se está releyendo: su tarjeta cuenta.
-            if (vista.regenerando.has(aviso.json)) {
-                vista.regenerando.set(aviso.json, { hechas: aviso.hechas, total: aviso.total });
-                pintarGrabadas();
-            }
+            // Una clase terminada que se está releyendo: su tarjeta cuenta, y la
+            // tarjeta es de la otra pantalla.
+            grabadas.avanceDeRegenerado(aviso);
             return;
         }
         if (aviso.tipo === 'golpe') {
@@ -996,13 +912,28 @@ export function wireGrabar() {
  *
  * Solo dibuja: no toca el motor ni el micrófono, así que desde acá no se puede
  * hacer nada que la pantalla no pueda hacer sola.
+ *
+ * Y muestra la toma de notas, porque un estado es una sesión: empujarlo con la
+ * lista delante dibujaría la pantalla escondida y desde afuera se vería que no
+ * pasó nada.
  */
 export function pintarEstado(estado) {
     vista.estado = estado;
+    pantallas.mostrar(pantallas.TOMA);
     pintar();
 }
 
-/** Entrar al paso. Pide el micrófono la primera vez. */
+/**
+ * Entrar al paso, que es entrar a la lista.
+ *
+ * Salvo que haya una grabación en curso: el motor la puede tener de antes de
+ * cambiar de paso, y ahí se entra por la toma de notas, que es donde está pasando
+ * algo. Es lo que hace que irse a Ajustes y volver no se sienta como haber
+ * perdido la clase, y es también la puerta por la que la maqueta abre la pantalla
+ * grabando (`?grabando`).
+ *
+ * Ya no pide el micrófono: eso pasó a "Comenzar clase" (ver `comenzar`).
+ */
 export async function abrirGrabar() {
     showView('grabar');
     marcarPaso(PASOS.grabar);
@@ -1010,15 +941,16 @@ export async function abrirGrabar() {
     // guardado, venga de esta sesión o de la anterior —las carpetas y las clases
     // que hay en ellas—.
     if (!vista.vistas.length) vista.vistas = await window.cc.grabarVistas();
-    await cargarGrabadas();
-    pintar();
-    if (!oido.escuchando()) await cargarEntradas();
-    // Las cámaras se miran cada vez que se entra, pero no se abre ninguna salvo
-    // que la vista hubiera quedado desplegada: pedir la cámara por entrar acá
-    // sería encenderla sin que nadie la haya pedido.
-    await ojo.alEntrar();
-    // El motor puede tener una grabación en curso de antes de cambiar de paso.
     const enCurso = await window.cc.grabarEstado();
-    if (enCurso) { vista.estado = enCurso; }
+    if (enCurso) vista.estado = enCurso;
+    await releerLaLista();
+
+    if (vista.estado && vista.estado.grabando) {
+        pantallas.mostrar(pantallas.TOMA);
+        if (!oido.escuchando()) await cargarEntradas();
+        await ojo.alEntrar();
+    } else {
+        pantallas.mostrar(pantallas.LISTA);
+    }
     pintar();
 }

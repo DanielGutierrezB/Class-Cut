@@ -11,6 +11,10 @@
     <!-- Detrás de grabar.css y no antes: sus reglas salieron de ahí tal cual, y
          moverlas de orden cambiaría la cascada que ya está aprobada. -->
     <link rel="stylesheet" href="css/grabar-analisis.css">
+    <!-- La otra pantalla del paso: la lista de clases y su gestión. Detrás por lo
+         mismo, y porque el rojo del "Borrar" tiene que ganarle al color que la
+         cabecera de una toma le pone a sus botones. -->
+    <link rel="stylesheet" href="css/grabar-lista.css">
     <!-- La marca de la toma elegida, también detrás de grabar.css: se apoya en
          `.toma` y en su cabecera, y lo único que hace es agregarles algo. -->
     <link rel="stylesheet" href="css/grabar-teclas.css">
@@ -43,114 +47,153 @@
 
     <main class="content">
 
-        <!-- Paso 1: las notas, mientras la clase se graba -->
+        <!-- Paso 1: las notas, mientras la clase se graba.
+
+             Son DOS pantallas y no una, y el paso entra siempre por la primera:
+             la lista de lo que hay en la carpeta, con "Comenzar clase". La
+             segunda es la toma de notas, y ahí la lista no se muestra —lo que
+             importa mientras se graba es la clase que está pasando—.
+
+             Que sean dos hermanas escondidas y no dos vistas del cabezal es a
+             propósito: el paso del cabezal es "Grabar", una sola cosa, y las dos
+             pantallas son dos momentos de ella. Meterlas en `.view` haría que
+             volver a la lista se leyera como cambiar de paso, y sacaría a la
+             toma de notas del sitio donde `marcarPaso` la pone. -->
         <section class="view view-grabar" id="view-grabar">
-            <div class="grabar-barra">
-                <div class="grabar-fuente">
-                    <label for="grabar-entrada">Entrada de audio</label>
-                    <select class="picker" id="grabar-entrada"></select>
-                    <button class="btn btn-ghost btn-inline" id="grabar-entradas" type="button"
-                        title="Volver a preguntar qué entradas hay, de audio y de video. Un micrófono o una cámara enchufados con la app abierta no aparecen solos.">Refrescar</button>
-                    <span class="grabar-nivel" id="grabar-nivel" title="Lo que está entrando ahora">
-                        <span class="grabar-nivel-barra" id="grabar-nivel-barra"></span>
-                    </span>
-                </div>
-                <!-- El video es solo para mirar: no se graba, no va al XML y no
-                     lo toca el motor. Va al lado del audio porque son la misma
-                     pregunta —qué está llegando por el cable— y comparten el
-                     botón de "Refrescar". -->
-                <div class="grabar-fuente grabar-ojo-fuente">
-                    <label for="grabar-video">Entrada de video</label>
-                    <select class="picker" id="grabar-video"></select>
-                    <button class="btn btn-ghost btn-inline" id="grabar-ojo-ver" type="button"
-                        aria-controls="grabar-ojo" aria-pressed="false" disabled
-                        title="Elegí una entrada de video y después se puede desplegar la vista.">Ver vista</button>
-                </div>
-                <div class="grabar-datos">
-                    <label for="grabar-clase">Clase</label>
-                    <!-- Texto y no `number` para que se vea el "01": un campo
-                         numérico se come el cero de adelante. -->
-                    <input class="grabar-num" id="grabar-clase" type="text" inputmode="numeric"
-                        maxlength="3" value="01" autocomplete="off">
-                    <span class="grabar-parte" id="grabar-parte" hidden></span>
-                    <span class="grabar-curso-label">Curso</span>
-                    <span class="grabar-curso" id="grabar-curso" title="El nombre de la carpeta elegida: una carpeta es un curso">—</span>
-                </div>
-                <div class="grabar-acciones">
-                    <!-- Deshacer y rehacer con los mismos rótulos y el mismo orden
-                         que en Revisar cortes. El historial vive en el motor, que
-                         es quien escribe el XML (ver `engine/deshacer.js`). -->
-                    <span class="grabar-historia">
-                        <button class="btn btn-ghost btn-inline" id="grabar-deshacer" type="button" disabled>↶</button>
-                        <button class="btn btn-ghost btn-inline" id="grabar-rehacer" type="button" disabled>↷</button>
-                    </span>
-                    <button class="btn btn-ghost" id="grabar-descartadas" type="button" aria-pressed="false" hidden
-                        title="Las descartadas siguen en la sesión y se pueden recuperar: esto solo las saca de la vista.">Ocultar descartadas</button>
-                    <button class="btn btn-ghost" id="grabar-compact" type="button" aria-pressed="false"
-                        title="Esconde las palabras de orilla: el gris de justo antes del IN y justo después del OUT. El guion de la toma se queda entero.">Compact</button>
-                    <button class="btn btn-ghost" id="grabar-carpeta">Elegir carpeta…</button>
-                    <button class="btn btn-ghost grabar-claqueta-btn" id="grabar-claqueta-ahora" disabled
-                        title="Marcar la claqueta ahora, a mano. En post se ajusta sola contra el audio.">Claqueta</button>
-                    <!-- Al lado de "Claqueta" y por el mismo motivo: es el otro
-                         botón que se aprieta en medio de la clase, apurado y sin
-                         mirar, así que tiene que estar siempre en el mismo pixel.
-                         El "Cerrar acá" de la tarjeta sigue estando: ese dice en
-                         qué toma cae, pero la tarjeta se mueve con el scroll. -->
-                    <button class="btn btn-ghost" id="grabar-cerrar-toma" type="button" hidden
-                        title="Cierra la toma abierta en su última palabra, sin esperar el «Pausa». Se deshace con Cmd-Z.">Cerrar toma</button>
-                    <button class="btn btn-primary" id="grabar-iniciar" disabled>Iniciar grabación</button>
-                    <button class="btn btn-ghost" id="grabar-terminar" hidden>Terminar</button>
-                </div>
-            </div>
 
-            <p class="grabar-donde" id="grabar-donde"></p>
-
-            <p class="grabar-oyendo" id="grabar-oyendo" hidden></p>
-
-            <div class="grabar-claqueta" id="grabar-claqueta" hidden>
-                <span class="grabar-claqueta-que" id="grabar-claqueta-que"></span>
-            </div>
-
-            <div class="grabar-cols">
-                <!-- Con `id` porque es el que scrollea, y `pegado.js` lo tiene que
-                     poder agarrar para pegarlo al final de la lista de tomas. -->
-                <div class="grabar-izq" id="grabar-izq">
-                    <section class="clase es-en-curso" id="grabar-en-curso" aria-label="La clase que se está grabando">
-                        <header class="clase-cabeza" id="grabar-en-curso-cabeza" hidden></header>
-                        <div class="grabar-tomas" id="grabar-tomas"></div>
-                    </section>
-                    <section class="grabar-grabadas" aria-label="Clases ya grabadas">
-                        <div class="grabadas-barra" id="grabadas-barra" hidden>
-                            <button class="grabadas-titulo" id="grabadas-plegar" type="button" aria-expanded="true"
-                                aria-controls="grabar-grabadas">
-                                <span class="grabadas-flecha" aria-hidden="true"></span>
-                                Ya grabadas
-                                <span class="grabadas-cuantas" id="grabadas-cuantas"></span>
-                            </button>
-                            <div class="grabadas-modos" id="grabadas-modos" role="radiogroup" aria-label="Cómo ver la lista">
-                                <button class="grabadas-modo" type="button" data-modo="carpetas" role="radio">Por carpeta</button>
-                                <button class="grabadas-modo" type="button" data-modo="fecha" role="radio">Por fecha</button>
-                            </div>
-                        </div>
-                        <div class="grabadas-lista" id="grabar-grabadas"></div>
-                    </section>
-                </div>
-
-                <aside class="grabar-analisis" id="grabar-analisis" aria-label="Resultados de análisis"></aside>
-
-                <!-- El monitor de referencia, abajo a la derecha: la esquina más
-                     lejos del transcript, que es lo único que se lee palabra por
-                     palabra. Esto se mira de reojo. `muted` porque el audio ya
-                     entra por su cable y sonar acá sería eco o realimentación. -->
-                <aside class="grabar-ojo" id="grabar-ojo" aria-label="Monitor de referencia" hidden>
-                    <div class="grabar-ojo-cabeza">
-                        <span class="grabar-ojo-marca">Solo referencia · no se graba</span>
-                        <button class="btn btn-ghost btn-inline" id="grabar-ojo-cerrar" type="button"
-                            title="Cerrar la vista y soltar la cámara: se apaga su luz.">Cerrar</button>
+            <!-- Pantalla 1: qué hay en la carpeta, y qué se puede hacer con eso -->
+            <div class="grabar-pantalla" id="grabar-pantalla-lista">
+                <div class="grabar-barra grabar-barra-lista">
+                    <div class="grabar-datos">
+                        <strong class="grabar-titulo">Clases grabadas</strong>
+                        <span class="clase-dato" id="grabadas-cuantas"></span>
                     </div>
-                    <video class="grabar-ojo-video" id="grabar-ojo-video" autoplay muted playsinline></video>
-                    <p class="grabar-ojo-nota" id="grabar-ojo-nota" hidden></p>
-                </aside>
+                    <div class="grabar-acciones">
+                        <div class="grabadas-modos" id="grabadas-modos" role="radiogroup"
+                             aria-label="Cómo ver la lista">
+                            <button class="grabadas-modo" type="button" data-modo="carpetas" role="radio">Por carpeta</button>
+                            <button class="grabadas-modo" type="button" data-modo="fecha" role="radio">Por fecha</button>
+                        </div>
+                        <button class="btn btn-ghost" id="grabar-carpeta">Elegir carpeta…</button>
+                        <!-- No arranca ninguna toma: entra a la interfaz de toma
+                             de notas. Empezar a grabar es "Iniciar grabación",
+                             adentro, con la entrada de audio ya sonando. -->
+                        <button class="btn btn-primary" id="grabar-comenzar" type="button"
+                            title="Entra a la toma de notas de esta carpeta. Todavía no graba nada: adentro se elige la entrada de audio y se aprieta «Iniciar grabación».">Comenzar clase</button>
+                    </div>
+                </div>
+                <div class="grabadas-lista" id="grabar-grabadas"></div>
+            </div>
+
+            <!-- Pantalla 2: la toma de notas -->
+            <div class="grabar-pantalla" id="grabar-pantalla-toma" hidden>
+                <div class="grabar-barra">
+                    <!-- El botón de volver, arriba y a la izquierda, dentro de la
+                         misma barra: en un renglón propio se comía 40px de alto en la
+                         pantalla que más los necesita, que es la que tiene el guion.
+                         Mientras se graba está apagado y dice por qué. -->
+                    <div class="grabar-volver-caja">
+                        <button class="btn btn-ghost" id="grabar-volver" type="button">← Clases</button>
+                    </div>
+                    <div class="grabar-fuente">
+                        <label for="grabar-entrada">Entrada de audio</label>
+                        <select class="picker" id="grabar-entrada"></select>
+                        <button class="btn btn-ghost btn-inline" id="grabar-entradas" type="button"
+                            title="Volver a preguntar qué entradas hay, de audio y de video. Un micrófono o una cámara enchufados con la app abierta no aparecen solos.">Refrescar</button>
+                        <span class="grabar-nivel" id="grabar-nivel" title="Lo que está entrando ahora">
+                            <span class="grabar-nivel-barra" id="grabar-nivel-barra"></span>
+                        </span>
+                    </div>
+                    <!-- El video es solo para mirar: no se graba, no va al XML y no
+                         lo toca el motor. Va al lado del audio porque son la misma
+                         pregunta —qué está llegando por el cable— y comparten el
+                         botón de "Refrescar". -->
+                    <div class="grabar-fuente grabar-ojo-fuente">
+                        <label for="grabar-video">Entrada de video</label>
+                        <select class="picker" id="grabar-video"></select>
+                        <button class="btn btn-ghost btn-inline" id="grabar-ojo-ver" type="button"
+                            aria-controls="grabar-ojo" aria-pressed="false" disabled
+                            title="Elegí una entrada de video y después se puede desplegar la vista.">Ver vista</button>
+                    </div>
+                    <div class="grabar-datos">
+                        <label for="grabar-clase">Clase</label>
+                        <!-- Texto y no `number` para que se vea el "01": un campo
+                             numérico se come el cero de adelante. -->
+                        <input class="grabar-num" id="grabar-clase" type="text" inputmode="numeric"
+                            maxlength="3" value="01" autocomplete="off">
+                        <span class="grabar-parte" id="grabar-parte" hidden></span>
+                        <span class="grabar-curso-label">Curso</span>
+                        <span class="grabar-curso" id="grabar-curso" title="El nombre de la carpeta elegida: una carpeta es un curso">—</span>
+                    </div>
+                    <div class="grabar-acciones">
+                        <!-- Deshacer y rehacer con los mismos rótulos y el mismo orden
+                             que en Revisar cortes. El historial vive en el motor, que
+                             es quien escribe el XML (ver `engine/deshacer.js`). -->
+                        <span class="grabar-historia">
+                            <button class="btn btn-ghost btn-inline" id="grabar-deshacer" type="button" disabled>↶</button>
+                            <button class="btn btn-ghost btn-inline" id="grabar-rehacer" type="button" disabled>↷</button>
+                        </span>
+                        <button class="btn btn-ghost" id="grabar-descartadas" type="button" aria-pressed="false" hidden
+                            title="Las descartadas siguen en la sesión y se pueden recuperar: esto solo las saca de la vista.">Ocultar descartadas</button>
+                        <button class="btn btn-ghost" id="grabar-compact" type="button" aria-pressed="false"
+                            title="Esconde las palabras de orilla: el gris de justo antes del IN y justo después del OUT. El guion de la toma se queda entero.">Compact</button>
+                        <!-- "Elegir carpeta…" ya no está acá: es de la lista. La
+                             carpeta ES el curso, y elegirlo es lo que se hace antes de
+                             entrar; acá al lado se muestra cuál quedó, como dato. -->
+                        <button class="btn btn-ghost grabar-claqueta-btn" id="grabar-claqueta-ahora" disabled
+                            title="Marcar la claqueta ahora, a mano. En post se ajusta sola contra el audio.">Claqueta</button>
+                        <!-- Al lado de "Claqueta" y por el mismo motivo: es el otro
+                             botón que se aprieta en medio de la clase, apurado y sin
+                             mirar, así que tiene que estar siempre en el mismo pixel.
+                             El "Cerrar acá" de la tarjeta sigue estando: ese dice en
+                             qué toma cae, pero la tarjeta se mueve con el scroll. -->
+                        <button class="btn btn-ghost" id="grabar-cerrar-toma" type="button" hidden
+                            title="Cierra la toma abierta en su última palabra, sin esperar el «Pausa». Se deshace con Cmd-Z.">Cerrar toma</button>
+                        <button class="btn btn-primary" id="grabar-iniciar" disabled>Iniciar grabación</button>
+                        <button class="btn btn-ghost" id="grabar-terminar" hidden>Terminar</button>
+                    </div>
+                </div>
+
+                <p class="grabar-donde" id="grabar-donde"></p>
+
+                <p class="grabar-oyendo" id="grabar-oyendo" hidden></p>
+
+                <div class="grabar-claqueta" id="grabar-claqueta" hidden>
+                    <span class="grabar-claqueta-que" id="grabar-claqueta-que"></span>
+                </div>
+
+                <div class="grabar-cols">
+                    <!-- Con `id` porque es el que scrollea, y `pegado.js` lo tiene que
+                         poder agarrar para pegarlo al final de la lista de tomas. -->
+                    <div class="grabar-izq" id="grabar-izq">
+                        <section class="clase es-en-curso" id="grabar-en-curso" aria-label="La clase que se está grabando">
+                            <header class="clase-cabeza" id="grabar-en-curso-cabeza" hidden></header>
+                            <div class="grabar-tomas" id="grabar-tomas"></div>
+                        </section>
+                        <!-- Acá abajo iba "Ya grabadas", y se fue a su pantalla. Con
+                             la clase en curso arriba y seis clases viejas debajo, la
+                             toma que estaba pasando quedaba fuera de la ventana, y lo
+                             que había para resolverlo era plegar la lista sola al
+                             empezar a grabar y desplegarla al terminar. Dos pantallas
+                             resuelven eso mismo sin un pliegue que se mueve solo. -->
+                    </div>
+
+                    <aside class="grabar-analisis" id="grabar-analisis" aria-label="Resultados de análisis"></aside>
+
+                    <!-- El monitor de referencia, abajo a la derecha: la esquina más
+                         lejos del transcript, que es lo único que se lee palabra por
+                         palabra. Esto se mira de reojo. `muted` porque el audio ya
+                         entra por su cable y sonar acá sería eco o realimentación. -->
+                    <aside class="grabar-ojo" id="grabar-ojo" aria-label="Monitor de referencia" hidden>
+                        <div class="grabar-ojo-cabeza">
+                            <span class="grabar-ojo-marca">Solo referencia · no se graba</span>
+                            <button class="btn btn-ghost btn-inline" id="grabar-ojo-cerrar" type="button"
+                                title="Cerrar la vista y soltar la cámara: se apaga su luz.">Cerrar</button>
+                        </div>
+                        <video class="grabar-ojo-video" id="grabar-ojo-video" autoplay muted playsinline></video>
+                        <p class="grabar-ojo-nota" id="grabar-ojo-nota" hidden></p>
+                    </aside>
+                </div>
             </div>
         </section>
 

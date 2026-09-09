@@ -58,6 +58,36 @@
     --tinta-x2: #14171f;
 }
 
+/* ── Las dos pantallas del paso ──────────────────────────────────────── */
+
+/* La lista y la toma de notas son dos hermanas de la misma vista, y solo una
+   está puesta (ver `grabar/pantallas.js`). Cada una se acomoda como se acomodaba
+   la vista entera: columna, con el mismo aire entre bloques y `min-height: 0`
+   para que la lista de adentro pueda scrollear en vez de estirar la página.
+
+   El `[hidden]` va escrito porque hace falta: `display: flex` gana sobre el
+   atributo, y sin esta línea esconder una pantalla no la esconde. Es el mismo
+   descuido que ya costó una vez en `.view-grabar`, donde repetir `display` dejaba
+   el paso encendido para siempre. */
+.grabar-pantalla {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    flex: 1;
+}
+
+.grabar-pantalla[hidden] { display: none; }
+
+/* "← Clases", el único botón de la barra que no habla de la clase que se está
+   grabando. Separado con una línea y no con aire: entre siete controles, el aire
+   solo no dice que este es de otra categoría. */
+.grabar-volver-caja {
+    align-self: center;
+    padding-right: 16px;
+    border-right: 1px solid var(--border);
+}
+
 /* ── La barra de arriba: fuente, datos y los dos botones ─────────────── */
 
 .grabar-barra {
@@ -310,140 +340,10 @@
 /* La que está en curso lleva el color del acento, el mismo de la toma abierta. */
 .clase.es-en-curso > .clase-cabeza { border-color: var(--accent-dim); }
 
-/* Las grabadas van plegadas: de un vistazo lo que importa, y las tomas al abrir. */
-.grabar-grabadas,
-.grabadas-lista {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* La barra de la lista: qué es, y cómo se quiere ver. */
-.grabadas-barra {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 6px;
-}
-
-/* El título es el que pliega la lista. Mientras se graba arranca plegada: lo que
-   importa entonces es la toma que está pasando, no las seis clases de ayer. */
-.grabadas-titulo {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 2px 0;
-    background: none;
-    border: 0;
-    font: inherit;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-dim);
-    cursor: pointer;
-}
-
-.grabadas-titulo:hover { color: var(--text); }
-
-.grabadas-flecha {
-    width: 0;
-    height: 0;
-    border-left: 5px solid currentColor;
-    border-top: 4px solid transparent;
-    border-bottom: 4px solid transparent;
-    transform: rotate(90deg);
-    transition: transform 0.12s ease;
-}
-
-.grabadas-titulo.es-plegada .grabadas-flecha { transform: rotate(0deg); }
-
-.grabadas-cuantas {
-    color: var(--text-mute);
-    text-transform: none;
-    letter-spacing: 0;
-}
-
-.grabadas-modos {
-    display: flex;
-    margin-left: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-}
-
-.grabadas-modo {
-    padding: 4px 10px;
-    background: var(--surface-2);
-    color: var(--text-dim);
-    border: 0;
-    border-right: 1px solid var(--border);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.grabadas-modo:last-child { border-right: 0; }
-.grabadas-modo:hover { color: var(--text); background: var(--surface-3); }
-.grabadas-modo.is-elegido { color: var(--text); background: var(--surface-3); font-weight: 600; }
-
-/* Por carpeta: cada curso con su cabecera y sus clases debajo, un poco metidas. */
-.carpeta {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.carpeta-cabeza {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-}
-
-.carpeta-cabeza.es-activa { border-bottom-color: var(--accent-dim); }
-.carpeta-cabeza strong { font-weight: 600; }
-.carpeta-cabeza .mono { font-size: 11px; }
-.carpeta-cabeza .clase-dato.es-en-uso { color: var(--accent); font-weight: 600; }
-.carpeta-quitar { margin-left: auto; }
-.carpeta > .clase,
-.carpeta > .carpeta-vacia { margin-left: 12px; }
-
-.clase-dato.es-marcha { color: var(--accent); }
-
-.clase.es-hecha > summary {
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-}
-
-.clase.es-hecha > summary::-webkit-details-marker { display: none; }
-
-.clase.es-hecha > summary::before {
-    content: '▸';
-    color: var(--text-mute);
-    font-size: 11px;
-}
-
-.clase.es-hecha[open] > summary::before { content: '▾'; }
-
-.clase.es-hecha > .grabar-tomas {
-    margin-left: 10px;
-    padding-left: 12px;
-    border-left: 2px solid var(--border);
-}
-
-/* Las tomas de una clase terminada no se tocan, y se ve: sin el borde que
-   pulsa y con la nota como texto. */
-.toma-nota-leida {
-    margin: 10px 0 0;
-    font-size: 13px;
-    color: var(--text);
-    padding-left: 10px;
-    border-left: 2px solid var(--accent-dim);
-}
+/* La lista de clases y todo lo que cuelga de ella —las carpetas, la tarjeta de
+   una clase terminada, renombrar y borrar— viven en `grabar-lista.css`, que se
+   carga detrás de esta. Es la otra mitad del paso, y ahora es su propia pantalla
+   (ver `grabar/pantallas.js`). */
 
 .grabar-vacio {
     margin: 0;
