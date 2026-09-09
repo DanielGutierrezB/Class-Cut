@@ -175,6 +175,63 @@ const REVERSIONES = [
         caen: ['regenerar limpia la marca']
     },
     {
+        que: 'lo pegado sin sesión se tira, como antes de que hubiera dónde pegarlo',
+        archivo: 'engine/grabacion.js',
+        de: '    if (!sesion) return { temario: temarioSesion.ponerEnElCurso(dir, texto) };',
+        a: '    if (!sesion) return { temario: null };',
+        filtro: 'temario',
+        // Las dos que NO se caen, y por qué. "Pegar una lista vacía saca el
+        // archivo" pasa en verde porque sin nada pegado el archivo no llegó a
+        // existir: es una prueba que este cambio deja sin sujeto, y la cuida su
+        // propia reversión, la de más abajo. Y "lo que se lee es lo de la sesión"
+        // pasa porque la sesión sí guarda: ahí el pegado no es el de antes de
+        // grabar. Anotarlas como caídas era pedirle a esta reversión que probara
+        // algo que no está probando.
+        caen: [
+            'sin sesión, lo pegado queda escrito en la carpeta',
+            'y de ahí la lee la pantalla, sin ninguna clase de por medio',
+            'la clase que arranca después nace con esa lista',
+            'y le gana a la de la clase anterior, que es la que puede estar vieja',
+            'pegar a mano la lista que llegó sola no tira la cobertura ya medida'
+        ]
+    },
+    {
+        que: 'la clase nueva solo mira el sidecar de la anterior y no la lista de la carpeta',
+        archivo: 'engine/temario-sesion.js',
+        de: '    return leerDelCurso(dir) || deLaClaseAnterior(dir);',
+        a: '    return deLaClaseAnterior(dir);',
+        filtro: 'temario',
+        caen: [
+            'la clase que arranca después nace con esa lista',
+            'y le gana a la de la clase anterior, que es la que puede estar vieja',
+            'pegar a mano la lista que llegó sola no tira la cobertura ya medida'
+        ]
+    },
+    {
+        que: 'lo pegado con la clase empezada se queda solo en el sidecar de esa clase',
+        archivo: 'engine/temario-sesion.js',
+        de: '    guardarEnElCurso(sesion.dir, texto);\n',
+        a: '',
+        filtro: 'temario',
+        caen: ['lo pegado con la clase ya empezada también queda para el curso']
+    },
+    {
+        que: 'la lista recién pegada se contesta a sí misma que llegó sola',
+        archivo: 'engine/temario-sesion.js',
+        de: "    return puesta && { ...puesta, origen: 'pegado' };",
+        a: '    return puesta;',
+        filtro: 'temario',
+        caen: ['lo que vuelve de pegarla dice «pegado», aunque en la carpeta quede «guardado»']
+    },
+    {
+        que: 'una lista vacía deja el archivo del curso donde estaba',
+        archivo: 'engine/temario-sesion.js',
+        de: "        try { fs.unlinkSync(archivo); } catch (e) { /* si no estaba, ya está sacada */ }",
+        a: '',
+        filtro: 'temario',
+        caen: ['pegar una lista vacía saca el archivo, no lo deja vacío']
+    },
+    {
         que: 'la maqueta se queda con el motor que cargó al arrancar',
         archivo: 'tools/maqueta.js',
         de: '    const guardado = olvidarElMotor();',

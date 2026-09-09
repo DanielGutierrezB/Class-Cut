@@ -181,6 +181,37 @@ async function escribir(wc, texto) {
 }
 
 /**
+ * Escribir varios renglones, con Enter entre uno y otro.
+ *
+ * La lista del CD llega en renglones y es lo que decide cuántos objetivos hay,
+ * así que pegarla en una sola línea probaría un caso que no es el de nadie.
+ */
+async function escribirRenglones(wc, renglones) {
+    for (const [i, renglon] of renglones.entries()) {
+        if (i) await tecla(wc, 'Enter');
+        await escribir(wc, renglon);
+    }
+}
+
+/**
+ * Vuelve a preguntar hasta que la respuesta deje de ser nula, o se rinde.
+ *
+ * Lo que se mide con el modelo tarda —acá unos segundos, en la app un par de
+ * minutos— y dormir un número fijo es la forma de tener un arnés que falla los
+ * martes: de más, la ronda se hace eterna; de menos, se pone roja sin que nada
+ * esté mal. Se pregunta por lo que se está esperando y se corta cuando llega.
+ */
+async function esperarA(wc, js, cuanto) {
+    const hasta = Date.now() + (cuanto || 15000);
+    for (;;) {
+        const r = await mirar(wc, js);
+        if (r) return r;
+        if (Date.now() > hasta) return null;
+        await dormir(300);
+    }
+}
+
+/**
  * Arrastrar un elemento `dx` píxeles, en pasos.
  *
  * Con pasos intermedios porque el gesto se escucha en `pointermove`: un salto
@@ -333,6 +364,34 @@ const comoEstaElPliegue = toma => `(() => {
     };
 })()`;
 
+/**
+ * El bloque de cobertura del temario, leído del DOM y de nadie más.
+ *
+ * Las tres filas de arriba van enteras porque son las que el usuario vio en
+ * guion: lo que hace falta poder ver es que dejan de estarlo cuando hay una
+ * medición, y que vuelven al guion mientras se está midiendo otra vez.
+ */
+const COMO_ESTA_EL_TEMARIO = `(() => {
+    const b = document.querySelector('#grabar-analisis [data-bloque="temario"]');
+    if (!b) return null;
+    const caja = b.querySelector('.temario-caja');
+    return {
+        hayCaja: Boolean(caja),
+        abierta: Boolean(caja && caja.open),
+        resumen: ((b.querySelector('.temario-summary') || {}).textContent || '').trim(),
+        filas: [...b.querySelectorAll('dd')].map(d => d.textContent.trim()),
+        temas: [...b.querySelectorAll('.temario-tema')].map(e => e.textContent),
+        faltan: b.querySelectorAll('.temario-lista.es-falta li').length
+    };
+})()`;
+
+/** Cuándo se midió la cobertura que el motor tiene ahora, o null si no hay. */
+const CUANDO_SE_MIDIO = `(async () => {
+    const e = await window.cc.grabarEstado();
+    const c = e && e.temario ? e.temario.cobertura : null;
+    return c ? c.medidoEn : null;
+})()`;
+
 /** Qué vista muestra la tarjeta de una toma, leído del DOM y de nadie más. */
 const enPantalla = toma => `(() => {
     const b = document.querySelector('#grabar-tomas .toma[data-toma="${toma}"] .toma-vista-btn.is-elegida');
@@ -352,6 +411,9 @@ const enPantalla = toma => `(() => {
  * motor coinciden, no que el cambio haya caído en la toma que se tocó.
  */
 function casos(wc) {
+    /** Cuándo quedó medida la lista que pegó el arnés, para ver que se vuelve a medir. */
+    let medidoAlPegar = null;
+
     return [
         {
             que: 'al abrir, la pantalla y el motor ya dicen lo mismo',
@@ -633,6 +695,42 @@ function casos(wc) {
             }
         },
         {
+            que: 'pegar una lista nueva la mide sola, y las tres filas dejan el guion',
+            // Con la clase ya grabando, que es el otro lado de lo que se arregló:
+            // la caja está plegada porque ya hay lista, se abre tocando su
+            // resumen, se corrige lo que hay sin borrar nada primero, y al guardar
+            // se pliega de nuevo. Y lo que importa detrás: la medición sale sola.
+            //
+            // Las tres filas se miran antes y después. En guion es como el usuario
+            // encontró el panel, y son la única señal de que la medición ocurrió:
+            // un desplegable que aparece y no mueve ningún número no arregló nada.
+            hacer: async () => {
+                await clic(wc, '#grabar-analisis .temario-summary');
+                await clic(wc, '#grabar-analisis .temario-campo');
+                // Encima de lo que había, que es corregir la lista y no rehacerla.
+                wc.selectAll();
+                await dormir(150);
+                await escribirRenglones(wc, ['- Contexto acotado', '- El archivo de reglas']);
+                await clic(wc, '#grabar-analisis .temario-acciones .btn-primary');
+                await dormir(400);
+            },
+            ademas: async () => {
+                const guardando = await mirar(wc, COMO_ESTA_EL_TEMARIO);
+                if (guardando.abierta) return 'la caja quedó abierta después de guardar';
+                if (!/2 temas/.test(guardando.resumen)) return `plegada dice «${guardando.resumen}»`;
+
+                const medido = await esperarA(wc, `(() => {
+                    const t = ${COMO_ESTA_EL_TEMARIO};
+                    return t && !t.filas.slice(0, 3).some(f => f === '—') ? t : null;
+                })()`);
+                if (!medido) return 'las tres filas se quedaron en guion: la medición no llegó a la pantalla';
+                if (!/ de 2$/.test(medido.filas[0])) return `«Objetivos cubiertos» dice «${medido.filas[0]}»`;
+                if (medido.temas.length !== 2) return `la lista dibujada tiene ${medido.temas.length} temas`;
+                medidoAlPegar = await mirar(wc, CUANDO_SE_MIDIO);
+                return medidoAlPegar ? null : 'el motor se quedó sin cobertura medida';
+            }
+        },
+        {
             que: 'cerrar la abierta no le quita la elección a la que estaba elegida',
             // El otro borde: la elección es explícita y se respeta aunque debajo
             // cambie el paisaje. Quien eligió la toma 1 para arreglarle la vista
@@ -653,6 +751,29 @@ function casos(wc) {
                 if (como.abiertas !== 0) return 'la toma no se cerró';
                 if (como.marcadas.join(' ') !== '1') return `la marca quedó en «${como.marcadas.join(' ')}»`;
                 return una === 'S' ? null : `la tecla no cayó en la elegida, que muestra ${una}`;
+            }
+        },
+        {
+            que: 'y ese mismo cierre volvió a medir la cobertura, sin que nadie la pidiera',
+            // **El latido que el panel promete**: "se mide sola cada vez que se
+            // cierra una toma". No hay gesto propio —el de arriba ya cerró la
+            // toma— y eso es justamente lo que se comprueba: que la medición sale
+            // del cierre y no de haber tocado el bloque del temario. Ninguna
+            // prueba sin pantalla puede ver esta cadena entera, porque son tres
+            // piezas distintas hablándose (el cierre, la cola de relecturas y la
+            // consulta) y lo único que las une es que el panel cambie.
+            hacer: async () => {},
+            ademas: async () => {
+                if (!medidoAlPegar) return 'no se llegó a medir nada antes de cerrar la toma';
+                const otra = await esperarA(wc, `(async () => {
+                    const cuando = await ${CUANDO_SE_MIDIO};
+                    return cuando && cuando !== ${JSON.stringify(medidoAlPegar)} ? cuando : null;
+                })()`);
+                if (!otra) return 'la cobertura quedó con la medición de antes del cierre';
+                const t = await mirar(wc, COMO_ESTA_EL_TEMARIO);
+                return t.filas.slice(0, 3).some(f => f === '—')
+                    ? `la medición nueva no llegó a las filas: ${t.filas.slice(0, 3).join(' · ')}`
+                    : null;
             }
         },
         {

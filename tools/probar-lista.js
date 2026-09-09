@@ -171,6 +171,21 @@ async function escribir(wc, texto) {
 }
 
 /**
+ * Escribir varios renglones, con Enter entre uno y otro.
+ *
+ * La lista del CD llega en renglones y es lo que decide cuántos objetivos hay, así
+ * que pegarla en una sola línea probaría un caso que no es el de nadie. El Enter
+ * va por `sendInputEvent` como todo lo demás: adentro de un `textarea` el
+ * navegador lo convierte en un salto de línea, y fabricado a mano no.
+ */
+async function escribirRenglones(wc, renglones) {
+    for (const [i, renglon] of renglones.entries()) {
+        if (i) await tecla(wc, 'Enter');
+        await escribir(wc, renglon);
+    }
+}
+
+/**
  * Vaciar el campo que tenga el foco.
  *
  * Con `selectAll` y un Backspace, no con cuarenta Backspaces: un clic del mouse
@@ -223,6 +238,40 @@ const COMO_ESTA = `(() => {
 })()`;
 
 const comoEsta = wc => mirar(wc, COMO_ESTA);
+
+/**
+ * El bloque de cobertura del temario, y lo que el motor tiene guardado al lado.
+ *
+ * **Las dos lecturas juntas y no una**, que es la lección de esta tanda: el
+ * bloque prometía "pegala acá" sin dibujar dónde, y mirando solo el motor eso no
+ * se ve; mirando solo la pantalla, una lista que se dibuja y no llega a ningún
+ * archivo pasa en verde igual. Lo que hay que poder ver es que la promesa, el
+ * control y lo guardado dicen los tres lo mismo.
+ */
+const COMO_ESTA_EL_TEMARIO = `(async () => {
+    const b = document.querySelector('#grabar-analisis [data-bloque="temario"]');
+    if (!b) return null;
+    const caja = b.querySelector('.temario-caja');
+    const campo = b.querySelector('.temario-campo');
+    const guardado = await window.cc.grabarTemarioCarpeta((await window.cc.ajustesLeer()).notasDir);
+    return {
+        hayCaja: Boolean(caja),
+        abierta: Boolean(caja && caja.open),
+        resumen: ((b.querySelector('.temario-summary') || {}).textContent || '').trim(),
+        escrito: campo ? campo.value : null,
+        // Los tres renglones de arriba, que son los que estaban en guion.
+        filas: [...b.querySelectorAll('dd')].map(d => d.textContent.trim()),
+        aviso: [...b.querySelectorAll('.analisis-pendiente')].map(p => p.textContent.trim()).join(' '),
+        // Lo que el motor tiene guardado para esa carpeta, que es lo que va a
+        // encontrarse la clase que arranque después.
+        enElMotor: guardado ? guardado.objetivos.map(o => o.texto) : null
+    };
+})()`;
+
+const comoEstaElTemario = wc => mirar(wc, COMO_ESTA_EL_TEMARIO);
+
+/** La lista que el arnés pega, escrita como la escribe un CD. */
+const TEMARIO = ['- Contexto acotado', '- El archivo de reglas', '- Revisar lo que devuelve'];
 
 /** El formulario de renombrar, tal como se ve. */
 const COMO_ESTA_EL_FORMULARIO = `(() => {
@@ -451,6 +500,71 @@ function casos(wc) {
             }
         },
         {
+            que: 'y acá está la caja donde pegar el temario del CD, que es donde el panel dice que se pega',
+            // **El defecto entero, y por eso está tan arriba en la ronda.** El
+            // bloque de cobertura decía "pegala acá y se mide sola cada vez que se
+            // cierra una toma" y no dibujaba ninguna caja: el desplegable salía
+            // solo con la sesión abierta, o sea después de "Iniciar grabación", y
+            // esta es la pantalla en la que se entra a tomar notas. El editor
+            // buscaba dónde pegar la lista que le acababa de mandar el CD y no
+            // había dónde.
+            //
+            // Se comprueba lo prometido y el control a la vez porque el defecto
+            // era justamente que no coincidían. Un mensaje que promete algo que no
+            // está es peor que no decir nada.
+            hacer: async () => {},
+            ademas: async () => {
+                const t = await comoEstaElTemario(wc);
+                if (!t) return 'no está el bloque de cobertura del temario';
+                if (!t.hayCaja) return `el bloque promete dónde pegar y no lo dibuja: «${t.aviso}»`;
+                if (!t.abierta) return 'la caja arranca plegada sobre un bloque sin lista';
+                if (/cada vez que se cierra una toma\.$/.test(t.aviso)) {
+                    return `promete medir por toma sobre una clase que no arrancó: «${t.aviso}»`;
+                }
+                return /grabaci/i.test(t.aviso) ? null
+                    : `no dice cuándo se empieza a medir: «${t.aviso}»`;
+            },
+            shot: 'temario-donde-pegar'
+        },
+        {
+            que: 'pegar la lista la guarda y pliega la caja en el mismo gesto',
+            // Lo que se pidió: que la caja se despliegue para pegar y se repliegue
+            // después, para no ocupar la columna el resto de la clase. Plegada
+            // sigue diciendo cuántos temas hay, que si no plegarla parece haberlos
+            // perdido.
+            hacer: async () => {
+                await clic(wc, '#grabar-analisis .temario-campo');
+                await escribirRenglones(wc, TEMARIO);
+                await clicTexto(wc, '#grabar-analisis [data-bloque="temario"]', 'Medir contra esta lista');
+                await dormir(900);
+            },
+            ademas: async () => {
+                const t = await comoEstaElTemario(wc);
+                if (t.abierta) return 'la caja quedó abierta después de guardar';
+                if (!/3 temas/.test(t.resumen)) return `plegada dice «${t.resumen}»`;
+                // Y lo que importa: llegó al motor. Que se vea en la pantalla no
+                // dice nada sobre lo que quedó guardado.
+                if (!t.enElMotor) return 'la lista no llegó al motor';
+                return t.enElMotor.length === 3 ? null
+                    : `el motor guardó ${t.enElMotor.length} temas: ${t.enElMotor.join(' | ')}`;
+            },
+            shot: 'temario-pegado'
+        },
+        {
+            que: 'y se vuelve a abrir con lo pegado adentro, para corregirla sin borrar todo',
+            hacer: async () => {
+                await clic(wc, '#grabar-analisis .temario-summary');
+                await dormir(400);
+            },
+            ademas: async () => {
+                const t = await comoEstaElTemario(wc);
+                if (!t.abierta) return 'el resumen no volvió a abrir la caja';
+                return /El archivo de reglas/.test(t.escrito || '') ? null
+                    : `la caja se abrió con «${t.escrito}»`;
+            },
+            shot: 'temario-reabierto'
+        },
+        {
             que: 'el botón de arriba vuelve a la lista',
             hacer: async () => {
                 await clic(wc, '#grabar-volver');
@@ -485,6 +599,24 @@ function casos(wc) {
                 return null;
             },
             shot: 'grabando-sin-volver'
+        },
+        {
+            que: 'y la clase arrancó con la lista que se había pegado antes de grabar',
+            // El otro extremo de la cadena: pegar antes de "Iniciar" no sirve de
+            // nada si la sesión nace sin la lista. Sale de la carpeta, que es
+            // donde vive: el CD entrega una lista por curso y en un día de rodaje
+            // se graban cuatro clases seguidas.
+            hacer: async () => {},
+            ademas: async () => {
+                const puestos = await mirar(wc, `(async () => {
+                    const e = await window.cc.grabarEstado();
+                    return e && e.temario ? e.temario.objetivos.map(o => o.texto) : null;
+                })()`);
+                if (!puestos) return 'la clase arrancó sin ninguna lista contra la que medir';
+                return puestos.length === 3 ? null
+                    : `arrancó con ${puestos.length} temas: ${puestos.join(' | ')}`;
+            },
+            shot: 'temario-en-la-clase'
         },
         {
             que: 'terminar enciende el botón de volver, que es lo único que lo señala',
