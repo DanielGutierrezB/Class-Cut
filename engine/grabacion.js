@@ -376,9 +376,21 @@ async function leerClaqueta(ms) {
  * modelo: antes pasaba por la misma lectura que un golpe, y podía terminar en
  * pantalla como "sin confirmar" después de que alguien la había afirmado. Los
  * golpes que quedaban por leer ya no importan.
+ *
+ * **Va al historial como todo lo demás**, y se deshace SIEMPRE: ninguna toma
+ * depende de la claqueta —los bordes cuelgan de `ceroMs` y de la hora de cada
+ * palabra, no de ella—, así que no hay un punto pasado el cual sacarla rompa algo.
+ * Lo único que vuelve atrás es el marcador que se escribe en el XML, que es
+ * exactamente lo que el editor quiso deshacer.
+ *
+ * Lo que NO entra en la foto son las candidatas: son los golpes que faltaba leer,
+ * o sea trabajo pendiente y no algo que se vea. Deshacer devuelve la claqueta que
+ * había —la del golpe confirmado, o ninguna— y desde ahí los golpes que lleguen
+ * se vuelven a encolar solos, porque `claquetaLista` vuelve a decir que no.
  */
 function claqueta(paredMs) {
     if (!sesion) return null;
+    const antes = historial.fotoDeCampo(sesion.estado.claqueta);
     sesion.estado.claqueta = {
         ms: Number(paredMs) || Date.now(),
         frase: '',
@@ -386,6 +398,7 @@ function claqueta(paredMs) {
         origen: 'editor'
     };
     sesion.candidatas = [];
+    cambiosToma.anotarDeLaSesion(sesion, 'claqueta', antes, { tipo: 'claqueta' });
     espejo.escribir(sesion);
     return espejo.resumen(sesion);
 }
@@ -506,8 +519,31 @@ function apagar() {
  * exactamente lo que antes estaba desparramado en mil cuatrocientas líneas.
  */
 
+/**
+ * La lista del CD, pegada en el panel. Se deshace como todo lo demás.
+ *
+ * La foto es la lista con su última medición, y con eso alcanza: no hay nada de
+ * las tomas ahí adentro, así que deshacer un pegado de hace cinco minutos deja
+ * las tomas que entraron mientras tanto donde están.
+ *
+ * **Y devuelve la lista anterior CON la cobertura que se le había medido**, que
+ * es lo que hace que deshacer no cueste una consulta: la foto se saca en el
+ * momento de pegar la nueva, o sea cuando lo viejo ya estaba medido. `volver`
+ * vuelve a pasar por `pedir`, y la huella que trae la foto le dice que no hay
+ * nada que rehacer salvo que hayan cerrado tomas mientras tanto.
+ *
+ * El paso se anota acá y no adentro de `temarioSesion.poner` porque el rótulo y
+ * la forma del paso son de `cambios-toma.js`, y este archivo es el único que
+ * puede llamar a los dos sin que se requieran en círculo.
+ */
 function ponerTemario(texto) {
-    return temarioSesion.poner(sesion, texto);
+    if (!sesion) return temarioSesion.poner(sesion, texto);
+    const antes = historial.fotoDeCampo(sesion.estado.temario);
+    temarioSesion.poner(sesion, texto);
+    cambiosToma.anotarDeLaSesion(sesion, 'temario', antes, { tipo: 'temario', texto });
+    // El resumen se rehace después de anotar: el que devuelve `poner` se armó
+    // antes, así que diría que hay un paso menos para deshacer del que hay.
+    return espejo.resumen(sesion);
 }
 
 function editar(cambio) {

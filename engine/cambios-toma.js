@@ -82,31 +82,21 @@ function editar(sesion, cambio) {
             vivo.aplicar(toma, c);
     }
 
-    // **Al historial entra lo que cambió la toma, y nada más.** Un paso que al
-    // deshacerse no se ve hace apretar de nuevo pensando que el botón no
-    // funciona, y encima se come el Cmd-Z que iba para el cambio de verdad.
+    // Al historial entra lo que cambió la toma, y nada más. Quien decide eso es
+    // `historial.anotar`, comparando las dos fotos: está de aquel lado para que
+    // no haya un gesto que se olvide de preguntar (ver `anotar`).
     //
-    // Se pregunta una sola vez y para todos los tipos, comparando las dos fotos,
-    // y no gesto por gesto: cuando cada camino traía su propio criterio, el del
-    // borde se cuidaba y el de reabrir no —una toma que el motor se niega a
-    // reabrir dejaba igual su paso—, y los cinco que pasan por `vivo.aplicar`
-    // tampoco miraban nada. Poner la vista que la toma ya tenía es un clic que
-    // cualquiera da.
-    //
-    // La foto de después es null cuando la toma ya no está en la sesión, y eso
-    // se mira en la lista y no en el tipo del cambio: un `eliminar` que se plantó
-    // —la toma no estaba descartada— deja la toma donde estaba, así que su foto
-    // es la misma de antes y no hay paso que anotar.
-    const despues = sesion.estado.tomas.includes(toma) ? historial.foto(toma) : null;
-    if (!historial.mismaFoto(antes, despues)) {
-        historial.anotar(sesion.historia, {
-            que: comoSeLlama(c),
-            tipo: c.tipo,
-            id: toma.id,
-            antes,
-            despues
-        });
-    }
+    // Lo único que se decide acá es qué es la foto de después, y es null cuando
+    // la toma ya no está en la sesión. Se mira en la LISTA y no en el tipo del
+    // cambio: un `eliminar` que se plantó —la toma no estaba descartada— deja la
+    // toma donde estaba, así que su foto es la de antes y no hay paso que anotar.
+    historial.anotar(sesion.historia, {
+        que: comoSeLlama(c),
+        tipo: c.tipo,
+        id: toma.id,
+        antes,
+        despues: sesion.estado.tomas.includes(toma) ? historial.foto(toma) : null
+    });
 
     espejo.escribir(sesion);
     // Descartar una toma le saca a la clase lo que esa toma decía, así que un
@@ -136,8 +126,40 @@ function comoSeLlama(c) {
         case 'reabrir': return `reabrir ${cual}`;
         case 'eliminar': return `eliminar ${cual}`;
         case 'cerrar': return `cerrar ${cual}`;
+        // Los dos que no son de ninguna toma, así que no la nombran. Están acá y
+        // no donde se hacen por lo mismo que los otros: si cada gesto redactara
+        // su rótulo, el botón de deshacer diría las cosas de nueve maneras.
+        case 'claqueta': return 'poner la claqueta';
+        case 'temario': return `${vivo.limpio(c.texto) ? 'pegar' : 'sacar'} el temario`;
         default: return `el cambio en ${cual}`;
     }
+}
+
+/**
+ * El paso de un campo de la sesión: la claqueta puesta a mano y el temario pegado.
+ *
+ * Están acá, con los de las tomas, porque son el mismo historial y la misma pila
+ * —el orden de deshacer tiene que ser el orden de los gestos— y porque el rótulo
+ * sale del mismo sitio. Lo que los distingue es qué se repone: un campo del
+ * estado en vez de una toma, y por eso el paso lleva `campo` en lugar de `id`
+ * (ver `engine/deshacer.js`).
+ *
+ * Quien los llama es `grabacion.js`, que es el único que sabe cuál es la sesión.
+ * La foto de antes la toma él, antes de tocar nada; la de después se saca acá,
+ * que es lo que garantiza que las dos se saquen igual.
+ *
+ * @param {'claqueta'|'temario'} campo qué campo de `sesion.estado` se tocó
+ * @param {object|null} antes de `historial.fotoDeCampo`, sacada antes del cambio
+ */
+function anotarDeLaSesion(sesion, campo, antes, cambio) {
+    if (!sesion) return;
+    historial.anotar(sesion.historia, {
+        que: comoSeLlama(cambio || {}),
+        tipo: (cambio || {}).tipo,
+        campo,
+        antes,
+        despues: historial.fotoDeCampo(sesion.estado[campo])
+    });
 }
 
 /**
@@ -198,7 +220,7 @@ function reabrir(sesion, toma) {
  * El historial es del motor porque la verdad es del motor: cada cambio reescribe
  * el XML y el sidecar en el mismo gesto, así que volver atrás también tiene que
  * reescribirlos. El por qué está entero en `engine/deshacer.js`, junto con el
- * motivo de que la foto sea de una toma y no de la sesión.
+ * motivo de que la foto sea de una toma —o de un campo— y nunca de la sesión.
  */
 
 /**
@@ -211,7 +233,11 @@ function volver(sesion, hacia) {
     if (!paso) return { ok: false, estado: espejo.resumen(sesion) };
 
     const foto = hacia === 'adelante' ? paso.despues : paso.antes;
-    if (historial.dejariaDosAbiertas(sesion.estado.tomas, paso.id, foto)) {
+    // La única cosa que no se puede deshacer, y es de las tomas: un paso de la
+    // sesión no repone ninguna, así que no puede dejar dos abiertas. Preguntarle
+    // igual lo plantaría siempre, porque su `id` es undefined y entonces
+    // cualquier toma abierta contaría como "la otra".
+    if (!paso.campo && historial.dejariaDosAbiertas(sesion.estado.tomas, paso.id, foto)) {
         return {
             ok: false,
             error: `No puedo ${hacia === 'adelante' ? 'rehacer' : 'deshacer'} «${paso.que}»: ` +
@@ -222,12 +248,18 @@ function volver(sesion, hacia) {
     }
 
     historial.sacar(sesion.historia, hacia);
-    historial.poner(sesion.estado.tomas, paso.id, foto);
+    if (paso.campo) historial.ponerCampo(sesion.estado, paso.campo, foto);
+    else historial.poner(sesion.estado.tomas, paso.id, foto);
     // Un borde repuesto pide el mismo texto que pidió el gesto original: acá el
     // reparto de palabras lo hace la relectura, no el borde (ver `editar`).
     if (paso.tipo === 'borde' || paso.tipo === 'cerrar') relecturas.encolar(sesion, paso.id);
 
     espejo.escribir(sesion);
+    // Y un temario repuesto vuelve con la cobertura que se había medido CONTRA
+    // ESA lista, así que esto no vuelve a preguntar nada si nada se movió: la
+    // huella que trae la foto es la que `hayQueMedir` compara. Lo que sí dispara
+    // es el caso en que mientras tanto cerraron tomas, que es cuando la medición
+    // vieja dejó de valer.
     temarioSesion.pedir(sesion);
     return { ok: true, que: paso.que, estado: espejo.resumen(sesion) };
 }
@@ -258,4 +290,4 @@ function cerrarToma(sesion) {
     return espejo.resumen(sesion);
 }
 
-module.exports = { editar, comoSeLlama, volver, cerrarToma };
+module.exports = { editar, comoSeLlama, anotarDeLaSesion, volver, cerrarToma };

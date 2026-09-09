@@ -24,6 +24,7 @@ const fs = require('fs');
 const historial = require('../engine/deshacer');
 const grabacion = require('../engine/grabacion');
 const oir = require('../engine/oir');
+const ia = require('../engine/ia');
 const workspace = require('../engine/workspace');
 
 /** Una toma escrita corta, con lo que se le pida encima. */
@@ -41,6 +42,15 @@ function toma(id, campos) {
  * contesta un guion escrito a mano. Todo lo demás es el motor real, con su WAV
  * en el disco, su ciclo de señales y su XML: es lo que hace que esta prueba
  * valga, porque el camino que se está mirando es el de escribir el archivo.
+ *
+ * Y lo otro que se reemplaza es el proveedor de modelo, por dos motivos que van
+ * juntos. Uno: sin tocarlo, la cobertura del temario saldría a preguntarle de
+ * verdad al que esté configurado en ESTA Mac, o sea red y minutos adentro de una
+ * prueba. El otro: `gpu.sePuedeConsultar` lee el proveedor de Ajustes, así que
+ * la misma prueba mediría o se abstendría según quién la corra. Se dice que hay
+ * un proveedor remoto —para que no se abstenga— y que armarlo no da cliente, y
+ * entonces `temario.medir` cae en su respaldo por palabras: sin red, sin espera
+ * y siempre el mismo número.
  */
 
 /** Palabras del guion: "texto@segundo" desde que arrancó la captura. */
@@ -81,7 +91,10 @@ function silencio(segundos) {
  * donde el motor saca hasta dónde puede escuchar.
  */
 async function grabar(dir, segundos) {
-    const antes = oir.escuchar;
+    const oreja = oir.escuchar;
+    const estadoDeIa = ia.estado;
+    const armarIa = ia.armar;
+
     oir.escuchar = async p => ({
         palabras: CLASE
             .map(w => ({ t: p.sesion.desdeMs + Math.round(w.seg * 1000), texto: w.texto }))
@@ -89,20 +102,34 @@ async function grabar(dir, segundos) {
         colapsadas: 0,
         rellenadas: 0
     });
+    ia.estado = () => ({ estado: 'listo', proveedor: 'anthropic', model: 'de mentira', reason: '' });
+    ia.armar = async () => ({ cliente: null, proveedor: 'anthropic', reason: 'no hay modelo en las pruebas' });
 
     grabacion.iniciar({ dir, clase: 1, curso: 'curso', sampleRate: TASA, canales: 1, sinReloj: true });
     await seguir(segundos);
-    return () => { oir.escuchar = antes; };
+    return () => {
+        oir.escuchar = oreja;
+        ia.estado = estadoDeIa;
+        ia.armar = armarIa;
+    };
+}
+
+/**
+ * Le da lugar a lo que quedó en el aire: la relectura de una toma que cerró y la
+ * medición de la cobertura, que son promesas que nadie exporta.
+ *
+ * Sin esto la primera edición cae sobre una toma que el motor todavía está
+ * reescribiendo, y una cobertura recién pedida se lee cuando todavía es null.
+ */
+async function respirar() {
+    for (let i = 0; i < 40; i++) await new Promise(r => setImmediate(r));
 }
 
 /** Otro tramo de clase: más audio y otra pasada del ciclo de señales. */
 async function seguir(segundos) {
     grabacion.pcm(silencio(segundos));
     await grabacion.buscarSenales();
-    // Las tomas que cerraron se releen de a una en una cola que no se exporta;
-    // se le da lugar para que termine antes de mirar, que si no la primera
-    // edición cae sobre una toma que el motor todavía está reescribiendo.
-    for (let i = 0; i < 40; i++) await new Promise(r => setImmediate(r));
+    await respirar();
 }
 
 /** Lo que quedó escrito al lado del XML, que es la verdad del archivo. */
@@ -152,7 +179,10 @@ module.exports = async t => {
         // Con quince tomas en pantalla y el scroll donde lo dejó quien estaba
         // leyendo, un cambio que se revierte lejos de la vista es invisible.
         const h = historial.nueva();
-        historial.anotar(h, { que: 'descartar la toma 2', tipo: 'descartar', id: 2, antes: null, despues: null });
+        historial.anotar(h, {
+            que: 'descartar la toma 2', tipo: 'descartar', id: 2,
+            antes: toma(2), despues: toma(2, { descartada: true })
+        });
         t.eq(historial.proximo(h, 'atras').que, 'descartar la toma 2');
         t.eq(historial.proximo(h, 'adelante'), null, 'y para adelante todavía no hay nada');
     });
@@ -167,17 +197,20 @@ module.exports = async t => {
         // Ese futuro dejó de existir: rehacerlo pondría encima un cambio que
         // salió de un estado que ya no es el que hay.
         const h = historial.nueva();
-        historial.anotar(h, { que: 'uno', tipo: 'vista', id: 1, antes: null, despues: null });
+        historial.anotar(h, { que: 'uno', tipo: 'vista', id: 1, antes: toma(1), despues: toma(1, { vista: 'S' }) });
         historial.sacar(h, 'atras');
         t.eq(historial.pasos(h).adelante, 1);
-        historial.anotar(h, { que: 'otro', tipo: 'nota', id: 1, antes: null, despues: null });
+        historial.anotar(h, { que: 'otro', tipo: 'nota', id: 1, antes: toma(1), despues: toma(1, { comentario: 'x' }) });
         t.deep(historial.pasos(h), { atras: 1, adelante: 0 });
     });
 
     t.test('el historial tiene tope y tira los más viejos', () => {
         const h = historial.nueva();
         for (let i = 0; i < historial.TOPE + 10; i++) {
-            historial.anotar(h, { que: `paso ${i}`, tipo: 'vista', id: 1, antes: null, despues: null });
+            historial.anotar(h, {
+                que: `paso ${i}`, tipo: 'vista', id: 1,
+                antes: toma(1), despues: toma(1, { vista: 'S' })
+            });
         }
         t.eq(historial.pasos(h).atras, historial.TOPE);
         t.eq(historial.proximo(h, 'atras').que, `paso ${historial.TOPE + 9}`, 'el último sigue estando');
@@ -526,6 +559,199 @@ module.exports = async t => {
             const r = grabacion.editar(uno);
             t.eq(r.tomas[0].comentarios.length, 2);
             t.eq(r.historia.atras, 2);
+        });
+    });
+
+    /* ─── Los dos gestos que no son de ninguna toma ───────────────────────
+     *
+     * Poner la claqueta a mano y pegar la lista del CD también reescriben el XML
+     * y el sidecar en el acto, así que también tienen que poder volver. Sin eso
+     * el Cmd-Z que se da después de uno de los dos se lleva puesto el cambio
+     * ANTERIOR: el editor ve moverse una toma que no había pedido tocar.
+     *
+     * Lo que estas pruebas fijan, además de que se deshagan, es que se deshagan
+     * SIN arrastrar nada: la foto es del campo y de nada más, así que deshacer un
+     * pegado de hace cinco minutos tiene que dejar donde están las tomas que
+     * entraron mientras tanto.
+     */
+    t.group('el historial · la claqueta puesta a mano');
+
+    t.test('poner la claqueta deja un paso, y deshacerla la saca del archivo', async () => {
+        await conSesion((dir, e) => {
+            const cuando = e.ceroMs + 5000;
+            const puesta = grabacion.claqueta(cuando);
+            t.eq(puesta.claqueta.ms, cuando);
+            t.ok(puesta.claqueta.confirmada, 'la afirmó una persona');
+            t.eq(puesta.historia.queAtras, 'poner la claqueta', 'el botón dice qué va a deshacer');
+            t.eq(sidecarDe(dir, e).claqueta.ms, cuando, 'el archivo se escribió con ella');
+
+            const r = grabacion.deshacer();
+            t.ok(r.ok);
+            t.eq(r.que, 'poner la claqueta');
+            t.eq(r.estado.claqueta, null, 'volvió a no haber ninguna');
+            t.eq(sidecarDe(dir, e).claqueta, null, 'y deshacer lo volvió a escribir');
+        });
+    });
+
+    t.test('rehacerla la vuelve a poner, en el archivo también', async () => {
+        await conSesion((dir, e) => {
+            const cuando = e.ceroMs + 5000;
+            grabacion.claqueta(cuando);
+            grabacion.deshacer();
+            const r = grabacion.rehacer();
+            t.ok(r.ok);
+            t.eq(r.estado.claqueta.ms, cuando);
+            t.eq(sidecarDe(dir, e).claqueta.ms, cuando);
+        });
+    });
+
+    t.test('poner la misma claqueta dos veces no deja un paso de más', async () => {
+        await conSesion((dir, e) => {
+            const cuando = e.ceroMs + 5000;
+            grabacion.claqueta(cuando);
+            const r = grabacion.claqueta(cuando);
+            t.eq(r.historia.atras, 1);
+        });
+    });
+
+    t.test('deshacerla NO toca las tomas que entraron mientras tanto', async () => {
+        // La razón entera de que la foto sea del campo y no de la sesión: una
+        // foto de la sesión repuesta acá se llevaría puesta la toma que llegó.
+        await conSesion(async (dir, e, mas) => {
+            grabacion.claqueta(e.ceroMs + 5000);
+            await mas(10);
+            t.eq(grabacion.resumen().tomas.length, 4, 'llegó una toma nueva');
+
+            const r = grabacion.deshacer();
+            t.ok(r.ok);
+            t.eq(r.estado.claqueta, null, 'la claqueta volvió atrás');
+            t.eq(r.estado.tomas.length, 4, 'y las cuatro tomas siguen ahí');
+            t.eq(sidecarDe(dir, e).tomas.length, 4, 'en el archivo también');
+        });
+    });
+
+    t.test('y no se planta por haber una toma abierta, que es cosa de las tomas', async () => {
+        // La única cosa que no se puede deshacer es reponer una toma abierta
+        // cuando ya hay otra. Un paso de la sesión no repone ninguna toma, así
+        // que esa pregunta no le corresponde: hecha igual lo plantaría siempre,
+        // porque un paso sin `id` hace que cualquier toma abierta cuente como
+        // "la otra". Acá la toma 3 está abierta desde que arrancó la prueba.
+        await conSesion((dir, e) => {
+            t.eq(e.abierta, e.tomas[2].id, 'hay una toma abierta');
+            grabacion.claqueta(e.ceroMs + 5000);
+            t.ok(grabacion.deshacer().ok, 'se deshace');
+            const r = grabacion.rehacer();
+            t.ok(r.ok, 'y se rehace');
+            t.eq(r.estado.claqueta.ms, e.ceroMs + 5000);
+        });
+    });
+
+    t.group('el historial · el temario del CD');
+
+    const LISTA = '- Qué es un PROM\n- Cómo se mide la cobertura';
+
+    t.test('pegar el temario deja un paso, y deshacerlo lo saca del archivo', async () => {
+        await conSesion((dir, e) => {
+            const puesto = grabacion.ponerTemario(LISTA);
+            t.eq(puesto.temario.objetivos.length, 2);
+            t.eq(puesto.historia.queAtras, 'pegar el temario');
+            t.eq(sidecarDe(dir, e).temario.objetivos.length, 2, 'el archivo lo tiene');
+
+            const r = grabacion.deshacer();
+            t.ok(r.ok);
+            t.eq(r.que, 'pegar el temario');
+            t.eq(r.estado.temario, null, 'volvió a no haber lista');
+            t.eq(sidecarDe(dir, e).temario, null, 'y deshacer lo volvió a escribir');
+        });
+    });
+
+    t.test('sacarlo también es un paso, y se llama por su nombre', async () => {
+        await conSesion((dir, e) => {
+            grabacion.ponerTemario(LISTA);
+            const vacio = grabacion.ponerTemario('');
+            t.eq(vacio.temario, null);
+            t.eq(vacio.historia.queAtras, 'sacar el temario');
+
+            const r = grabacion.deshacer();
+            t.eq(r.estado.temario.objetivos.length, 2, 'la lista vuelve entera');
+        });
+    });
+
+    t.test('pegar la misma lista otra vez no deja paso ni tira lo ya medido', async () => {
+        // Es el gesto de quien pega dos veces por las dudas. Antes tiraba la
+        // cobertura y pagaba una consulta nueva para llegar al mismo resultado.
+        await conSesion(async (dir, e) => {
+            grabacion.ponerTemario(LISTA);
+            await respirar();
+            t.ok(grabacion.resumen().temario.cobertura, 'la lista se midió');
+
+            const r = grabacion.ponerTemario(LISTA);
+            t.eq(r.historia.atras, 1, 'un solo paso');
+            t.ok(r.temario.cobertura, 'y la cobertura sigue puesta');
+        });
+    });
+
+    t.test('deshacer devuelve la lista anterior CON lo que se le había medido', async () => {
+        // El borde que importa del temario: la foto se saca en el momento de
+        // pegar la lista nueva, o sea cuando lo viejo ya estaba medido. Así
+        // deshacer no cuesta una consulta ni deja el panel sin resultado.
+        await conSesion(async (dir, e) => {
+            grabacion.ponerTemario('- Qué es un PROM');
+            await respirar();
+            const primera = grabacion.resumen().temario.cobertura;
+            t.ok(primera, 'la primera lista se midió');
+
+            grabacion.ponerTemario(LISTA);
+            await respirar();
+            t.eq(grabacion.resumen().temario.objetivos.length, 2);
+
+            const r = grabacion.deshacer();
+            t.eq(r.estado.temario.objetivos.length, 1, 'volvió la lista de antes');
+            t.ok(r.estado.temario.cobertura, 'con su cobertura, no en blanco');
+            t.deep(r.estado.temario.cobertura.huella, primera.huella,
+                'es la medición que era, no una nueva');
+        });
+    });
+
+    t.group('el historial · una sola pila para los dos');
+
+    t.test('el orden de deshacer es el orden en que se hicieron los gestos', async () => {
+        // Con dos pilas habría que inventar cuál toca primero; con una sola, la
+        // respuesta correcta —la que se tocó al final— ya está.
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            grabacion.editar({ tipo: 'vista', toma: id, vista: 'S' });
+            grabacion.claqueta(e.ceroMs + 5000);
+            grabacion.ponerTemario(LISTA);
+            grabacion.editar({ tipo: 'nota', toma: id, texto: 'mirar el audio' });
+            t.eq(grabacion.resumen().historia.atras, 4);
+
+            t.eq(grabacion.deshacer().que, `la nota de la toma ${id}`);
+            t.eq(grabacion.deshacer().que, 'pegar el temario');
+            t.eq(grabacion.deshacer().que, 'poner la claqueta');
+
+            const ultimo = grabacion.deshacer();
+            t.eq(ultimo.que, `poner la toma ${id} en S`);
+            t.eq(ultimo.estado.tomas[0].vista, 'PV', 'y la toma volvió a lo que era');
+            t.eq(ultimo.estado.claqueta, null);
+            t.eq(ultimo.estado.temario, null);
+            t.eq(ultimo.estado.historia.adelante, 4, 'los cuatro esperan para rehacerse');
+        });
+    });
+
+    t.test('y rehacerlos los devuelve en el orden en que se hicieron', async () => {
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            grabacion.editar({ tipo: 'vista', toma: id, vista: 'S' });
+            grabacion.claqueta(e.ceroMs + 5000);
+            grabacion.deshacer();
+            grabacion.deshacer();
+
+            t.eq(grabacion.rehacer().que, `poner la toma ${id} en S`);
+            const r = grabacion.rehacer();
+            t.eq(r.que, 'poner la claqueta');
+            t.eq(r.estado.tomas[0].vista, 'S');
+            t.eq(r.estado.claqueta.ms, e.ceroMs + 5000);
         });
     });
 

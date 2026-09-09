@@ -56,10 +56,20 @@ function heredar(dir) {
  *
  * Pegar una lista vacía es querer sacarla, y saca también la medición: dejar la
  * cobertura de una lista que ya no existe sería mostrar un resultado sin su vara.
+ *
+ * Pegar la MISMA lista otra vez, en cambio, no es pegar otra, y se planta antes
+ * de tocar nada. Sin eso el gesto tiraba la cobertura ya medida y pagaba una
+ * consulta nueva para llegar al mismo resultado —lo mismo que le pasa a quien
+ * pega dos veces por las dudas—, y de paso dejaba en el historial un paso que al
+ * deshacerse no se ve, porque el objeto era nuevo aunque dijera lo mismo.
  */
 function poner(sesion, texto) {
     if (!sesion) return null;
     const objetivos = temario.partir(texto);
+    const ya = sesion.estado.temario;
+    if (ya && ya.origen === 'pegado' && ya.texto === String(texto || '') && objetivos.length) {
+        return espejo.resumen(sesion);
+    }
     sesion.estado.temario = objetivos.length
         ? {
             texto: String(texto || ''),
