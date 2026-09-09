@@ -27,7 +27,7 @@ import * as plegado from './plegado.js';
 import * as margen from './margen.js';
 import { comoSeLlama, dosDigitos, nombreDeCarpeta, numeroLeido } from './gestionar.js';
 import { queHace, tomaDeLasTeclas, puedeElegirse } from './teclas.js';
-import { mostrador } from './turnos.js';
+import { mostrador, esDeLaQueTermino } from './turnos.js';
 
 /**
  * Lo que la ventana recuerda por su cuenta: la última entrada de audio elegida,
@@ -92,6 +92,9 @@ const vista = {
     aplauso: null,
     // "Terminar" apretado y esperando a que el motor relea las últimas tomas.
     terminando: false,
+    // La secuencia de la clase que ya se cerró. Sirve para tirar los avisos que
+    // llegan después de terminarla, que si no la resucitan (`esDeLaQueTermino`).
+    terminada: null,
     cableado: false
 };
 
@@ -654,6 +657,9 @@ async function iniciar() {
     if (!r.ok) { toast(r.error); return; }
 
     vista.estado = r.estado;
+    // La clase anterior deja de importar: en un día de rodaje se graban varias
+    // seguidas y la marca del cierre no puede callar a la que empieza.
+    vista.terminada = null;
     oido.empezarAMandar();
     toast('Grabando. El XML ya está en la carpeta y se va escribiendo.');
     pintar();
@@ -716,9 +722,14 @@ async function terminar() {
     // no se puede volver a apretar mientras tanto.
     vista.terminando = true;
     refrescarBotones();
+    // Qué clase es la que se está cerrando, antes de soltar el estado: las
+    // relecturas del cierre siguen empujando avisos suyos y alguno llega después
+    // de este renglón.
+    const cerrada = vista.estado && vista.estado.secuencia;
     const final = await window.cc.grabarTerminar();
     vista.terminando = false;
     vista.estado = null;
+    vista.terminada = cerrada || (final && final.secuencia) || null;
     vista.aplauso = null;
     // La clase que terminó pasa a la lista, y la siguiente ya tiene su número: en
     // un día de rodaje se graban varias seguidas. Sale de la carpeta, que ya
@@ -895,7 +906,10 @@ export function wireGrabar() {
             linea.hidden = !aviso.oyendo;
             linea.textContent = aviso.oyendo ? `Oyendo: ${aviso.oyendo}` : '';
         }
-        if (aviso.estado) {
+        // Un aviso de la clase que ya se cerró no se dibuja: llega de las
+        // relecturas del cierre y traería `grabando: true` sobre una clase cuyo XML
+        // ya está escrito, dejando la pantalla trabada en la toma de notas.
+        if (aviso.estado && !esDeLaQueTermino(aviso.estado, vista.terminada)) {
             vista.estado = aviso.estado;
             pintar();
         }

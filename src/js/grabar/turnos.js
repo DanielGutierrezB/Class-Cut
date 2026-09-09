@@ -58,3 +58,33 @@ export function mostrador() {
         }
     };
 }
+
+/**
+ * ¿Este estado empujado es de una clase que ya terminó?
+ *
+ * El mostrador de arriba sirve para lo que la pantalla PIDE: cada pedido lleva su
+ * turno porque la ventana es la que lo mandó. Los avisos del motor
+ * (`grabar-aviso`) no se piden, así que no tienen turno, y llegan igual: mientras
+ * se cierra una clase el motor relee las últimas tomas con el modelo grande y va
+ * empujando el estado en cada una.
+ *
+ * **El que llega después de que la clase terminó la resucita**, y eso se vio en la
+ * app de verdad (`tools/probar-vivo.js`): terminar deja `vista.estado = null`, un
+ * aviso de la relectura entra un instante más tarde con `grabando: true`, y la
+ * pantalla vuelve a creer que está grabando una clase cuyo XML ya está escrito.
+ * De ahí no se sale: "← Clases" se apaga porque cree que hay una toma en curso
+ * (`porQueNoSeVuelve` en `pantallas.js`), y la única salida es cerrar la app con
+ * la clase ya grabada.
+ *
+ * Se compara la secuencia y no un booleano "ya terminé": en un día de rodaje se
+ * graban varias clases seguidas, y un booleano dejaría muda la que empieza
+ * después. La secuencia nombra a UNA clase, así que lo que se tira es
+ * exactamente lo que llegó tarde de la que se acaba de cerrar.
+ *
+ * @param {object|null} estado el que trae el aviso
+ * @param {string|null} terminada la secuencia de la clase que ya se cerró
+ */
+export function esDeLaQueTermino(estado, terminada) {
+    if (!terminada || !estado) return false;
+    return estado.secuencia === terminada;
+}

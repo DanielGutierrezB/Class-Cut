@@ -22,7 +22,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
 
 module.exports = async t => {
     const src = nombre => pathToFileURL(path.join(__dirname, '..', 'src', 'js', nombre)).href;
-    const { mostrador } = await import(src('grabar/turnos.js'));
+    const { mostrador, esDeLaQueTermino } = await import(src('grabar/turnos.js'));
 
     t.group('grabar · el mostrador de turnos');
 
@@ -106,5 +106,36 @@ module.exports = async t => {
         // pantalla la toma 4 volvía a mostrar la vista de antes hasta el empujón
         // siguiente del motor.
         t.eq(await dosGestos(false), 'toma1=MG toma4=PV');
+    });
+
+    /* ─── El aviso que llega después de terminar ───────────────────────────
+     *
+     * La otra mitad del mismo problema, y la que se vio en la app de verdad
+     * (`tools/probar-vivo.js`): un aviso no se pide, así que no tiene turno, y el
+     * que entra después de cerrar la clase la devolvía a "grabando".
+     */
+
+    t.group('grabar · el aviso de una clase que ya terminó');
+
+    const CUAL = '02_curso_2026-09-08_15-00-00';
+
+    t.test('sin ninguna clase cerrada, todos los avisos se dibujan', () => {
+        t.eq(esDeLaQueTermino({ secuencia: CUAL, grabando: true }, null), false);
+    });
+
+    t.test('el aviso atrasado de la clase que se cerró se tira', () => {
+        // Es el que dejaba la pantalla trabada: trae `grabando: true` sobre una
+        // clase cuyo XML ya está escrito, y con eso «← Clases» no se enciende más.
+        t.eq(esDeLaQueTermino({ secuencia: CUAL, grabando: true }, CUAL), true);
+    });
+
+    t.test('el de la clase siguiente sí se dibuja, aunque venga una cerrada atrás', () => {
+        // En un día de rodaje se graban varias seguidas: una marca que fuera un sí
+        // o un no dejaría muda la que empieza después.
+        t.eq(esDeLaQueTermino({ secuencia: '03_curso_2026-09-08_16-00-00' }, CUAL), false);
+    });
+
+    t.test('un aviso sin estado no se confunde con uno atrasado', () => {
+        t.eq(esDeLaQueTermino(null, CUAL), false);
     });
 };
