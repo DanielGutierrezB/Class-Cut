@@ -1,7 +1,7 @@
 {
   "name": "class-cut",
   "productName": "Class Cut",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Corta las clases grabadas con Rodecaster Video y genera XML para Premiere Pro y DaVinci Resolve",
   "main": "main.js",
   "author": "Daniel Gutiérrez",

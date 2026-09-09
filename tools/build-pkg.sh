@@ -68,25 +68,57 @@ OLLAMA_MODELS="bin/mac/ollama-models"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/payload"
-# Qué modelos viajan, uno por uno y con lo que pesa cada uno.
-#
-# El total no alcanza para decidir nada, y acá hay algo que decidir: los modelos
-# son casi todo el instalador, así que agregar o sacar uno se ve en el número que
-# el editor descarga. El que más fácil se saca por parecer un extra es
-# `ggml-small.bin`, y es justo el que no conviene sacar: son 426 MiB que le dan a
-# CUALQUIER máquina las dos cosas que esta Mac no tuvo hasta que se bajó —el
-# modelo del ciclo de señales y el escalón al que bajar si el sistema se lleva al
-# grande en medio de una toma (`engine/insistir.js`)—. Sin él el instalador pesa
-# menos y la toma que se pierda no se puede recuperar hasta después de la clase.
-echo "→ juntando los modelos ($(du -shc "$MODELS" "$OLLAMA_MODELS" | tail -1 | cut -f1))"
-for m in "$MODELS"/* "$OLLAMA_MODELS"/*; do
-    [ -e "$m" ] || continue
-    echo "    $(du -sh "$m" | cut -f1)  $(basename "$m")"
-done
+echo "→ juntando los modelos"
 # `ditto` y no `cp`: sin `--norsrc` cada archivo viaja con un `._` al lado, que
 # son 16 archivos de basura dentro de un instalador de 3.8 GB.
 ditto --norsrc --noextattr --noacl "$MODELS" "$STAGE/payload/models"
 ditto --norsrc --noextattr --noacl "$OLLAMA_MODELS" "$STAGE/payload/ollama-models"
+
+# Al payload van archivos y nada más.
+#
+# `ditto` preserva los enlaces simbólicos, y en la carpeta de modelos de esta Mac
+# hay uno: `ggml-large-v3.bin` son 90 bytes que apuntan a la carpeta de otra app
+# del editor (`com.meetily.ai`). Acá resuelve —del otro lado hay 2,9 GB de ggml de
+# verdad— y por eso no se ve como basura al compilar; dentro de un `.pkg` sí lo
+# es, porque esa ruta no existe en la máquina donde se instala y lo que llega es
+# un enlace colgado.
+#
+# Seguirlo tampoco es la salida: sumaría 2,9 GB al instalador para traer el
+# modelo que `large-v3-turbo` ya reemplaza —misma calidad y varias veces más
+# rápido, ver `MODEL_PREFERENCE` en `engine/paths.js`—, y el editor descargaría
+# esos gigas para nada.
+#
+# Así que se quitan del payload, y se dice cuáles: el enlace que aparezca mañana
+# en la carpeta de modelos tiene que verse en el registro de la compilación en vez
+# de viajar callado. La carpeta del repo no se toca — ahí el enlace sirve, y
+# `modelosInstalados` lo pesa con `statSync` para tener a mano el escalón de
+# arriba.
+colgados=$(find "$STAGE/payload" -type l)
+if [ -n "$colgados" ]; then
+    echo "→ enlaces que NO viajan (su destino no existe donde se instala):"
+    while IFS= read -r enlace; do
+        echo "    $(basename "$enlace") → $(readlink "$enlace")"
+    done <<< "$colgados"
+    find "$STAGE/payload" -type l -delete
+fi
+
+# Qué modelos viajan, uno por uno, leídos del payload ya armado y no de la
+# carpeta de origen: así el inventario es lo que entra al instalador, con los
+# enlaces ya descontados.
+#
+# El total no alcanza para decidir nada, y acá hay algo que decidir: los modelos
+# son casi todo el instalador, así que agregar o sacar uno se ve en el número que
+# el editor descarga. El que más fácil se saca por parecer un extra es
+# `ggml-small.bin`, y es justo el que no conviene sacar: le da a CUALQUIER máquina
+# las dos cosas que esta Mac no tuvo hasta que se bajó —el modelo del ciclo de
+# señales y el escalón al que bajar si el sistema se lleva al grande en medio de
+# una toma (`engine/insistir.js`)—. Sin él el instalador pesa menos y la toma que
+# se pierda no se puede recuperar hasta después de la clase.
+echo "→ lo que viaja ($(du -shc "$STAGE/payload"/* | tail -1 | cut -f1)):"
+for m in "$STAGE/payload/models"/* "$STAGE/payload/ollama-models"/*; do
+    [ -e "$m" ] || continue
+    echo "    $(du -sh "$m" | cut -f1)  $(basename "$m")"
+done
 
 # ── 3. Los componentes ───────────────────────────────────────────────
 echo "→ armando los componentes"

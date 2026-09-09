@@ -12,10 +12,24 @@
 # sola, entra de sobra con sus 146 MB.
 #
 #   bash tools/publish-release.sh
+#   bash tools/publish-release.sh notas/0.3.0.md
+#
+# Las notas salen de un archivo si se le pasa uno, y si no del texto de acá
+# abajo. El archivo es el caso normal de una versión con algo que contar: el
+# botón de actualizar muestra estas notas tal cual, así que son lo único que el
+# editor lee antes de decidir si instala, y un párrafo escrito para él no cabe
+# en un heredoc de un script. El texto de abajo queda para las versiones que no
+# cambian nada que se pueda contar.
 #
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+NOTAS_ARCHIVO="${1:-}"
+if [ -n "$NOTAS_ARCHIVO" ] && [ ! -f "$NOTAS_ARCHIVO" ]; then
+    echo "No existe el archivo de notas: $NOTAS_ARCHIVO"
+    exit 1
+fi
 
 VERSION=$(node -p "require('./package.json').version")
 OWNER=$(node -p "require('./engine/updates').DEFAULTS.owner")
@@ -40,10 +54,17 @@ gh repo view "${OWNER}/${REPO}" >/dev/null 2>&1 || {
 }
 
 echo "→ publicando v${VERSION}"
-gh release create "v${VERSION}" "$UPDATE_PKG" \
-    --repo "${OWNER}/${REPO}" \
-    --title "Class Cut ${VERSION}" \
-    --notes "$(cat <<'NOTAS'
+if [ -n "$NOTAS_ARCHIVO" ]; then
+    echo "   notas: $NOTAS_ARCHIVO"
+    gh release create "v${VERSION}" "$UPDATE_PKG" \
+        --repo "${OWNER}/${REPO}" \
+        --title "Class Cut ${VERSION}" \
+        --notes-file "$NOTAS_ARCHIVO"
+else
+    gh release create "v${VERSION}" "$UPDATE_PKG" \
+        --repo "${OWNER}/${REPO}" \
+        --title "Class Cut ${VERSION}" \
+        --notes "$(cat <<'NOTAS'
 Actualización de la app. Los modelos no se vuelven a descargar: siguen
 instalados en /Library/Application Support/Class Cut.
 
@@ -51,6 +72,7 @@ Desde la app: el número de versión, arriba a la izquierda, o Diagnóstico →
 Buscar actualización.
 NOTAS
 )"
+fi
 
 echo ""
 echo "Publicado. La app lo va a ver en la próxima consulta."
