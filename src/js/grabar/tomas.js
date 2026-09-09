@@ -23,6 +23,7 @@ import { textoDe, bordeConElDerecho, seleccion } from './palabras.js';
 import * as margen from './margen.js';
 import * as plegado from './plegado.js';
 import * as empalme from './empalme.js';
+import * as pulso from './pulso.js';
 
 /* ─── Las piezas de una toma ─────────────────────────────────────────────
  *
@@ -604,7 +605,7 @@ function acomodar(donde, nuevas) {
  *   alPlegar(id, plegada) }
  */
 export function pintar(donde, estado, acciones, mirada) {
-    vigilarElPulso(donde);
+    pulso.vigilar(donde);
     // Con un gesto del mouse a medio hacer sobre la lista no se repinta.
     if (enMitadDeUnGesto(donde)) return;
 
@@ -641,53 +642,24 @@ export function pintar(donde, estado, acciones, mirada) {
 
 /* ─── El pulso: nada se rehace debajo del puntero ─────────────────────────
  *
- * Un botón de vista apretado con la nota a medio escribir perdía el clic. El
- * `change` del campo sale del propio `mousedown` —al apretar, el campo pierde el
- * foco— y la respuesta del motor vuelve enseguida, así que el repintado caía
- * ENTRE el `mousedown` y el `mouseup`: el botón que recibió el primero ya no
- * estaba en el documento cuando llegó el segundo, y el navegador no dispara
- * ningún `click` si los dos no cayeron en el mismo nodo. La pantalla no mentía
- * —cada tarjeta seguía mostrando lo que decía el motor— y aun así el editor
- * apretaba y no pasaba nada.
+ * Un botón de vista apretado con la nota a medio escribir perdía el clic, y el
+ * porqué entero está en `pulso.js` — que salió de acá cuando la caja del temario,
+ * en la otra columna, resultó tener el mismo problema con su propio botón.
  *
  * Es el mismo problema que ya tenía el arrastre de un borde con otro gesto: una
  * lista que se rehace debajo de la mano. Así que la respuesta es la que ya
  * estaba —no repintar mientras el gesto dure— y no un mecanismo nuevo que
  * intente conservar los nodos de abajo del puntero.
- *
- * Lo que se pierde es un repintado, no un cambio: el motor ya lo escribió, y lo
- * que se ve queda al día en el gesto siguiente o, como mucho, en el empujón que
- * llega tres segundos después. Es exactamente el precio que la guarda del
- * arrastre venía pagando.
  */
-
-/** Si hay un botón del mouse apretado sobre la lista. */
-let apretado = false;
-const vigiladas = new WeakSet();
 
 /**
  * Las dos maneras de preguntar lo mismo, y la segunda sigue haciendo falta.
  *
- * Un arrastre de borde ES un botón apretado, así que `apretado` lo cubre; pero
+ * Un arrastre de borde ES un botón apretado, así que el pulso lo cubre; pero
  * dura segundos y no milisegundos, y en el medio la ventana puede perder el foco
  * —un diálogo del sistema— y soltar el pulso sin que nadie haya soltado nada. La
  * línea en la mano lo dice por sí misma y no depende de eso.
  */
 function enMitadDeUnGesto(donde) {
-    return apretado || Boolean(donde.querySelector('.toma-borde.es-arrastrando'));
-}
-
-function vigilarElPulso(donde) {
-    if (vigiladas.has(donde)) return;
-    vigiladas.add(donde);
-    // En captura, para que el pulso se encienda aunque el gesto lo atienda algo
-    // de adentro; y solo el botón principal, porque el clic derecho abre un
-    // diálogo del sistema y su `pointerup` puede no volver nunca.
-    donde.addEventListener('pointerdown', e => { if (e.button === 0) apretado = true; }, true);
-    // El final se escucha en la ventana y no en la lista por lo mismo que el del
-    // arrastre (`empezarAMover` en `palabras.js`): se puede soltar afuera, y un
-    // gesto que nunca se diera por terminado congelaría la lista para siempre.
-    const soltar = () => { apretado = false; };
-    for (const fin of ['pointerup', 'pointercancel']) window.addEventListener(fin, soltar);
-    window.addEventListener('blur', soltar);
+    return pulso.apretando() || Boolean(donde.querySelector('.toma-borde.es-arrastrando'));
 }
