@@ -119,14 +119,14 @@
 
    El grosor de la letra no cambia con el estado: están en un flex con
    `margin-left: auto`, y un ancho distinto corría a los de al lado al apretarlos. */
-#grabar-compact.is-elegido,
+.grabar-compact.is-elegido,
 #grabar-descartadas.is-elegido {
     color: var(--accent);
     border-color: var(--accent-dim);
     background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-#grabar-compact.is-elegido:hover,
+.grabar-compact.is-elegido:hover,
 #grabar-descartadas.is-elegido:hover {
     background: color-mix(in srgb, var(--accent) 20%, transparent);
 }

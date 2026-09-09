@@ -278,9 +278,13 @@ function pintarEnCurso() {
  */
 function pintarCompacto() {
     $('view-grabar').classList.toggle('es-compacto', vista.compacto);
-    const boton = $('grabar-compact');
-    boton.setAttribute('aria-pressed', String(vista.compacto));
-    boton.classList.toggle('is-elegido', vista.compacto);
+    // Hay uno en cada barra, porque hay dos pantallas y las orillas se leen en las
+    // dos. Es un interruptor con dos manijas, no dos interruptores: el estado y la
+    // preferencia son los mismos, así que los dos se pintan juntos.
+    for (const boton of document.querySelectorAll('.grabar-compact')) {
+        boton.setAttribute('aria-pressed', String(vista.compacto));
+        boton.classList.toggle('is-elegido', vista.compacto);
+    }
 }
 
 /**
@@ -949,11 +953,13 @@ export function wireGrabar() {
         alComenzar: comenzar
     });
     $('grabar-volver').onclick = volver;
-    $('grabar-compact').onclick = () => {
-        vista.compacto = !vista.compacto;
-        recordar(ORILLAS_RECORDADAS, vista.compacto ? 'no' : 'si');
-        pintarCompacto();
-    };
+    for (const boton of document.querySelectorAll('.grabar-compact')) {
+        boton.onclick = () => {
+            vista.compacto = !vista.compacto;
+            recordar(ORILLAS_RECORDADAS, vista.compacto ? 'no' : 'si');
+            pintarCompacto();
+        };
+    }
     $('grabar-descartadas').onclick = () => {
         vista.sinDescartadas = !vista.sinDescartadas;
         recordar(DESCARTADAS_RECORDADAS, vista.sinDescartadas ? 'si' : 'no');

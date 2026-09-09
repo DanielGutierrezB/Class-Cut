@@ -74,6 +74,13 @@
                             <button class="grabadas-modo" type="button" data-modo="carpetas" role="radio">Por carpeta</button>
                             <button class="grabadas-modo" type="button" data-modo="fecha" role="radio">Por fecha</button>
                         </div>
+                        <!-- El mismo interruptor que la otra barra, y a propósito:
+                             las orillas se leen igual en una clase terminada que en
+                             la que se está grabando, así que quien las apagó allá
+                             las quiere apagadas acá. Comparten estado y preferencia
+                             por la clase, no por el id (ver `pintarCompacto`). -->
+                        <button class="btn btn-ghost grabar-compact" type="button" aria-pressed="false"
+                            title="Esconde las palabras de orilla: el gris de justo antes del IN y justo después del OUT. El guion de la toma se queda entero.">Compact</button>
                         <button class="btn btn-ghost" id="grabar-carpeta">Elegir carpeta…</button>
                         <!-- No arranca ninguna toma: entra a la interfaz de toma
                              de notas. Empezar a grabar es "Iniciar grabación",
@@ -135,7 +142,7 @@
                         </span>
                         <button class="btn btn-ghost" id="grabar-descartadas" type="button" aria-pressed="false" hidden
                             title="Las descartadas siguen en la sesión y se pueden recuperar: esto solo las saca de la vista.">Ocultar descartadas</button>
-                        <button class="btn btn-ghost" id="grabar-compact" type="button" aria-pressed="false"
+                        <button class="btn btn-ghost grabar-compact" id="grabar-compact" type="button" aria-pressed="false"
                             title="Esconde las palabras de orilla: el gris de justo antes del IN y justo después del OUT. El guion de la toma se queda entero.">Compact</button>
                         <!-- "Elegir carpeta…" ya no está acá: es de la lista. La
                              carpeta ES el curso, y elegirlo es lo que se hace antes de
