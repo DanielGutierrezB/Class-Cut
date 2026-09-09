@@ -95,6 +95,10 @@ const vista = {
     // La secuencia de la clase que ya se cerró. Sirve para tirar los avisos que
     // llegan después de terminarla, que si no la resucitan (`esDeLaQueTermino`).
     terminada: null,
+    // La lista del CD guardada para la carpeta elegida, `{dir, temario}`. Es lo
+    // único que el bloque de cobertura tiene para mostrar cuando no hay sesión, y
+    // sin sesión es como se entra a esta pantalla (ver `releerElTemario`).
+    temario: null,
     cableado: false
 };
 
@@ -477,13 +481,30 @@ function pintar() {
     pintarCompacto();
     pintarDescartadas();
     pintarHistoria();
-    analisis.pintar($('grabar-analisis'), vista.estado);
+    analisis.pintar($('grabar-analisis'), vista.estado, vista.temario);
     pintarClaqueta();
     decirDonde();
     refrescarBotones();
     // Lo último de todo: el salto al fondo se mide sobre la lista ya dibujada, y
     // esta pantalla repinta varias cosas que le cambian el alto.
     if (vista.fondo) vista.fondo.alPintar();
+}
+
+/**
+ * Relee la lista del CD guardada para la carpeta elegida.
+ *
+ * **Es lo que el panel de cobertura muestra cuando no hay sesión**, que es como
+ * se entra a la toma de notas: la lista se pega antes de "Iniciar grabación" —es
+ * cuando el editor la tiene en la mano— y vive en la carpeta, porque la carpeta
+ * es el curso y el CD entrega una lista por curso (`engine/temario-sesion.js`).
+ *
+ * Se relee al entrar al paso, al entrar a la toma de notas y al terminar una
+ * clase, que son los tres momentos en que puede haber cambiado la carpeta o
+ * haberse soltado la sesión que la tapaba.
+ */
+async function releerElTemario() {
+    const dir = grabadas.carpeta();
+    vista.temario = { dir, temario: dir ? await window.cc.grabarTemarioCarpeta(dir) : null };
 }
 
 /**
@@ -752,6 +773,10 @@ async function iniciar() {
 async function comenzar() {
     pantallas.mostrar(pantallas.TOMA);
     proponerClase();
+    // La lista del CD de esta carpeta, antes del primer repintado: el bloque de
+    // cobertura es lo primero que se mira acá y aparecer vacío sobre una lista ya
+    // guardada se lee como haberla perdido.
+    await releerElTemario();
     pintar();
     anotar('grabar.comienza', { carpeta: grabadas.carpeta() });
     if (!oido.escuchando()) await cargarEntradas();
@@ -805,6 +830,9 @@ async function terminar() {
     // incluye la que se acaba de escribir.
     await grabadas.cargar();
     proponerClase();
+    // Y la lista vuelve a salir de la carpeta: la sesión que la tenía ya no está,
+    // y sin esto el bloque quedaría sin lista sobre una carpeta que sí la tiene.
+    await releerElTemario();
     pintar();
     if (final && final.archivos) {
         // Y se dice que ya se puede volver, porque es el momento en que el botón de
@@ -1033,6 +1061,7 @@ export async function abrirGrabar() {
     const enCurso = await window.cc.grabarEstado();
     if (enCurso) vista.estado = enCurso;
     await releerLaLista();
+    await releerElTemario();
 
     if (vista.estado && vista.estado.grabando) {
         pantallas.mostrar(pantallas.TOMA);

@@ -535,15 +535,39 @@ function apagar() {
  * El paso se anota acá y no adentro de `temarioSesion.poner` porque el rótulo y
  * la forma del paso son de `cambios-toma.js`, y este archivo es el único que
  * puede llamar a los dos sin que se requieran en círculo.
+ *
+ * **Sin sesión también se pega**, y ese es el camino normal y no el raro: la
+ * lista del CD llega antes de grabar, y el panel la ofrece desde que se entra a
+ * la toma de notas. Queda guardada para la carpeta y la sesión que arranque
+ * después nace con ella (`temarioSesion.heredar`). Vuelve con la forma mínima
+ * que el panel necesita —la lista y nada más— porque no hay sesión de la que
+ * hacer un resumen, y no hay historial: deshacer es de una clase.
+ *
+ * @param {string} texto lo pegado, crudo
+ * @param {string} [dir] la carpeta del curso, para cuando no hay sesión
  */
-function ponerTemario(texto) {
-    if (!sesion) return temarioSesion.poner(sesion, texto);
+function ponerTemario(texto, dir) {
+    if (!sesion) return { temario: temarioSesion.ponerEnElCurso(dir, texto) };
     const antes = historial.fotoDeCampo(sesion.estado.temario);
     temarioSesion.poner(sesion, texto);
     cambiosToma.anotarDeLaSesion(sesion, 'temario', antes, { tipo: 'temario', texto });
     // El resumen se rehace después de anotar: el que devuelve `poner` se armó
     // antes, así que diría que hay un paso menos para deshacer del que hay.
     return espejo.resumen(sesion);
+}
+
+/**
+ * La lista guardada para una carpeta, con la de la sesión ganando si hay una.
+ *
+ * La sesión gana porque es la que se está midiendo: pegar una lista con la clase
+ * empezada guarda las dos, pero deshacer ese pegado devuelve la de la sesión y no
+ * la del archivo, y el panel tiene que mostrar contra qué se mide de verdad.
+ *
+ * @param {string} dir la carpeta del curso
+ */
+function temarioDeCarpeta(dir) {
+    if (sesion && sesion.dir === dir) return sesion.estado.temario || null;
+    return temarioSesion.leerDelCurso(dir);
 }
 
 function editar(cambio) {
@@ -595,6 +619,7 @@ module.exports = {
     pcm,
     claqueta,
     ponerTemario,
+    temarioDeCarpeta,
     editar,
     editarGrabada: clasesGrabadas.editarGrabada,
     deshacer,

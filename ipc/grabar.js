@@ -65,14 +65,29 @@ function registrar({ ipcMain, app, send, anotar }) {
      *
      * Devuelve el estado entero, como todo lo demás de este puente: la medición
      * tarda unos segundos y llega después, por `grabar-aviso`.
+     *
+     * La carpeta viaja al lado del texto porque el momento de pegar la lista es
+     * ANTES de "Iniciar grabación" —es cuando el editor la tiene en la mano— y
+     * ahí no hay sesión de la que sacarla. Con sesión no se mira: la sesión ya
+     * sabe en qué carpeta está, y creerle a la ventana cuál es sería dejar que
+     * un pegado escriba en una carpeta que no es la que se está grabando.
      */
-    ipcMain.handle('grabar-temario', (event, texto) => {
-        const estado = grabacion.ponerTemario(texto);
+    ipcMain.handle('grabar-temario', (event, texto, dir) => {
+        const estado = grabacion.ponerTemario(texto, dir);
         anotar('grabar.temario', {
             objetivos: estado && estado.temario ? estado.temario.objetivos.length : 0
         });
         return estado;
     });
+
+    /**
+     * La lista guardada para una carpeta, para dibujarla sin sesión.
+     *
+     * Sin esto el panel no puede mostrar antes de grabar lo que ya está pegado, y
+     * un desplegable que aparece vacío sobre una lista guardada se lee como que la
+     * lista se perdió.
+     */
+    ipcMain.handle('grabar-temario-carpeta', (event, dir) => grabacion.temarioDeCarpeta(dir));
 
     ipcMain.handle('grabar-editar', (event, cambio) => {
         anotar('grabar.editar', { toma: cambio && cambio.toma, tipo: cambio && cambio.tipo });

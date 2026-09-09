@@ -439,4 +439,128 @@ module.exports = t => {
         t.eq(temarioAlEmpezar([['01_c_2026-09-08_13-00-00', 1, BASE, null]]), null);
         t.eq(temarioAlEmpezar([]), null, 'y en una carpeta vacía tampoco se inventa nada');
     });
+
+    t.group('temario · la lista pegada antes de grabar');
+
+    /**
+     * El caso por el que existe este grupo: **la lista del CD llega ANTES de que
+     * exista la clase**, y el panel la ofrece desde que se entra a la toma de
+     * notas. Hasta acá lo pegado sin sesión se tiraba —`ponerTemario` contestaba
+     * null y no escribía nada—, así que el único renglón del panel que le pide
+     * algo a quien mira apuntaba a un control que solo se dibujaba después de
+     * apretar "Iniciar grabación".
+     *
+     * Todo lo de acá mira EL ARCHIVO y no lo que devuelve la función: guardar es
+     * justamente lo que la pantalla no puede comprobar sola, y una prueba que se
+     * conforme con el valor de vuelta pasa en verde con el disco intacto.
+     */
+    const archivoDelCurso = dir => path.join(workspace.notasDatosDir(dir), 'temario.json');
+
+    /** Una carpeta de curso vacía, y lo que se le haga adentro. */
+    function enUnaCarpeta(hacer) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-temario-'));
+        try {
+            return hacer(dir);
+        } finally {
+            grabacion.apagar();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    const LISTA = '- Contexto acotado\n- El archivo de reglas';
+
+    t.test('sin sesión, lo pegado queda escrito en la carpeta', () => {
+        enUnaCarpeta(dir => {
+            const r = grabacion.ponerTemario(LISTA, dir);
+            t.deep(r.temario.objetivos.map(o => o.texto), ['Contexto acotado', 'El archivo de reglas']);
+            const enDisco = workspace.readJson(archivoDelCurso(dir));
+            t.eq(enDisco.texto, LISTA, 'y el archivo tiene el texto crudo, no la lista partida');
+        });
+    });
+
+    t.test('y de ahí la lee la pantalla, sin ninguna clase de por medio', () => {
+        enUnaCarpeta(dir => {
+            grabacion.ponerTemario(LISTA, dir);
+            const leido = grabacion.temarioDeCarpeta(dir);
+            t.deep(leido.objetivos.map(o => o.texto), ['Contexto acotado', 'El archivo de reglas']);
+            t.eq(leido.origen, 'guardado', 'y dice que no la pegó nadie en ninguna clase');
+            t.eq(leido.cobertura, null, 'sin clase no hay nada medido');
+        });
+    });
+
+    t.test('lo que vuelve de pegarla dice «pegado», aunque en la carpeta quede «guardado»', () => {
+        // El rótulo del panel existe para avisar que una lista apareció sola —"de
+        // la clase anterior", "guardada para esta carpeta"— y la que se acaba de
+        // pegar no apareció sola. Sin esta diferencia, pegar la lista se
+        // contestaba a sí misma que había llegado de otro lado, y el desplegable
+        // lo decía en el mismo gesto en que alguien terminaba de pegarla.
+        enUnaCarpeta(dir => {
+            t.eq(grabacion.ponerTemario(LISTA, dir).temario.origen, 'pegado');
+            t.eq(grabacion.temarioDeCarpeta(dir).origen, 'guardado', 'y mañana ya llegó sola');
+        });
+    });
+
+    t.test('pegar una lista vacía saca el archivo, no lo deja vacío', () => {
+        enUnaCarpeta(dir => {
+            grabacion.ponerTemario(LISTA, dir);
+            grabacion.ponerTemario('   \n  ', dir);
+            t.eq(fs.existsSync(archivoDelCurso(dir)), false);
+            t.eq(grabacion.temarioDeCarpeta(dir), null);
+        });
+    });
+
+    t.test('la clase que arranca después nace con esa lista', () => {
+        enUnaCarpeta(dir => {
+            grabacion.ponerTemario(LISTA, dir);
+            const estado = grabacion.iniciar({ dir, clase: 1, curso: 'curso', sinReloj: true });
+            t.deep(estado.temario.objetivos.map(o => o.texto), ['Contexto acotado', 'El archivo de reglas']);
+            t.eq(estado.temario.origen, 'guardado');
+        });
+    });
+
+    t.test('y le gana a la de la clase anterior, que es la que puede estar vieja', () => {
+        enUnaCarpeta(dir => {
+            claseEnDisco(dir, '01_c_2026-09-08_13-00-00', 1, BASE, '- la de ayer');
+            grabacion.ponerTemario('- la que pegó el CD hoy', dir);
+            const estado = grabacion.iniciar({ dir, clase: 9, curso: 'curso', sinReloj: true });
+            t.deep(estado.temario.objetivos.map(o => o.texto), ['la que pegó el CD hoy']);
+        });
+    });
+
+    t.test('lo pegado con la clase ya empezada también queda para el curso', () => {
+        // La lista es del curso y no de esta clase: en un día de rodaje se graban
+        // cuatro seguidas, y sin esto la segunda tendría que esperar a que la
+        // primera termine para heredarla de su sidecar.
+        enUnaCarpeta(dir => {
+            grabacion.iniciar({ dir, clase: 1, curso: 'curso', sinReloj: true });
+            grabacion.ponerTemario(LISTA);
+            t.eq(workspace.readJson(archivoDelCurso(dir)).texto, LISTA);
+        });
+    });
+
+    t.test('con la clase grabando, lo que se lee es lo de la sesión', () => {
+        enUnaCarpeta(dir => {
+            grabacion.ponerTemario('- la guardada', dir);
+            grabacion.iniciar({ dir, clase: 1, curso: 'curso', sinReloj: true });
+            grabacion.ponerTemario('- la de esta clase');
+            const leido = grabacion.temarioDeCarpeta(dir);
+            t.deep(leido.objetivos.map(o => o.texto), ['la de esta clase']);
+            t.eq(leido.origen, 'pegado', 'y esta sí la pegó alguien acá');
+        });
+    });
+
+    t.test('pegar a mano la lista que llegó sola no tira la cobertura ya medida', () => {
+        // Confirmar que la lista heredada es la de esta clase es un gesto que vale
+        // la pena poder hacer, y no puede costar una consulta al modelo ni dejar
+        // el panel unos segundos sin resultado.
+        enUnaCarpeta(dir => {
+            grabacion.ponerTemario(LISTA, dir);
+            grabacion.iniciar({ dir, clase: 1, curso: 'curso', sinReloj: true });
+            const medida = { como: 'ia', cubiertos: 2, faltan: 0, objetivos: [], huella: 'la de antes' };
+            grabacion.resumen().temario.cobertura = medida;
+            const despues = grabacion.ponerTemario(LISTA);
+            t.eq(despues.temario.cobertura, medida, 'la medición se queda');
+            t.eq(despues.temario.origen, 'pegado', 'y el origen pasa a decir que la pegaron acá');
+        });
+    });
 };

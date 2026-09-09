@@ -871,7 +871,10 @@ function ponerAGrabar(cero, conReparto) {
 /** Suelta la sesión, como `soltar()` allá: de acá en más no hay ninguna. */
 function soltarLaSesion() {
     enMemoria.sesion = null;
+    // La lista de la SESIÓN se va con ella; la de la carpeta se queda, que es lo
+    // que hace que la clase siguiente del mismo curso la encuentre puesta.
     enMemoria.temario = null;
+    enMemoria.carpeta = null;
     enMemoria.midiendoTemario = false;
     enMemoria.historia = { atras: [], adelante: [] };
     pararElEmpujon();
@@ -1467,6 +1470,14 @@ function muestrarioDeVistas(hecha) {
 
 const enMemoria = {
     notas: {}, planes: {}, temario: null,
+    // La lista del CD de cada carpeta, que es donde vive antes de que haya
+    // ninguna clase. Allá es un archivo adentro de la carpeta de notas y acá un
+    // objeto: la carpeta es el curso, y el CD entrega una lista por curso
+    // (`engine/temario-sesion.js`).
+    temarioPorCarpeta: {},
+    // En qué carpeta está grabando la sesión, para saber a cuál escribirle la
+    // lista que se pega con la clase ya empezada.
+    carpeta: null,
     // Si hay una medición de cobertura en vuelo, como `sesion.midiendoTemario`.
     midiendoTemario: false,
     // La sesión que se está grabando, para que lo que se le hace quede hecho, y
@@ -1488,6 +1499,22 @@ const enMemoria = {
  * muestra mientras se mide —el único que explica por qué la lista está unos
  * segundos sin resultado— no existía en la maqueta y no se podía aprobar.
  */
+/**
+ * La lista guardada para una carpeta, sin cobertura y sin clase.
+ *
+ * `origen: 'guardado'` es lo que hace que la sesión que la herede diga en el
+ * desplegable que no la pegó nadie ahí: puede ser la de la clase de ayer.
+ */
+function temarioGuardado(texto) {
+    const puesto = temarioPegado(texto);
+    return puesto.objetivos.length ? { ...puesto, origen: 'guardado' } : null;
+}
+
+/** En qué carpeta graba la sesión, que es a la que le queda la lista pegada. */
+function carpetaEnVivo() {
+    return enMemoria.carpeta;
+}
+
 function temarioPegado(texto) {
     const objetivos = String(texto || '')
         .split(/\r?\n/)
@@ -1523,8 +1550,10 @@ function temarioPegado(texto) {
 function coberturaDe(objetivos) {
     // Las tomas cerradas de la sesión: es de donde tiene que salir el número que
     // se muestra al lado de un objetivo cubierto, porque es el que se puede ir a
-    // mirar. Inventarlo dejaría el panel señalando tomas que no están.
-    const cerradas = [1, 2];
+    // mirar. Inventarlo dejaría el panel señalando tomas que no están, que es
+    // justo lo que pasaba con una sesión recién arrancada: la lista se puede
+    // pegar antes de "Iniciar", y ahí no hay ninguna toma todavía.
+    const cerradas = tomasCerradas();
     const medidos = objetivos.map((o, i) => ({
         ...o,
         cubierto: i % 3 !== 1,
@@ -1546,15 +1575,27 @@ function coberturaDe(objetivos) {
     };
 }
 
+/** Las tomas que cuentan para la cobertura: las que quedan y ya cerraron. */
+function tomasCerradas() {
+    const s = sesionEnVivo();
+    return ((s && s.tomas) || [])
+        .filter(t => !t.descartada && t.outMs != null)
+        .map(t => t.id);
+}
+
 /**
  * Larga la medición de la cobertura, y una sola a la vez (`temarioSesion.pedir`).
  *
  * Lo que llega después llega por el mismo camino que allá: `espejo.fijar`, o sea
  * un aviso con el estado entero. Sin pantalla que lo pida y sin que nadie toque
  * nada, que es lo que no se podía verificar hasta que la maqueta empujó.
+ *
+ * Sin ninguna toma cerrada no se mide y no es un caso raro: es como arranca toda
+ * clase, y allá `hayQueMedir` contesta lo mismo —no hay texto contra el que
+ * comparar—. El panel lo dice con su propio renglón, que sin esto no aparecía.
  */
 function pedirLaCobertura() {
-    if (enMemoria.midiendoTemario || !enMemoria.temario) return;
+    if (enMemoria.midiendoTemario || !enMemoria.temario || !tomasCerradas().length) return;
     enMemoria.midiendoTemario = true;
     setTimeout(() => {
         enMemoria.midiendoTemario = false;
@@ -2136,6 +2177,12 @@ window.cc = {
         if (!p.dir) return { ok: false, error: 'Falta la carpeta donde guardar las notas.' };
         if (sesionEnVivo()) return { ok: false, error: 'Ya hay una grabación en curso.' };
         ponerAGrabar(Date.now(), false);
+        enMemoria.carpeta = p.dir;
+        // La sesión nace con la lista que la carpeta ya tenía, como allá
+        // (`temarioSesion.heredar`): sin esto, apretar "Iniciar" perdería de vista
+        // la lista que se acababa de pegar y la maqueta enseñaría eso.
+        enMemoria.temario = enMemoria.temarioPorCarpeta[p.dir] || null;
+        pedirLaCobertura();
         return { ok: true, estado: porElPuente(resumenEnVivo()) };
     },
     grabarPcm: () => {},
@@ -2172,18 +2219,39 @@ window.cc = {
      * Pegar la MISMA lista otra vez se planta antes de tocar nada, como allá: sin
      * eso el gesto tira la cobertura ya medida para volver a medir lo mismo, y
      * deja un paso en el historial que al deshacerse no se ve.
+     *
+     * **Sin sesión también se pega, y es el camino normal**: la lista del CD llega
+     * antes de grabar y el panel la ofrece desde que se entra a la toma de notas.
+     * Allá queda en un archivo de la carpeta y acá en memoria, indexada por
+     * carpeta, que es lo mismo salvo por lo único que la maqueta no puede mostrar
+     * —que sobreviva a cerrar la app—. Vuelve con la forma mínima, la lista y nada
+     * más, porque no hay sesión de la que hacer un resumen.
      */
-    grabarTemario: async texto => {
-        if (!sesionEnVivo()) return null;
+    grabarTemario: async (texto, dir) => {
+        if (!sesionEnVivo()) {
+            const puesta = temarioGuardado(texto);
+            enMemoria.temarioPorCarpeta[dir] = puesta;
+            // Y vuelve como 'pegado' aunque quede guardada como 'guardado', igual
+            // que allá (`ponerEnElCurso`): el rótulo del panel avisa que una lista
+            // apareció sola, y la que se acaba de pegar la pegó quien mira.
+            return porElPuente({ temario: puesta && { ...puesta, origen: 'pegado' } });
+        }
         const antes = fotoDeCampo(enMemoria.temario);
         const nuevo = temarioPegado(texto);
         if (antes && nuevo && antes.texto === nuevo.texto) return porElPuente(resumenEnVivo());
 
         enMemoria.temario = nuevo;
+        // Lo pegado con la clase empezada también queda para la carpeta: la lista
+        // es del curso y no de esta clase (ver `poner` en `temario-sesion.js`).
+        enMemoria.temarioPorCarpeta[carpetaEnVivo()] = temarioGuardado(texto);
         anotarDeLaSesionEnMemoria('temario', antes, { tipo: 'temario', texto });
         pedirLaCobertura();
         return porElPuente(resumenEnVivo());
     },
+    /** La lista guardada para una carpeta, con la de la sesión ganando si hay una. */
+    grabarTemarioCarpeta: async dir => porElPuente(
+        sesionEnVivo() ? enMemoria.temario : (enMemoria.temarioPorCarpeta[dir] || null)
+    ),
     // Sin demora, y es a propósito: allá esto es memoria y dos escrituras en
     // disco, o sea que vuelve en el mismo suspiro. Y esa velocidad es lo que hace
     // dura la prueba — la respuesta cae en un microtask, o sea ENTRE el mousedown
@@ -2399,6 +2467,9 @@ function arrancarGrabando() {
     // "La sesión" cuentan contra el cero, así que con la fija dirían que se lleva
     // grabando desde septiembre.
     ponerAGrabar(Date.now() - CORRIDOS * 1000, true);
+    // En qué carpeta graba, que es a la que le va a quedar la lista si alguien
+    // pega otra desde el desplegable.
+    enMemoria.carpeta = CURSO;
     // Ya medido, y por eso puesto a mano en vez de pedido: una clase a medio
     // grabar ya tuvo tiempo de que le contestaran, y lo que hay para mirar es la
     // lista con unos temas dichos y otros no. El camino lento —pegar y esperar—

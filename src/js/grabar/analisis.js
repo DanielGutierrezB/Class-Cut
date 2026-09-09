@@ -28,6 +28,7 @@
  */
 
 import { fmtDur, plural } from '../formato.js';
+import * as pulso from './pulso.js';
 
 const BLOQUES = [
     {
@@ -49,7 +50,7 @@ const BLOQUES = [
  * cada tres segundos para ver la lista cargada, y pegar algo y que no pase nada
  * durante tres segundos se lee como que no se pegó.
  */
-const ultimo = { donde: null, estado: null, rehacerTemario: false };
+const ultimo = { donde: null, estado: null, carpeta: null, rehacerTemario: false };
 
 /**
  * Los números de la sesión, contra un instante.
@@ -214,10 +215,30 @@ function pendiente(texto, clase) {
 /* ─── La cobertura del temario ───────────────────────────────────────────── */
 
 const SIN_LISTA = 'Falta la lista de objetivos de la clase para medir contra ella. ' +
-    'Pegala acá y se mide sola cada vez que se cierra una toma.';
+    'Pegala en la caja de acá arriba y se mide sola cada vez que se cierra una toma.';
+
+/**
+ * Lo mismo, antes de "Iniciar grabación", que es cuando la lista está en la mano.
+ *
+ * **La diferencia no es de tono: es que todavía no hay nada que medir.** Con la
+ * frase de arriba, el panel prometía una medición "cada vez que se cierra una
+ * toma" en una pantalla donde no hay ninguna toma ni la va a haber hasta que
+ * alguien apriete un botón que no se nombra. Acá se dice dónde se guarda lo
+ * pegado y cuándo empieza a medirse, que son las dos preguntas que quedaban sin
+ * contestar.
+ */
+const ANTES_DE_GRABAR = 'Falta la lista de objetivos de la clase para medir contra ella. ' +
+    'Pegala en la caja de acá arriba: queda guardada para esta carpeta y se empieza a ' +
+    'medir sola en cuanto la grabación cierre su primera toma.';
 
 const PEGAR_ACA = 'Pegá acá los temas que pidió el director de contenido, uno por ' +
     'renglón o con viñetas. También sirve pegar el párrafo tal como llegó.';
+
+/** De dónde salió una lista que nadie pegó en esta clase, dicho en la pantalla. */
+const DE_DONDE = {
+    heredado: 'de la clase anterior',
+    guardado: 'guardada para esta carpeta'
+};
 
 /**
  * Cuánto tiempo de clase lleva cada objetivo cubierto.
@@ -262,12 +283,12 @@ function desplegable(temario, abierto) {
         : 'Pegar la lista de temas del CD';
 
     // De dónde salió la lista, plegado y todo: una lista que apareció sola —la
-    // de la clase anterior del mismo curso— tiene que decir que no la pegó nadie
-    // acá, porque puede no ser la de esta clase.
-    if (temario && temario.origen === 'heredado' && objetivos.length) {
+    // guardada para la carpeta, la de la clase anterior del mismo curso— tiene
+    // que decir que no la pegó nadie acá, porque puede no ser la de esta clase.
+    if (temario && DE_DONDE[temario.origen] && objetivos.length) {
         const de = document.createElement('span');
         de.className = 'temario-origen';
-        de.textContent = 'de la clase anterior';
+        de.textContent = DE_DONDE[temario.origen];
         cabeza.append(de);
     }
 
@@ -310,18 +331,27 @@ function desplegable(temario, abierto) {
 /**
  * Manda la lista al motor y dibuja lo que conteste.
  *
- * El motor la parte, la guarda en el sidecar de la clase y arranca la medición;
- * la cobertura llega unos segundos después, por el aviso de siempre. Acá solo se
- * refresca lo que ya se sabe: que la lista quedó cargada y con cuántos temas.
+ * El motor la parte, la guarda en el sidecar de la clase y en la carpeta del
+ * curso, y arranca la medición; la cobertura llega unos segundos después, por el
+ * aviso de siempre. Acá solo se refresca lo que ya se sabe: que la lista quedó
+ * cargada y con cuántos temas.
+ *
+ * Sin sesión pasa por el mismo camino y con la carpeta al lado: lo que vuelve es
+ * la lista guardada y nada más, porque no hay ninguna clase de la que hacer un
+ * resumen (ver `ponerTemario` en `engine/grabacion.js`).
  */
 async function aplicar(texto) {
-    const estado = await window.cc.grabarTemario(texto);
+    const estado = await window.cc.grabarTemario(texto, ultimo.carpeta ? ultimo.carpeta.dir : null);
     if (!estado || !ultimo.donde) return;
     // El estado que tiene la pantalla es el mismo objeto que dibuja todo lo demás
     // (`vista.estado` en `index.js`), así que se le copia el temario nuevo en vez
     // de guardarse una copia acá: el motor sigue siendo el único dueño, y el
     // repintado que venga —el del aviso, tres segundos después— trae lo mismo.
+    // Sin sesión el dueño es el otro objeto que manda la ventana, y por lo mismo:
+    // ahí no hay avisos que lleguen solos, así que el repintado siguiente dibuja
+    // lo que quede acá.
     if (ultimo.estado) ultimo.estado.temario = estado.temario;
+    else if (ultimo.carpeta) ultimo.carpeta.temario = estado.temario;
     // Y este repintado sí rehace el bloque, aunque el foco siga adentro.
     //
     // Hace falta decirlo porque el foco SIGUE adentro: apretar el botón lo deja
@@ -333,7 +363,7 @@ async function aplicar(texto) {
     // —el estado del motor, cada tres segundos—, no contra el que pide el propio
     // gesto de guardar.
     ultimo.rehacerTemario = true;
-    pintar(ultimo.donde, ultimo.estado || estado);
+    pintar(ultimo.donde, ultimo.estado, ultimo.carpeta);
 }
 
 /**
@@ -390,9 +420,14 @@ function listaDeObjetivos(cobertura) {
  * Pierde `es-pendiente` cuando hay lista y hay medición: la clase apagada dice
  * "esto no mide nada todavía", y dejarla puesta sobre una cobertura de verdad
  * sería enseñarle a quien mira a no creerle al único bloque que sí mide.
+ *
+ * @param {object|null} estado el resumen del motor, o null si no se está grabando
+ * @param {object|null} carpeta `{dir, temario}`: la lista guardada para el curso
  */
-function bloqueDeTemario(estado) {
-    const t = estado ? estado.temario : null;
+function bloqueDeTemario(estado, carpeta) {
+    // Sin sesión manda la lista guardada para la carpeta. Es la misma lista: el
+    // CD entrega una por curso, y lo que la sesión le agrega es la cobertura.
+    const t = estado ? estado.temario : (carpeta ? carpeta.temario : null);
     const cobertura = t ? t.cobertura : null;
     const objetivos = t ? t.objetivos : [];
 
@@ -405,14 +440,25 @@ function bloqueDeTemario(estado) {
         ['Tiempo por objetivo', tiempoPorObjetivo(estado, cobertura)]
     ]));
 
-    // Sin sesión no hay dónde pegar nada: la lista es de una clase, y la clase
-    // empieza con "Iniciar grabación".
+    // **El desplegable va siempre, y esto es lo que estaba roto.** Antes salía
+    // solo con la sesión abierta, o sea con "Iniciar grabación" ya apretado, y en
+    // la pantalla en la que se entra a tomar notas el bloque decía "pegala acá"
+    // sin tener dónde: el único renglón del panel que le pide algo a quien mira
+    // señalaba un control que no estaba dibujado. Y era justo al revés de lo que
+    // hace falta — la lista del CD llega antes de grabar, y el momento de pegarla
+    // es este.
+    caja.append(desplegable(t, abiertoDe(caja.dataset.bloque)));
+
+    // Antes de empezar no hay tomas que medir, y el renglón lo dice: prometer la
+    // medición "cada vez que se cierra una toma" sobre una clase que todavía no
+    // arrancó es la otra mitad del mismo desconcierto.
     if (!estado) {
-        caja.append(pendiente(SIN_LISTA));
+        caja.append(pendiente(objetivos.length
+            ? `${plural(objetivos.length, 'tema guardado', 'temas guardados')} para esta ` +
+              'carpeta. La medición arranca con la grabación, cada vez que se cierra una toma.'
+            : ANTES_DE_GRABAR));
         return caja;
     }
-
-    caja.append(desplegable(t, abiertoDe(caja.dataset.bloque)));
 
     // Sin lista no hay nada más que decir: el desplegable ya está para pegarla.
     if (!objetivos.length) {
@@ -709,11 +755,28 @@ function acomodar(donde, nuevas) {
     }
 }
 
-export function pintar(donde, estado) {
+/**
+ * @param {Element} donde la columna del panel
+ * @param {object|null} estado el resumen del motor
+ * @param {object|null} [carpeta] `{dir, temario}` de la carpeta elegida, que es
+ *   lo único que el bloque del temario tiene para mostrar sin sesión
+ */
+export function pintar(donde, estado, carpeta) {
     // Antes de armar nada: `abiertoDe` y `ocupado` leen lo que hay dibujado, y lo
     // que hay dibujado se sabe por acá.
     ultimo.donde = donde;
     ultimo.estado = estado;
+    ultimo.carpeta = carpeta || null;
+
+    // Nada se rehace debajo del puntero, igual que en la lista de tomas y por lo
+    // mismo (`pulso.js`). Acá el gesto que lo pedía es el de la caja del temario:
+    // "Medir contra esta lista" también la pliega, y el `change` del campo sale
+    // del propio `mousedown`, así que el repintado que ese `change` dispara caía
+    // entre el `mousedown` y el `mouseup` y se comía el clic. La lista quedaba
+    // guardada —el `change` ya la había mandado— y la caja abierta, o sea que lo
+    // único que se perdía era la mitad del gesto que se había pedido.
+    pulso.vigilar(donde);
+    if (pulso.apretando()) return;
 
     const ahora = bloque('La sesión', 'sesion');
     const filas = tabla(cuentas(estado, Date.now()));
@@ -726,7 +789,7 @@ export function pintar(donde, estado) {
     const previo = donde.querySelector('[data-bloque="temario"]');
     const rehacer = ultimo.rehacerTemario;
     ultimo.rehacerTemario = false;
-    const temario = !rehacer && ocupado(previo) ? previo : bloqueDeTemario(estado);
+    const temario = !rehacer && ocupado(previo) ? previo : bloqueDeTemario(estado, ultimo.carpeta);
 
     const restantes = BLOQUES.map(b => {
         const caja = bloque(b.titulo, b.titulo);

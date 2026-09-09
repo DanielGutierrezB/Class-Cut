@@ -14,41 +14,124 @@
  * relecturas, que son los que lo llaman.
  */
 
+const fs = require('fs');
+const path = require('path');
+
 const espejo = require('./espejo');
 const clasesGrabadas = require('./clases-grabadas');
 const temario = require('./temario');
 const medirToma = require('./medir-toma');
 const gpu = require('./gpu');
+const workspace = require('./workspace');
 const ia = require('./ia');
 
 /**
- * La lista de la clase anterior del mismo curso.
+ * Una lista recién partida, sin nada medido. Los cuatro campos van siempre: el
+ * panel los lee sin preguntar si existen, y `undefined` ahí se dibuja igual que
+ * un fallo que nadie tuvo.
+ */
+function sinMedir(texto, objetivos, origen) {
+    return { texto: String(texto == null ? '' : texto), objetivos, origen, cobertura: null, fallo: null, abstenido: null };
+}
+
+/* ─── La lista del curso, en la carpeta ──────────────────────────────────── */
+
+/**
+ * Dónde queda la lista del CD: en la carpeta de notas, con lo demás que la app
+ * se guarda para sí misma (`Datos/`, ver `workspace.js`).
+ *
+ * **Vive en la carpeta y no en los ajustes**, y eso es lo mismo que decidió
+ * `heredar` antes que esto: la carpeta ES el curso, así que la lista del curso no
+ * puede quedar en una preferencia global que otro curso se lleve puesta. Y no
+ * vive en la sesión porque el momento de pegarla es ANTES de grabar —la lista
+ * llega por mail el día anterior— y ahí no hay ninguna sesión que la aguante.
+ *
+ * Se guarda el texto crudo y nada más. Los objetivos se vuelven a partir en cada
+ * lectura para que una app más nueva parta mejor lo mismo que ya estaba guardado,
+ * y para que no haya dos versiones de la misma lista en el mismo archivo.
+ */
+function archivoDelCurso(dir) {
+    return path.join(workspace.notasDatosDir(dir), 'temario.json');
+}
+
+/**
+ * La lista guardada para esa carpeta, o null.
+ *
+ * @param {string} dir la carpeta de notas del curso
+ */
+function leerDelCurso(dir) {
+    if (!dir) return null;
+    const guardado = workspace.readJson(archivoDelCurso(dir));
+    if (!guardado) return null;
+    const objetivos = temario.partir(guardado.texto);
+    return objetivos.length ? sinMedir(guardado.texto, objetivos, 'guardado') : null;
+}
+
+/**
+ * Guarda la lista del curso, o la saca si lo pegado quedó vacío.
+ *
+ * Borrar el archivo y no dejarlo con la lista vacía: lo que se lee después es
+ * "no hay lista para este curso", y esas dos formas de decirlo se contestan
+ * distinto en cuanto alguien se olvide de mirar una de las dos.
+ *
+ * @returns {object|null} la lista tal como queda guardada
+ */
+function guardarEnElCurso(dir, texto) {
+    if (!dir) return null;
+    const objetivos = temario.partir(texto);
+    const archivo = archivoDelCurso(dir);
+    if (!objetivos.length) {
+        try { fs.unlinkSync(archivo); } catch (e) { /* si no estaba, ya está sacada */ }
+        return null;
+    }
+    workspace.writeJson(archivo, { texto: String(texto), guardadoMs: Date.now() });
+    return sinMedir(texto, objetivos, 'guardado');
+}
+
+/**
+ * La lista que se pega con la clase todavía sin empezar.
+ *
+ * Es el camino que el panel usa antes de "Iniciar grabación", que es cuando el
+ * editor tiene la lista del CD en la mano y todavía no comprometió ningún
+ * archivo. No mide nada —no hay ni una toma contra la que medir— y no falta: la
+ * sesión que arranque después se la encuentra puesta por `heredar`.
+ */
+function ponerEnElCurso(dir, texto) {
+    const puesta = guardarEnElCurso(dir, texto);
+    // Y vuelve como 'pegado', que es lo único que la distingue de la misma lista
+    // leída mañana: el rótulo del panel existe para avisar que una lista apareció
+    // sola —"guardada para esta carpeta"— y la que se acaba de pegar no apareció
+    // sola, la pegó quien está mirando. Al reabrir la app sí llegó sola, y ahí
+    // `leerDelCurso` la marca 'guardado'.
+    return puesta && { ...puesta, origen: 'pegado' };
+}
+
+/**
+ * Con qué temario nace una sesión.
  *
  * El CD entrega UNA lista para el día o para el curso, no una por clase, y en un
  * día de rodaje se graban cuatro o cinco seguidas. Obligar a pegarla de nuevo en
  * cada una es garantizar que a la tercera nadie la pegue y la validación quede
  * apagada justo cuando ya se confiaba en ella.
  *
- * Se hereda de la carpeta y no de una preferencia global porque la carpeta ES el
- * curso (una carpeta de notas por curso): empezar a grabar otro curso es elegir
- * otra carpeta, y ahí no se hereda nada, que es lo correcto. Y sale del sidecar
- * de la clase anterior, que ya está en el disco, así que no hay un segundo sitio
- * donde la lista pueda quedar desactualizada.
+ * Primero la guardada en la carpeta, que es la que alguien pegó a propósito para
+ * este curso; detrás, la de la clase anterior leída de su sidecar, que es de
+ * dónde salía esto antes de que la lista tuviera archivo propio y sigue siendo la
+ * única que tienen las carpetas grabadas hasta ayer.
  *
- * Se hereda la lista, NO la cobertura: lo medido es de la clase que se midió.
+ * Se hereda la lista, NO la cobertura: lo medido es de la clase que se midió. Y
+ * el origen viaja con ella porque la pantalla lo dice: una lista que apareció
+ * sola no la pegó nadie en ESTA clase, y puede no ser la de esta clase.
  */
 function heredar(dir) {
+    return leerDelCurso(dir) || deLaClaseAnterior(dir);
+}
+
+function deLaClaseAnterior(dir) {
     const previa = clasesGrabadas.listar([dir])
         .find(c => c.temario && (c.temario.objetivos || []).length);
     if (!previa) return null;
-    return {
-        texto: previa.temario.texto || '',
-        objetivos: previa.temario.objetivos,
-        origen: 'heredado',
-        cobertura: null,
-        fallo: null,
-        abstenido: null
-    };
+    return sinMedir(previa.temario.texto || '', previa.temario.objetivos, 'heredado');
 }
 
 /**
@@ -62,24 +145,26 @@ function heredar(dir) {
  * consulta nueva para llegar al mismo resultado —lo mismo que le pasa a quien
  * pega dos veces por las dudas—, y de paso dejaba en el historial un paso que al
  * deshacerse no se ve, porque el objeto era nuevo aunque dijera lo mismo.
+ *
+ * La misma lista que llegó sola —la guardada del curso, la de la clase anterior—
+ * pegada a mano tampoco tira nada: se le cambia el origen y se queda con lo
+ * medido. Confirmar que la lista heredada es la de esta clase es un gesto que
+ * vale la pena poder hacer, y hacerlo no puede costar la cobertura ya medida.
+ *
+ * Y lo pegado queda además guardado para el curso: la lista es del curso y no de
+ * esta clase, así que la siguiente la encuentra puesta (ver `heredar`).
  */
 function poner(sesion, texto) {
     if (!sesion) return null;
     const objetivos = temario.partir(texto);
     const ya = sesion.estado.temario;
-    if (ya && ya.origen === 'pegado' && ya.texto === String(texto || '') && objetivos.length) {
-        return espejo.resumen(sesion);
-    }
-    sesion.estado.temario = objetivos.length
-        ? {
-            texto: String(texto || ''),
-            objetivos,
-            origen: 'pegado',
-            cobertura: null,
-            fallo: null,
-            abstenido: null
-        }
-        : null;
+    const mismo = Boolean(ya && ya.texto === String(texto || '') && objetivos.length);
+    if (mismo && ya.origen === 'pegado') return espejo.resumen(sesion);
+
+    sesion.estado.temario = !objetivos.length ? null
+        : mismo ? { ...ya, origen: 'pegado' }
+            : sinMedir(texto, objetivos, 'pegado');
+    guardarEnElCurso(sesion.dir, texto);
     espejo.escribir(sesion);
     // Contra lo que ya haya grabado, sin esperar la toma siguiente: la lista se
     // pega con la clase empezada y el panel tiene que decir algo en el acto.
@@ -199,4 +284,4 @@ async function alCerrar(sesion) {
     await medirToma.conTecho(sesion.midiendoTemario, medirToma.CIERRE_MS);
 }
 
-module.exports = { heredar, poner, pedir, alCerrar };
+module.exports = { heredar, leerDelCurso, ponerEnElCurso, poner, pedir, alCerrar };
