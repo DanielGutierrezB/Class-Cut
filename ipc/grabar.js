@@ -130,6 +130,41 @@ function registrar({ ipcMain, app, send, anotar }) {
         }
     });
 
+    /**
+     * Renombrar y borrar una clase de la lista.
+     *
+     * Contestan `{ok, error}` como `grabar-editar-grabada` y no el estado pelado:
+     * los dos se pueden negar por un motivo que solo el motor conoce —un número
+     * que chocaría con otra clase, una clase que se está grabando ahora mismo— y
+     * ese motivo hay que poder mostrarlo tal cual.
+     *
+     * La confirmación de borrar es de la pantalla y no de acá. Cuando el gesto
+     * llega a este renglón ya está decidido, y el motor borra.
+     */
+    ipcMain.handle('grabar-renombrar', (event, json, cambio) => {
+        anotar('grabar.renombrar', { json, clase: cambio && cambio.clase });
+        try {
+            const r = grabacion.renombrarGrabada(json, cambio);
+            anotar('grabar.renombrada', { json, secuencia: r.secuencia, audios: r.audios });
+            return { ok: true, ...r };
+        } catch (err) {
+            anotar('grabar.renombrar-falla', { json, error: err.message });
+            return { ok: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('grabar-borrar', (event, json) => {
+        anotar('grabar.borrar', { json });
+        try {
+            const r = grabacion.borrarGrabada(json);
+            anotar('grabar.borrada', { json, secuencia: r.secuencia, audios: r.audios });
+            return { ok: true, ...r };
+        } catch (err) {
+            anotar('grabar.borrar-falla', { json, error: err.message });
+            return { ok: false, error: err.message };
+        }
+    });
+
     ipcMain.handle('grabar-regenerar', async (event, json) => {
         anotar('grabar.regenerar', { json });
         try {

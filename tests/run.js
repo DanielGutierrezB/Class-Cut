@@ -57,6 +57,7 @@ const FILES = [
     'gpu.test.js',
     'sesion.test.js',
     'regenerar.test.js',
+    'gestionar-clases.test.js',
     'silencios.test.js',
     'retimeo.test.js',
     'reloj.test.js',

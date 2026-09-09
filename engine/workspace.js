@@ -299,6 +299,24 @@ function migrarNotas(base) {
 }
 
 
+/**
+ * Si una ruta cae de verdad adentro de una carpeta.
+ *
+ * `safeName` ya deja los nombres sin barras y sin puntos al principio, así que
+ * lo de acá no debería hacer falta nunca. Está igual, y se usa antes de cada
+ * escritura y de cada borrado de `clases-grabadas.js`, porque el nombre del
+ * curso lo tipea el editor y viaja por el puente: entre "no debería" y "no
+ * puede" hay un `path.resolve`, y del otro lado hay archivos que se borran.
+ *
+ * Se compara resuelto y con el separador pegado: sin él, `/tmp/notas-viejas`
+ * pasaría por estar adentro de `/tmp/notas`.
+ */
+function dentroDe(base, ruta) {
+    const raiz = path.resolve(base);
+    const donde = path.resolve(ruta);
+    return donde === raiz || donde.startsWith(raiz + path.sep);
+}
+
 /** El nombre de secuencia va a ser un nombre de archivo: se limpia lo que no puede. */
 function safeName(name) {
     return String(name == null ? '' : name)
@@ -389,6 +407,7 @@ module.exports = {
     notasConXml,
     notasConDatos,
     migrarNotas,
+    dentroDe,
     safeName,
     ensureDir,
     writeAtomic,

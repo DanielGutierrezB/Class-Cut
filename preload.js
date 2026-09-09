@@ -59,6 +59,11 @@ contextBridge.exposeInMainWorld('cc', {
     grabarEstado: () => ipcRenderer.invoke('grabar-estado'),
     grabarVistas: () => ipcRenderer.invoke('grabar-vistas'),
     grabarListar: dirs => ipcRenderer.invoke('grabar-listar', dirs),
+    // Gestionar la lista: renombrar cambia el número y el curso —nunca la hora de
+    // captura, que es con la que post empareja— y borrar se lleva el XML, el
+    // sidecar y el audio.
+    grabarRenombrar: (json, cambio) => ipcRenderer.invoke('grabar-renombrar', json, cambio),
+    grabarBorrar: json => ipcRenderer.invoke('grabar-borrar', json),
     grabarRegenerar: json => ipcRenderer.invoke('grabar-regenerar', json),
     grabarTerminar: () => ipcRenderer.invoke('grabar-terminar'),
     onGrabarAviso: callback => {
