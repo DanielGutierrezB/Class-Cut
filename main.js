@@ -313,7 +313,19 @@ ipcMain.handle('claude-salir', () => {
 
 // Prueba una configuración SIN guardarla: el editor primero ve que contesta y
 // recién después decide quedársela.
-ipcMain.handle('ia-probar', (event, config) => ia.probar(config || {}));
+ipcMain.handle('ia-probar', async (event, config) => {
+    const r = await ia.probar(config || {});
+    // Al diario: «probé y no anduvo» es de los reportes más frecuentes, y hasta
+    // acá el resultado moría en un cartel. `config` lleva la clave cuando el
+    // editor la acaba de pegar, así que va el proveedor y nada más; `sanear` la
+    // taparía igual, pero no anotarla es más corto que confiar en que la tapen.
+    anotar('ia.probada', {
+        proveedor: config && config.proveedor,
+        ok: Boolean(r && r.ok),
+        error: (r && r.error) || null
+    });
+    return r;
+});
 
 // Los modelos que ofrece el Cursor CLI, para el selector de Ajustes.
 ipcMain.handle('cursor-modelos', () => aiCursor.modelos());

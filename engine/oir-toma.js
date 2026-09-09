@@ -17,6 +17,7 @@ const captura = require('./captura');
 const insistir = require('./insistir');
 const oir = require('./oir');
 const paths = require('./paths');
+const registro = require('./registro');
 const vivo = require('./notas-vivo');
 
 /**
@@ -127,6 +128,19 @@ async function leer(archivos, toma, opciones) {
                 conElBueno: modelo.name === bueno.name,
                 yaInsistio,
                 hayEscalon: Boolean(abajo)
+            });
+
+            // Al diario, porque esto pasa callado y explica cosas raras. Una
+            // corrida que tardó el triple, o una toma con el texto peor que las
+            // de al lado, se entienden al ver que acá se bajó de modelo; sin la
+            // línea, lo único que queda es una clase que salió distinta y ninguna
+            // pista de por qué. Son eventos raros: no inundan.
+            registro.anotar('main', 'whisper.se-murio', {
+                toma: toma && toma.id != null ? toma.id : null,
+                modelo: modelo.name,
+                muerte,
+                hacemos: paso.que,
+                detalle: ultimoMotivo
             });
 
             if (paso.que === 'rendirse') {
