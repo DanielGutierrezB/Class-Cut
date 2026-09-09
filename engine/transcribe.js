@@ -366,6 +366,34 @@ function tirar(temporal) {
 }
 
 /**
+ * Por qué se murió whisper-cli, dicho de manera que se pueda diagnosticar.
+ *
+ * **Cuando a un proceso lo matan, `code` viene en null y el motivo entero está en
+ * `signal`.** Eso salió de una corrida de verdad: una clase de veinte minutos con
+ * el modelo grande dejó una toma sin releer y el editor se llevó «whisper-cli
+ * terminó con código null», que no dice absolutamente nada — ni si lo mató la
+ * memoria, ni si se cayó solo, ni si alguien lo apagó desde afuera. El dato que
+ * hacía falta lo tenía Node en el segundo parámetro del `close`, y se estaba
+ * tirando.
+ *
+ * Distinguirlo importa porque las dos salidas se arreglan distinto: un código de
+ * salida es whisper.cpp contestando que no puede con este audio —el modelo que
+ * falta, el WAV que no se decodifica—, y una señal es la Mac o el sistema
+ * llevándoselo por delante, casi siempre por memoria cuando el modelo grande
+ * corre encima de otra cosa. Con el mensaje de antes las dos se leían igual.
+ *
+ * El detalle sale de stdout tanto como de stderr: whisper.cpp cuenta el motivo
+ * por cualquiera de los dos, y mirar uno solo deja al editor con un código pelado.
+ */
+function motivoDeSalida(code, signal, stderr, stdout) {
+    const detail = (stderr || stdout || '').trim().split('\n').slice(-4).join(' ');
+    const como = code == null
+        ? `lo mataron con ${signal || 'una señal que no se supo cuál era'}`
+        : `terminó con código ${code}`;
+    return `whisper-cli ${como}. ${detail}`.trim();
+}
+
+/**
  * Corre whisper-cli sobre un WAV. Devuelve el transcript ya normalizado.
  * @param {object} options { language, onProgress, signal }
  */
@@ -474,17 +502,14 @@ function runWhisper(wavPath, options) {
             reject(new TranscribeError(`No se pudo ejecutar whisper-cli: ${err.message}`, 'spawn'));
         });
 
-        child.on('close', code => {
+        child.on('close', (code, signal) => {
             if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
             if (killedByUser) {
                 return reject(new TranscribeError('Transcripción cancelada.', 'cancelado'));
             }
             if (code !== 0) {
-                // whisper.cpp cuenta el motivo por stdout tan seguido como por
-                // stderr; mirar uno solo deja al editor con un código pelado.
-                const detail = (stderr || stdout || '').trim().split('\n').slice(-4).join(' ');
                 return reject(new TranscribeError(
-                    `whisper-cli terminó con código ${code}. ${detail}`, 'whisper'));
+                    motivoDeSalida(code, signal, stderr, stdout), 'whisper'));
             }
 
             const jsonPath = `${outBase}.json`;
@@ -678,6 +703,7 @@ module.exports = {
     transcribeClass,
     reescribir,
     runWhisper,
+    motivoDeSalida,
     collapseLoops,
     segmentsFromWords,
     wordsFromWhisperJson,

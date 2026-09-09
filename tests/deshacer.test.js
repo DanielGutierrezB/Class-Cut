@@ -430,6 +430,32 @@ module.exports = async t => {
         });
     });
 
+    t.test('el OUT movido después de escribir la nota se deshace, y deshace el OUT', async () => {
+        // La secuencia de una persona, y en este orden: se escribe la nota de la
+        // toma y después se corre la línea roja. Salió de la corrida en la app
+        // (`tools/probar-vivo.js`), donde el botón ofrecía deshacer el OUT y lo que
+        // volvía era otra cosa. Las dos mitades se prueban acá: que se deshaga el
+        // paso que el botón PROMETE, y que la pila quede como corresponde.
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            const outAntes = e.tomas[0].outMs;
+            grabacion.editar({ tipo: 'nota', toma: id, texto: 'Repite el arranque' });
+            const otro = e.tomas[0].palabras[2].t;
+            const movido = grabacion.editar({ tipo: 'borde', toma: id, borde: 'out', paredMs: otro });
+            t.eq(movido.tomas[0].outMs, otro, 'el OUT se movió');
+            t.eq(movido.historia.atras, 2, 'la nota y el borde, dos pasos');
+            t.eq(movido.historia.queAtras, `mover el OUT de la toma ${id}`);
+
+            const r = grabacion.deshacer();
+            t.ok(r.ok);
+            t.eq(r.que, `mover el OUT de la toma ${id}`, 'se deshace lo que el botón prometía');
+            t.eq(r.estado.tomas[0].outMs, outAntes, 'y el OUT volvió a donde estaba');
+            t.eq(r.estado.tomas[0].comentario, 'Repite el arranque', 'sin tocar la nota');
+            t.eq(r.estado.historia.atras, 1, 'queda la nota para deshacer');
+            t.eq(r.estado.historia.adelante, 1, 'y el borde para rehacer');
+        });
+    });
+
     t.test('un arrastre que volvió al mismo hueco no deja paso', async () => {
         // Si dejara uno, deshacerlo no se vería y el editor apretaría de nuevo
         // pensando que el botón no funciona.

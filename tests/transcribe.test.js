@@ -117,6 +117,32 @@ module.exports = function (t) {
         t.eq(transcribe.DTW_POR_MODELO['ggml-lo-que-venga.bin'], undefined);
     });
 
+    t.group('transcribe · por qué se murió whisper');
+
+    t.test('un código de salida se cuenta como código', () => {
+        const motivo = transcribe.motivoDeSalida(1, null, 'no se pudo abrir el modelo', '');
+        t.eq(motivo, 'whisper-cli terminó con código 1. no se pudo abrir el modelo');
+    });
+
+    t.test('si lo mataron, el mensaje dice con qué señal y no "código null"', () => {
+        // Salió de una corrida real: una toma quedó sin releer y lo único que
+        // llegó fue «terminó con código null», que no distingue entre la memoria
+        // llevándose el modelo grande por delante y whisper.cpp cayéndose solo.
+        const motivo = transcribe.motivoDeSalida(null, 'SIGKILL', 'read_audio_data: leyendo', '');
+        t.eq(motivo, 'whisper-cli lo mataron con SIGKILL. read_audio_data: leyendo');
+    });
+
+    t.test('sin código y sin señal se dice eso, no se inventa un motivo', () => {
+        const motivo = transcribe.motivoDeSalida(null, null, '', '');
+        t.eq(motivo, 'whisper-cli lo mataron con una señal que no se supo cuál era.');
+    });
+
+    t.test('el detalle sale de stdout cuando stderr vino vacío', () => {
+        // whisper.cpp cuenta el motivo por cualquiera de los dos.
+        const motivo = transcribe.motivoDeSalida(2, null, '', 'error: modelo incompatible');
+        t.eq(motivo, 'whisper-cli terminó con código 2. error: modelo incompatible');
+    });
+
     t.group('transcribe · bucles de whisper');
 
     t.test('una palabra repetida en bucle se colapsa', () => {

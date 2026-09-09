@@ -43,7 +43,8 @@ function medidas() {
 }
 
 /**
- * `--responder=0` contesta los diálogos de varias salidas sin abrirlos.
+ * `--responder=0` contesta los diálogos sin abrirlos: los dos, el de varias
+ * salidas (`preguntar`) y el de sí o no (`confirmar`).
  *
  * Es para poder probar qué hace la ventana con cada respuesta, que es lo único
  * que ahí importa. La hoja de macOS no se puede manejar desde afuera —`osascript`
@@ -51,13 +52,22 @@ function medidas() {
  * la hoja—, así que con el diálogo de verdad la única rama comprobable era la de
  * quedarse esperando.
  *
+ * `confirmar` entró después que `preguntar` y por un motivo concreto: detrás de
+ * él están los tres gestos que no se deshacen —borrar una clase grabada,
+ * reprocesar tirando el trabajo guardado, terminar la toma de notas— o sea
+ * justamente los que más falta hace ejercitar desde afuera y los únicos que, sin
+ * esto, cuelgan el arnés en la primera hoja del sistema. Se contesta con el mismo
+ * índice: el 0 es el botón que hace la cosa, cualquier otro es Cancelar, que es
+ * exactamente lo que `main.js` devuelve (`response === 0`).
+ *
  * Se reemplaza el manejador acá y no en el puente: `window.cc` viaja congelado
  * por el `contextBridge` (a propósito), así que desde el `--js` no se puede
  * envolver nada. Y se hace desde este archivo, que sin sus banderas no existe,
  * para que la app instalada no tenga por dónde contestarse sus propios diálogos.
  *
- * El número es el índice de la opción; -1 es Cancelar. Cada consulta se imprime,
- * así que también sirve para comprobar que NO se preguntó.
+ * El número es el índice de la opción; -1 es Cancelar. Cada consulta se imprime
+ * entera —título y detalle—, así que también sirve para comprobar que NO se
+ * preguntó, y para leer lo que el cartel prometía antes de que se lo conteste.
  */
 function responderDialogos() {
     const crudo = argValue('responder');
@@ -67,6 +77,15 @@ function responderDialogos() {
     ipcMain.handle('preguntar', (event, payload) => {
         console.log(`preguntar: «${(payload && payload.titulo) || ''}» → ${respuesta}`);
         return respuesta;
+    });
+    ipcMain.removeHandler('confirmar');
+    ipcMain.handle('confirmar', (event, payload) => {
+        const p = payload || {};
+        // El detalle en una línea: es donde el cartel de borrar nombra los
+        // archivos que se van, y desde afuera no hay otra forma de leerlo.
+        const detalle = String(p.mensaje || '').replace(/\s*\n+\s*/g, ' · ');
+        console.log(`confirmar: «${p.titulo || ''}» · ${detalle} → ${respuesta === 0}`);
+        return respuesta === 0;
     });
 }
 
@@ -164,12 +183,42 @@ async function pase(win, shot, medida) {
     }
 }
 
+/**
+ * `--guion=<archivo>` le da la ventana a un recorrido escrito aparte.
+ *
+ * Las banderas de arriba alcanzan para un gesto y una captura, y no para un
+ * recorrido: una corrida de la toma de notas en vivo tiene que abrir una sesión,
+ * empujarle audio de verdad durante minutos, esperar a que Whisper abra las tomas
+ * y recién entonces tocar algo. Eso no entra en un `--js`, y sobre todo no puede
+ * salir de la ventana: **el audio hay que leerlo del disco y convertirlo, y la
+ * ventana no tiene Node.**
+ *
+ * Así que el recorrido corre ACÁ, en el proceso principal, que es el único lugar
+ * que tiene las dos cosas a la vez —`fs` y ffmpeg de un lado, `webContents` del
+ * otro— y puede meterle el PCM a la ventana para que ella lo mande por el puente
+ * de verdad (`window.cc.grabarPcm`). Un recorrido que llamara al motor desde acá
+ * se saltearía justamente el puente que se quiere probar.
+ *
+ * El archivo exporta `correr({ win, arg })`. Vive en `tools/` y no acá porque
+ * esto es el arnés y aquello es una corrida suya; sin la bandera no se carga
+ * nada, así que la app instalada no tiene por dónde ejecutar un recorrido.
+ */
+async function guion(win) {
+    const ruta = argValue('guion');
+    if (!ruta) return false;
+    const recorrido = require(require('path').resolve(ruta));
+    win.webContents.on('console-message', (_e, _nivel, texto) => console.log(texto));
+    await recorrido.correr({ win, arg: argValue });
+    return true;
+}
+
 /** @param {BrowserWindow} win la ventana ya cargada */
 async function correr(win) {
     const shot = argValue('shot');
     const folder = argValue('folder');
     const tamanos = medidas();
     responderDialogos();
+    if (await guion(win)) return;
     if (!shot && !folder && !tamanos.length) return;
 
     // Sin esto, lo que el JS de prueba imprime se queda en la consola de la
