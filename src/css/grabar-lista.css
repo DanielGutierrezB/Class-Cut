@@ -87,6 +87,25 @@
 .carpeta-cabeza .mono { font-size: 11px; }
 .carpeta-cabeza .clase-dato.es-en-uso { color: var(--accent); font-weight: 600; }
 .carpeta-quitar { margin-left: auto; }
+
+/* «Generar .prproj» abre la fila, antes del nombre del curso: es lo que se le
+   hace a ESTE curso, mientras que lo de la derecha —«en uso», «Quitar de la
+   lista»— es lo que se le hace a la fila. El separador marca esa frontera sin
+   gastar una palabra. */
+.carpeta-prproj {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 10px;
+    border-right: 1px solid var(--border);
+}
+/* Armando: el botón queda apagado pero no se lee como roto, y el ancho lo fija
+   el texto más largo para que la cuenta al subir no corra el nombre del curso. */
+.carpeta-prproj .btn[disabled] {
+    color: var(--accent);
+    opacity: 1;
+    min-width: 11ch;
+}
 .carpeta > .clase,
 .carpeta > .carpeta-vacia { margin-left: 12px; }
 

@@ -33,6 +33,7 @@ const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
 const registro = require('./engine/registro');
 const ipcGrabar = require('./ipc/grabar');
+const ipcPrproj = require('./ipc/prproj');
 const devShot = require('./dev-shot');
 
 let mainWindow = null;
@@ -878,6 +879,9 @@ ipcMain.handle('reveal', (event, target) => {
 // ─── Toma de notas en vivo ────────────────────────────────────────────
 
 ipcGrabar.registrar({ ipcMain, app, send, anotar });
+// `ventana` como función y no como valor: al registrar todavía no hay ninguna, y
+// el diálogo la necesita recién cuando alguien aprieta.
+ipcPrproj.registrar({ ipcMain, dialog, ventana: () => mainWindow, send, anotar });
 
 ipcMain.handle('open-path', async (event, target) => {
     if (typeof target !== 'string' || !target) return false;

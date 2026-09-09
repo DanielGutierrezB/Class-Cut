@@ -78,6 +78,21 @@ const DEFAULTS = {
      * mentira mañana. Eso se pregunta al disco cada vez que la pantalla se abre.
      */
     carpetasRecientes: [],
+    /**
+     * El `.prproj` del que se clona al generar el proyecto de un curso.
+     *
+     * Es una ruta y no un archivo adentro de la app a propósito. El formato de
+     * proyecto de Premiere deriva entre versiones —de 2024 a 2026 cambiaron 24
+     * de sus 81 clases— y no hay documentación: un esqueleto escrito a mano
+     * contra la versión de hoy envejece sin que nadie se entere. Uno guardado
+     * por el Premiere DEL EDITOR trae correctas las versiones de esquema, la
+     * gestión de color, los cuadros por segundo y una docena de campos que no
+     * aportan nada acá pero que mal escritos no abren.
+     *
+     * Y el día que se rompa, la reparación no pide saber nada del formato:
+     * abrir la plantilla, guardarla, listo.
+     */
+    plantillaPrproj: null,
     ia: {
         // 'local' es el que funciona en una Mac recién sacada de la caja, sin
         // cuentas ni claves: el que viene con la app.
@@ -116,6 +131,11 @@ function sanear(crudo) {
         notasDirs: (notasDir ? [notasDir] : []).concat([...new Set(recordadas)]),
         // Sin repetidas y hasta el tope, decidido acá y no en quien guarda.
         carpetasRecientes: [...new Set(recientes)].slice(0, RECIENTES),
+        // Que el archivo siga estando NO se comprueba acá, por lo mismo que con
+        // las carpetas: un "no está" escrito hoy es mentira mañana. Se pregunta
+        // al disco cuando se va a usar.
+        plantillaPrproj: (crudo && typeof crudo.plantillaPrproj === 'string'
+            && crudo.plantillaPrproj) || null,
         ia: {
             proveedor: PROVEEDORES.includes(ia.proveedor) ? ia.proveedor : DEFAULTS.ia.proveedor,
             local: { modelo: (ia.local && ia.local.modelo) || null },

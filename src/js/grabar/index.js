@@ -993,6 +993,12 @@ export function wireGrabar() {
 
     document.addEventListener('keydown', teclas);
 
+    // El avance de armar el proyecto de un curso. Va por su propio canal y no
+    // por `grabar-aviso` porque no es de la grabación: la clase que se está
+    // grabando y el curso que se está empaquetando son dos relojes distintos, y
+    // meterlos en el mismo canal obligaría a que cada uno se saltee al otro.
+    window.cc.onPrprojAviso(aviso => grabadas.avanceDePrproj(aviso));
+
     window.cc.onGrabarAviso(aviso => {
         if (aviso.tipo === 'error') { toast(aviso.mensaje); return; }
         if (aviso.tipo === 'regenerando') {

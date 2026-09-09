@@ -51,6 +51,7 @@ import {
     numeroLeido, parteQueQueda, queSeBorra, queSeBorraElComentario
 } from './gestionar.js';
 import { mostrador } from './turnos.js';
+import * as prproj from './prproj.js';
 
 /** Cómo se puede ver la lista, y con qué clave se recuerda la elección. */
 const MODOS = ['carpetas', 'fecha'];
@@ -379,11 +380,24 @@ function formularioDeRenombre(clase) {
  * La cabecera de una carpeta en el modo por carpeta: el curso, dónde está y
  * cuántas clases tiene. La que está en uso lo dice; las demás se pueden sacar de
  * la lista (no del disco).
+ *
+ * Acá vive también «Generar .prproj», que es la única acción de esta pantalla
+ * cuya unidad es el curso y no la clase: arma un proyecto de Premiere con todas
+ * las de la carpeta (`prproj.js`).
+ *
+ * @param {string} ruta
+ * @param {object[]} suyas las clases de esa carpeta
  */
-function cabeceraDeCarpeta(ruta, cuantas) {
+function cabeceraDeCarpeta(ruta, suyas) {
     const cabeza = document.createElement('header');
     cabeza.className = 'carpeta-cabeza';
     cabeza.classList.toggle('es-activa', ruta === suyo.carpeta);
+
+    // Primero de la fila, antes del nombre: es lo que se le hace a este curso, y
+    // lo de la derecha —«en uso», «Quitar de la lista»— es lo que se le hace a la
+    // fila. Son dos cosas distintas y conviene que no se mezclen.
+    const empaquetar = prproj.boton(ruta, suyas.filter(c => c.archivos).length);
+    if (empaquetar) cabeza.append(empaquetar);
 
     const nombre = document.createElement('strong');
     nombre.textContent = nombreDeCarpeta(ruta);
@@ -391,7 +405,7 @@ function cabeceraDeCarpeta(ruta, cuantas) {
     donde.className = 'clase-dato mono';
     donde.textContent = ruta;
     donde.title = ruta;
-    cabeza.append(nombre, donde, dato(plural(cuantas, 'clase', 'clases')));
+    cabeza.append(nombre, donde, dato(plural(suyas.length, 'clase', 'clases')));
 
     if (ruta === suyo.carpeta) {
         cabeza.append(dato('en uso', 'es-en-uso'));
@@ -487,7 +501,7 @@ export function pintar() {
         const suyas = suyo.clases.filter(c => c.carpeta === ruta);
         const grupo = document.createElement('section');
         grupo.className = 'carpeta';
-        grupo.append(cabeceraDeCarpeta(ruta, suyas.length));
+        grupo.append(cabeceraDeCarpeta(ruta, suyas));
         if (!suyas.length) {
             const vacio = document.createElement('p');
             vacio.className = 'toma-vacio carpeta-vacia';
@@ -627,6 +641,11 @@ async function regenerar(clase) {
     await cargar();
 }
 
+/** El avance que manda el motor mientras arma el proyecto de un curso. */
+export function avanceDePrproj(aviso) {
+    prproj.avance(aviso);
+}
+
 /** El avance que manda el motor mientras relee una clase. */
 export function avanceDeRegenerado(aviso) {
     if (!suyo.regenerando.has(aviso.json)) return;
@@ -730,6 +749,10 @@ export function cablear(deps) {
     suyo.vistas = deps.vistas;
     suyo.preguntarBorde = deps.preguntarBorde;
     suyo.alComenzar = deps.alComenzar;
+    // El botón del curso guarda su propio avance porque el cabezal se rehace
+    // entero en cada relectura; lo único que necesita de acá es poder pedir que
+    // se redibuje (ver `prproj.js`).
+    prproj.cablear({ pintar });
 
     for (const boton of document.querySelectorAll('.grabadas-modo')) {
         boton.onclick = () => {

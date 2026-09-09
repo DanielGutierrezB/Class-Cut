@@ -1668,6 +1668,16 @@ let yaGrabadas = null;
 const listaGrabadas = () => (yaGrabadas || (yaGrabadas = grabadas()));
 
 /**
+ * La plantilla de Premiere que se eligió en esta pestaña, o `null`.
+ *
+ * Arranca sin elegir a propósito: así es una máquina recién instalada, y ese es
+ * justamente el camino que hay que poder mirar —que el botón la pida la primera
+ * vez—. Vive acá y no en `ajustes` porque acá no hay Premiere que la escriba, y
+ * dejarla en los ajustes fingiría que quedó guardada en un disco.
+ */
+let plantillaElegida = null;
+
+/**
  * Las tres listas juntas, el borde corrido, y a repartir de nuevo: es lo que hace
  * `moverBordeGuardado` allá, en cuatro líneas.
  *
@@ -2393,6 +2403,47 @@ window.cc = {
         return porElPuente(salida);
     },
     onGrabarAviso: cb => { oyentes['grabar-aviso'] = cb; },
+
+    /**
+     * El proyecto de Premiere de un curso entero.
+     *
+     * La plantilla arranca SIN elegir, que es como está una máquina recién
+     * instalada y es el camino que hay que poder mirar: el botón tiene que pedirla
+     * la primera vez. `plantillaElegida` la recuerda dentro de la vida de la
+     * pestaña —no en los ajustes— porque acá no hay Premiere que la escriba, y
+     * fingir que quedó guardada en disco sería una de las mentiras que esta
+     * maqueta viene evitando.
+     */
+    prprojPlantilla: async () => (plantillaElegida
+        ? { ok: true, ruta: plantillaElegida }
+        : { ok: false, falta: 'sin-elegir' }),
+    prprojElegirPlantilla: async () => {
+        plantillaElegida = `${CURSO}/Plantilla de mentira.prproj`;
+        return { ok: true, ruta: plantillaElegida };
+    },
+    /**
+     * Avisa clase por clase, como el motor de verdad, en vez de contestar de una.
+     * El botón muestra una cuenta que sube y el cabezal se repinta debajo mientras
+     * tanto: si acá contestara al toque, ese camino no se podría mirar nunca.
+     */
+    prprojGenerar: async carpeta => {
+        const suyas = listaGrabadas().filter(c => c.carpeta === carpeta && c.archivos);
+        if (!suyas.length) return { ok: false, error: 'No hay ninguna clase con XML en esta carpeta.' };
+        for (let i = 0; i < suyas.length; i++) {
+            await espera(DEMORA_DE_RELECTURA_MS);
+            avisar('prproj-aviso', {
+                carpeta, hecho: i + 1, total: suyas.length,
+                que: `Clase ${suyas[i].clase}`
+            });
+        }
+        return {
+            ok: true,
+            ruta: `${carpeta}/${carpeta.split('/').filter(Boolean).pop()}.prproj`,
+            clases: suyas.length,
+            avisos: []
+        };
+    },
+    onPrprojAviso: cb => { oyentes['prproj-aviso'] = cb; },
 
     reveal: async t => { window.alert(`Mostraría en el Finder:\n${t}`); return { ok: true }; },
     openPath: async t => { window.alert(`Abriría:\n${t}`); return { ok: true }; },

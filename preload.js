@@ -75,6 +75,15 @@ contextBridge.exposeInMainWorld('cc', {
     onGrabarAviso: callback => {
         ipcRenderer.on('grabar-aviso', (_event, payload) => callback(payload));
     },
+
+    // El proyecto de Premiere de un curso entero. La plantilla se pregunta al
+    // disco y no al ajuste: guarda dónde estaba el archivo, no que siga estando.
+    prprojPlantilla: () => ipcRenderer.invoke('prproj-plantilla'),
+    prprojElegirPlantilla: () => ipcRenderer.invoke('prproj-elegir-plantilla'),
+    prprojGenerar: carpeta => ipcRenderer.invoke('prproj-generar', carpeta),
+    onPrprojAviso: callback => {
+        ipcRenderer.on('prproj-aviso', (_event, payload) => callback(payload));
+    },
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
 
