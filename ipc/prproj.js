@@ -209,6 +209,26 @@ function loEscribimosNosotros(ruta) {
 }
 
 /**
+ * Si la plantilla anotada todavía está y todavía sirve de molde.
+ *
+ * Se revisa el contenido y no solo que el archivo exista, porque hay dos maneras
+ * de que una anotación buena se pudra. Una es que la muevan, la renombren o esté
+ * en un disco que hoy no está enchufado. La otra es más callada: la anotación
+ * pudo guardarse antes de que existiera esta revisión, o el editor pudo abrir ese
+ * proyecto y sacarle de la línea de tiempo justo el clip estéreo del que
+ * copiábamos. En los dos casos conviene enterarse acá —donde todavía se puede
+ * buscar otra— y no a mitad del armado del curso.
+ */
+function sirveTodavia(ruta) {
+    try {
+        if (!fs.statSync(ruta).isFile()) return false;
+    } catch (err) {
+        return false;
+    }
+    return !porQueNoSirve(ruta);
+}
+
+/**
  * Qué le pasa hoy a la plantilla, que es lo que decide si el botón se puede
  * apretar y, si no, qué hay que decirle a quien lo mira.
  *
@@ -216,16 +236,12 @@ function loEscribimosNosotros(ruta) {
  * archivo que alguien puede mover, renombrar o tener en un disco externo. El
  * ajuste guarda dónde estaba, no que siga estando.
  *
- * Y si no hay ninguna anotada, o la que había se fue, se busca una antes de
+ * Y si no hay ninguna anotada, o la que había ya no sirve, se busca una antes de
  * darse por vencido: preguntar es el último recurso, no el primero.
  */
 function estadoDeLaPlantilla() {
     const anotada = ajustes.leer().plantillaPrproj;
-    if (anotada) {
-        try {
-            if (fs.statSync(anotada).isFile()) return { ok: true, ruta: anotada };
-        } catch (err) { /* se movió, se renombró, o el disco no está */ }
-    }
+    if (anotada && sirveTodavia(anotada)) return { ok: true, ruta: anotada };
 
     const encontrada = buscarPlantilla();
     if (encontrada) {

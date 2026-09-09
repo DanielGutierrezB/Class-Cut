@@ -198,14 +198,19 @@ module.exports = t => {
 
     // La plantilla es un `.prproj` del disco del editor: sin ella no hay nada que
     // clonar, y meterla al repo sería medio mega de binario para una prueba.
-    const PLANTILLA = process.env.CC_PLANTILLA_PRPROJ || '';
+    //
+    // Se busca igual que en la app, que es lo que la app hace desde que dejó de
+    // preguntarla. En una máquina con Premiere estas dos pruebas —las únicas que
+    // arman un proyecto entero y lo vuelven a leer— pasan de saltearse a correr
+    // siempre, sin que nadie tenga que acordarse de exportar una variable.
+    const PLANTILLA = process.env.CC_PLANTILLA_PRPROJ || require('../ipc/prproj').buscarPlantilla();
     const hay = PLANTILLA && fs.existsSync(PLANTILLA);
 
     if (!hay) {
-        t.skip('el curso entero sale en un proyecto que se puede releer',
-            'hace falta un .prproj de plantilla en CC_PLANTILLA_PRPROJ; se prueba en tools/prproj-molde.js');
-        t.skip('la fuente de notas da secuencias con marcadores y sin material',
-            'hace falta un .prproj de plantilla en CC_PLANTILLA_PRPROJ');
+        const comoSeConsigue = 'hace falta un .prproj que sirva de molde: se busca solo en '
+            + 'Movies, Documents y Desktop, o se apunta uno con CC_PLANTILLA_PRPROJ';
+        t.skip('el curso entero sale en un proyecto que se puede releer', comoSeConsigue);
+        t.skip('la fuente de notas da secuencias con marcadores y sin material', comoSeConsigue);
     } else {
         const prproj = require('../engine/prproj');
 

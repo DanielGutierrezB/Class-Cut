@@ -78,6 +78,7 @@ const FILES = [
     'prproj.test.js',
     'prproj-destino.test.js',
     'prproj-plantilla.test.js',
+    'prproj-plantilla-anotada.test.js',
     'prproj-panel.test.js',
     'prproj-clase.test.js',
     'prproj-curso.test.js',
