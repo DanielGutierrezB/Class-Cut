@@ -50,6 +50,7 @@ import {
     comoSeLlama, dosDigitos, horaDeCaptura, nombreDeCarpeta,
     numeroLeido, parteQueQueda, queSeBorra
 } from './gestionar.js';
+import { mostrador } from './turnos.js';
 
 /** Cómo se puede ver la lista, y con qué clave se recuerda la elección. */
 const MODOS = ['carpetas', 'fecha'];
@@ -503,17 +504,38 @@ export function pintar() {
 /* ─── Lo que se le pide al motor ─────────────────────────────────────────── */
 
 /**
+ * El mostrador de esta pantalla. Uno por pantalla, como dice `turnos.js`: los
+ * turnos valen entre sí y no contra los de la toma de notas.
+ */
+const turnos = mostrador();
+
+/**
  * Relee de los ajustes las carpetas, y del disco las clases que hay en ellas.
  *
+ * **Con turno, porque son dos viajes y siete caminos la llaman.** Releer la lista
+ * tarda lo que tarde el disco, y hay gestos que la piden con otro ya en vuelo:
+ * regenerar una clase de veinte minutos avisa su avance mientras alguien borra
+ * otra, y ahí las dos releídas pueden volver al revés. La que llega segunda es una
+ * foto de antes, así que guardarla devuelve a la pantalla una clase que ya no está
+ * en el disco, y de eso no se sale hasta el gesto siguiente.
+ *
+ * Y nada de `suyo` se toca antes del último `await`: escribir la carpeta y esperar
+ * las clases después dejaba media pantalla de una respuesta y media de la otra,
+ * que es peor que quedarse con la vieja entera.
+ *
  * @returns {Promise<boolean>} si la carpeta en uso cambió, que es lo que decide
- *   si hay que proponer un número de clase nuevo del otro lado
+ *   si hay que proponer un número de clase nuevo del otro lado. Una respuesta
+ *   atrasada contesta que no: no dejó nada en la pantalla que haya que seguir.
  */
 export async function cargar() {
+    const turno = turnos.tomar();
     const ajustes = await window.cc.ajustesLeer();
+    const clases = await window.cc.grabarListar(ajustes.notasDirs || []);
+    if (turnos.atrasada(turno)) return false;
     const cambioDeCarpeta = ajustes.notasDir !== suyo.carpeta;
     suyo.carpeta = ajustes.notasDir;
     suyo.carpetas = ajustes.notasDirs || [];
-    suyo.clases = await window.cc.grabarListar(suyo.carpetas);
+    suyo.clases = clases;
     pintar();
     return cambioDeCarpeta;
 }

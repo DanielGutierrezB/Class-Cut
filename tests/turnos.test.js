@@ -108,6 +108,46 @@ module.exports = async t => {
         t.eq(await dosGestos(false), 'toma1=MG toma4=PV');
     });
 
+    /* ─── La otra pantalla: releer la lista de clases grabadas ─────────────
+     *
+     * `grabadas.cargar` tiene la misma forma —pedir, esperar, mirar el turno,
+     * guardar— y la misma carrera, con un agravante: son DOS viajes seguidos (los
+     * ajustes y las clases) y la llaman siete caminos. El de abajo es el que se vio
+     * al auditar: regenerar una clase larga avisa su avance y relee, y si mientras
+     * tanto se borra otra, la releída vieja devuelve a la pantalla la clase que ya
+     * no está en el disco.
+     */
+
+    /**
+     * Dos releídas de la lista cruzadas: la de antes de borrar tarda más que la de
+     * después. Con `conMostrador` en false es cómo estaba la pantalla.
+     */
+    async function dosReleidas(conMostrador) {
+        const m = mostrador();
+        let pantalla = ['Clase 3', 'Clase 4'];
+        const releer = async (loQueHay, tarda) => {
+            const turno = m.tomar();
+            await espera(tarda);
+            if (conMostrador && m.atrasada(turno)) return;
+            pantalla = loQueHay;
+        };
+        await Promise.all([
+            // El avance del regenerado relee la lista entera, y el disco tarda.
+            releer(['Clase 3', 'Clase 4'], 30),
+            // Y mientras tanto se borró la 4, que sí llega rápido.
+            releer(['Clase 3'], 0)
+        ]);
+        return pantalla.join(' | ');
+    }
+
+    t.test('con el mostrador, la clase borrada no vuelve a la lista', async () => {
+        t.eq(await dosReleidas(true), 'Clase 3');
+    });
+
+    t.test('y sin él, la releída atrasada la resucita en la pantalla', async () => {
+        t.eq(await dosReleidas(false), 'Clase 3 | Clase 4');
+    });
+
     /* ─── El aviso que llega después de terminar ───────────────────────────
      *
      * La otra mitad del mismo problema, y la que se vio en la app de verdad
