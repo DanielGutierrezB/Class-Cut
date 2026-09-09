@@ -16,12 +16,12 @@
  * clase para recuperar dos segundos se comería el principio de la siguiente, y
  * en una anidación eso no se ve hasta que alguien mira el resultado.
  *
- * **Las cinco comparten el mismo mapa de franjas, y eso es lo que las hace
+ * **Las cuatro comparten el mismo mapa de franjas, y eso es lo que las hace
  * servir.** Si `CAM` y `SR` no arrancaran cada clase en el mismo segundo,
  * `SLIDE` no podría ser dos clips de punta a punta —habría que picarlo clase por
  * clase— y un corte tendría que calcular una entrada distinta para cada nido.
  * Con un solo mapa, un corte que en el XML entraba en el segundo 300 de la clase
- * seis entra en `franja(6) + 300` en cualquiera de las cinco.
+ * seis entra en `franja(6) + 300` en cualquiera de las cuatro.
  *
  * Las franjas se miden con la fuente MÁS LARGA de cada clase y no con la cámara:
  * el Live-Mix suele durar unas centésimas más que el video, y una franja cortada
@@ -47,8 +47,7 @@ const NOMBRES = {
     camara: 'CAM',
     pantalla: 'SR',
     audio: 'AUDIO',
-    slide: 'SLIDE',
-    mini: 'MINI'
+    slide: 'SLIDE'
 };
 
 /**
@@ -141,21 +140,28 @@ function pistaDelLiveMix(clase) {
 
 
 /**
- * Arma las cinco anidaciones del curso y las deja colgadas del bin que se pida.
+ * Arma las cuatro anidaciones del curso y las deja colgadas del bin que se pida.
  *
- * El orden importa: `CAM` y `SR` se arman primero porque `SLIDE` y `MINI` las
- * usan de fuente. Es la única dependencia entre ellas.
+ * El orden importa: `CAM` y `SR` se arman primero porque `SLIDE` las usa de
+ * fuente. Es la única dependencia entre ellas.
+ *
+ * **No hay un nido para el recuadro del profesor.** Lo hubo: `MINI` era `CAM`
+ * anidada otra vez con la escala y la posición puestas, así que el encuadre se
+ * escribía una sola vez para todo el curso. El editor lo probó y prefirió que la
+ * pista de arriba sea `CAM` a secas con el efecto encima, sin una anidación de
+ * por medio: una anidación sobre otra es un nivel más para entrar cada vez que
+ * quiere ver qué está mirando. El precio es que ahora el encuadre va corte por
+ * corte, y moverlo es seleccionar todos y pegar atributos en vez de tocar uno.
  *
  * @param {object} taller
  * @param {object} pedido
  * @param {object[]} pedido.clases        las clases leídas, en orden
  * @param {Map} pedido.mediosPorClase     clase → (id de archivo → medio importado)
- * @param {string} pedido.bin             dónde colgar las cinco
- * @param {string[]} pedido.avisos
- * @returns {{franjas, largoSeg, camara, pantalla, audio, slide, mini, cortes}}
+ * @param {string} pedido.bin             dónde colgar las cuatro
+ * @returns {{franjas, largoSeg, camara, pantalla, audio, slide, cortes, encuadre}}
  */
 function armarLosNidos(taller, pedido) {
-    const { clases, mediosPorClase, bin, avisos } = pedido;
+    const { clases, mediosPorClase, bin } = pedido;
     const { franjas, largoSeg } = franjasDe(clases);
     let cortes = 0;
 
@@ -250,30 +256,13 @@ function armarLosNidos(taller, pedido) {
         cortes++;
     });
 
-    // ── El recuadro del profesor, aplicado UNA vez ──
-    const mini = taller.crearSecuencia({
-        nombre: NOMBRES.mini, pistasVideo: 1, pistasAudio: 1, duracionSeg: largoSeg
-    });
-    taller.guardarEn(bin, mini.itemDelPanel);
-    taller.pintarItemDelPanel(mini.itemDelPanel, ETIQUETA_DE_CAMARA);
-    const suElCorte = taller.colocarCorte({
-        pista: mini.pistasVideo[0],
-        medio: camara.comoFuente,
-        desdeSeg: 0,
-        hastaSeg: largoSeg,
-        entradaSeg: 0,
-        etiqueta: ETIQUETA_DE_CAMARA
-    });
-    cortes++;
-    const puesto = taller.ponerEncuadre(suElCorte, fcp.encuadreDelRecuadro(medidasDe(clases)));
-    if (!puesto) {
-        avisos.push(`«${NOMBRES.mini}» entró sin el recuadro: la plantilla no tiene ningún clip`
-            + ' con la escala o la posición movidas del que copiarlo. El profesor va a ocupar'
-            + ' todo el cuadro hasta que se lo achique a mano, una sola vez, adentro de esa'
-            + ' secuencia.');
-    }
-
-    return { franjas, largoSeg, camara, pantalla, audio, slide, mini, cortes };
+    // El recuadro no es un nido: es la geometría que las clases le ponen a sus
+    // cortes de `CAM` en la pista de arriba. Se calcula acá porque acá está el
+    // material del que sale el cuadro contra el que se mide.
+    return {
+        franjas, largoSeg, camara, pantalla, audio, slide, cortes,
+        encuadre: fcp.encuadreDelRecuadro(medidasDe(clases))
+    };
 }
 
 /**

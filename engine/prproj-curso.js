@@ -394,8 +394,8 @@ function armarClaseSobreNidos(taller, clase, pedido) {
 
     let colocados = 0;
     const poner = (suPista, nido, corte, sonando, etiqueta) => {
-        if (!suPista) return;
-        taller.colocarCorte({
+        if (!suPista) return null;
+        const item = taller.colocarCorte({
             pista: suPista,
             medio: nido.comoFuente,
             desdeSeg: corte.desdeSeg,
@@ -405,8 +405,10 @@ function armarClaseSobreNidos(taller, clase, pedido) {
             sonando
         });
         colocados++;
+        return item;
     };
 
+    let sinRecuadro = 0;
     bloques.forEach((corte, i) => {
         const vista = vistaDe(i);
         const esCamara = vista === VISTA_DE_CAMARA;
@@ -419,10 +421,19 @@ function armarClaseSobreNidos(taller, clase, pedido) {
         poner(pista.pantalla, nidos.pantalla, corte, !esCamara && !esSlide, nidos.etiquetaDePantalla);
         if (pista.slide) poner(pista.slide, nidos.slide, corte, esSlide);
 
-        // El recuadro solo donde se ve la pantalla a cuadro completo. En `S` no
-        // va: el profesor ya está de fondo adentro del slide, y ponerlo otra vez
-        // en la esquina sería mostrarlo dos veces.
-        if (!esCamara && !esSlide) poner(pista.mini, nidos.mini, corte, true, nidos.etiquetaDeCamara);
+        // **El recuadro del profesor: la MISMA `CAM` de la pista de abajo, con
+        // la escala y la posición puestas encima.** No es otro nido: el editor
+        // probó `MINI` —`CAM` anidada una segunda vez con el efecto adentro— y
+        // prefirió esto, porque una anidación sobre otra es un nivel más para
+        // entrar cada vez que quiere ver qué está mirando.
+        //
+        // Va solo donde se ve la pantalla a cuadro completo. En `S` no: el
+        // profesor ya está de fondo adentro del slide, y ponerlo otra vez en la
+        // esquina sería mostrarlo dos veces.
+        if (!esCamara && !esSlide) {
+            const recuadro = poner(pista.mini, nidos.camara, corte, true, nidos.etiquetaDeCamara);
+            if (recuadro && !taller.ponerEncuadre(recuadro, nidos.encuadre)) sinRecuadro++;
+        }
     });
 
     // **Las dos pistas de audio no son lo mismo, y esa es la gracia.** Arriba va
@@ -469,6 +480,7 @@ function armarClaseSobreNidos(taller, clase, pedido) {
         marcadores: marcadores.length,
         conEfectos: 0,
         conSlides: hayS,
+        sinRecuadro,
         pistasVideo,
         pistasAudio: vivo ? 2 : 1
     };
@@ -844,7 +856,7 @@ function poblar(taller, clases, avisos, decir, opciones) {
     decir(clases.length, clases.length, 'Armando las anidaciones del curso…');
     const binNidos = taller.crearBin(nidos.NOMBRES.raiz, { orden: clases.length });
     const armados = nidos.armarLosNidos(taller, {
-        clases, mediosPorClase, bin: binNidos, avisos
+        clases, mediosPorClase, bin: binNidos
     });
 
     clases.forEach((clase, i) => {
@@ -896,6 +908,18 @@ function poblar(taller, clases, avisos, decir, opciones) {
         const total = conEfectos.reduce((n, c) => n + c.conEfectos, 0);
         avisos.push(`${total} corte(s) de ${conEfectos.length} clase(s) traían el recuadro`
             + ' puesto en el XML: entran en su lugar y con su duración, pero sin el encuadre.');
+    }
+
+    // Y lo mismo con los que no lo pudieron recibir: una vez y con el total. El
+    // encuadre se copia de un clip de la plantilla que lo tenga puesto, y la
+    // mayoría no tiene ninguno, así que esto se dice seguido y por una razón que
+    // no es de este curso. Trece líneas iguales taparían a las que sí lo son.
+    const faltantes = armadas.reduce((n, c) => n + (c.sinRecuadro || 0), 0);
+    if (faltantes) {
+        avisos.push(`${faltantes} corte(s) del recuadro del profesor entraron a cuadro completo:`
+            + ' la plantilla no tiene ningún clip con la escala o la posición movidas del que'
+            + ' copiar el encuadre. Se arregla achicando uno a mano y pegándole los atributos'
+            + ' a los demás; o eligiendo de plantilla un proyecto donde el recuadro ya esté.');
     }
 
     const cuenta = [];

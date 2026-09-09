@@ -444,8 +444,8 @@ module.exports = t => {
                 const pistas = pistasVideoDe(p, entregaDe(p, '01_clase'));
                 t.eq(pistas.length, 4, `cuatro pistas y no tres: ${pistas.length}`);
                 t.deep(pistas.map(k => nidoDelCorte(p, cortesDe(p, k)[0])),
-                    [nidos.NOMBRES.camara, nidos.NOMBRES.slide, nidos.NOMBRES.pantalla, nidos.NOMBRES.mini],
-                    'de abajo hacia arriba: cámara, slide, pantalla y el recuadro último');
+                    [nidos.NOMBRES.camara, nidos.NOMBRES.slide, nidos.NOMBRES.pantalla, nidos.NOMBRES.camara],
+                    'de abajo hacia arriba: cámara, slide, pantalla y la cámara otra vez de recuadro');
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });
@@ -594,12 +594,34 @@ module.exports = t => {
             });
         });
 
-        t.test('el recuadro ya no se avisa: ahora entra puesto, en «MINI»', () => {
+        t.test('el recuadro es la misma «CAM», no una anidación aparte', () => {
+            // Lo fue: `MINI` era `CAM` anidada una segunda vez con el efecto
+            // adentro, así que el encuadre se escribía una sola vez para todo el
+            // curso. El editor lo abrió y prefirió no tener una anidación sobre
+            // otra, que es un nivel más para entrar cada vez que quiere ver qué
+            // está mirando. La pista de arriba tiene que ser la MISMA `CAM` de
+            // la de abajo, o el nido deja de ser un solo lugar donde tocar.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['R']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(p.porNombre('Sequence', 'MINI'), null, 'no quedó ninguna secuencia MINI');
+
+                const pistas = pistasVideoDe(p, entregaDe(p, '01_clase'));
+                const arriba = cortesDe(p, pistas[2])[0];
+                t.ok(arriba, 'la pista del recuadro tiene su corte');
+                t.eq(nidoDelCorte(p, arriba), nidos.NOMBRES.camara, 'y mira a «CAM»');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('el recuadro ya no se avisa: ahora entra puesto sobre el corte', () => {
             // Durante meses el proyecto avisaba «entran en su lugar y con su
             // duración, pero sin el encuadre», porque el recuadro del profesor
-            // viajaba en el XML y el generador no sabía escribirlo. Con las
-            // anidaciones se aplica UNA vez, adentro de `MINI`, así que el aviso
-            // dejó de tener de qué hablar. Que no esté es el resultado.
+            // viajaba en el XML y el generador no sabía escribirlo. Ahora se
+            // escribe, así que el aviso dejó de tener de qué hablar. Que no esté
+            // es el resultado.
             const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
             const medio = path.join(dir, 'material', 'a.mov');
             fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
@@ -609,9 +631,6 @@ module.exports = t => {
                 t.eq(r.ok, true, r.error || '');
                 t.ok(r.avisos.every(a => !/sin el encuadre/.test(a)),
                     `el aviso viejo no tiene de qué hablar: ${r.avisos.join(' | ')}`);
-
-                const p = prproj.Proyecto.leer(r.ruta);
-                t.ok(p.porNombre('Sequence', nidos.NOMBRES.mini), 'y existe la secuencia del recuadro');
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });
@@ -628,9 +647,10 @@ module.exports = t => {
                 return null;
             }
             const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
-            const medio = path.join(dir, 'material', 'a.mov');
-            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
-            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 5, medio));
+            // Un solo bloque, y con la pantalla a cuadro completo: es el único
+            // caso que lleva recuadro, así que el proyecto tiene que quedar con
+            // exactamente un efecto y se lo puede mirar entero.
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['R']);
             return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
                 const p = prproj.Proyecto.leer(r.ruta);

@@ -62,6 +62,15 @@ const REVERSIONES = [
         caen: ['un corte entra en el nido corrido por la franja de su clase']
     },
     {
+        que: 'el recuadro vuelve a ser una anidación aparte en vez de la misma CAM',
+        archivo: 'engine/prproj-curso.js',
+        de: '            const recuadro = poner(pista.mini, nidos.camara, corte, true, nidos.etiquetaDeCamara);',
+        a: '            const recuadro = poner(pista.mini, nidos.slide, corte, true, nidos.etiquetaDeCamara);',
+        filtro: 'prproj-curso',
+        caen: ['el recuadro es la misma «CAM», no una anidación aparte',
+            'con una S la clase lleva cuatro, y el recuadro queda arriba de todo']
+    },
+    {
         que: 'el respaldo de audio vuelve a ser una segunda copia del mismo nido',
         archivo: 'engine/prproj-curso.js',
         de: '                pista: secuencia.pistasAudio[1],\n'
@@ -156,9 +165,9 @@ const REVERSIONES = [
     },
     {
         que: 'el recuadro no se aplica, y el proyecto se calla que falta',
-        archivo: 'engine/prproj-nidos.js',
-        de: '    const puesto = taller.ponerEncuadre(suElCorte, fcp.encuadreDelRecuadro(medidasDe(clases)));',
-        a: '    const puesto = true;',
+        archivo: 'engine/prproj-curso.js',
+        de: '            if (recuadro && !taller.ponerEncuadre(recuadro, nidos.encuadre)) sinRecuadro++;',
+        a: '',
         filtro: 'prproj-curso',
         caen: ['el recuadro sale con la geometría medida en el Premiere del editor']
     },
