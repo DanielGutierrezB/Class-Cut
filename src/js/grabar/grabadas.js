@@ -416,8 +416,20 @@ function sinCarpetas() {
 
 /* ─── Dibujar ─────────────────────────────────────────────────────────────── */
 
-/** Si alguien está escribiendo en el formulario de renombre. */
+/**
+ * Si alguien está escribiendo en el formulario de renombre.
+ *
+ * El foco adentro del campo no alcanza para decidirlo: hay que preguntarle
+ * también al estado si el formulario todavía tiene que estar abierto. Guardando
+ * con la tecla Enter el foco no se mueve de donde se escribió —el submit sale del
+ * campo mismo, no del botón—, así que sin la primera línea el repintado de después
+ * de guardar se saltaba, el formulario se quedaba abierto sobre una clase que ya
+ * se llamaba de otra manera y la lista seguía mostrando el nombre viejo hasta el
+ * gesto siguiente. Con el botón «Guardar» no pasaba, porque el foco queda en un
+ * BUTTON: el defecto solo aparecía con el teclado.
+ */
 function enElFormulario() {
+    if (!suyo.renombrando) return false;
     const foco = document.activeElement;
     return Boolean(foco && foco.tagName === 'INPUT' && foco.closest('.clase-renombre'));
 }

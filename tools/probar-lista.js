@@ -481,6 +481,32 @@ function casos(wc) {
             shot: 'renombrada'
         },
         {
+            // El mismo guardado, con la tecla en vez del botón, porque no son el
+            // mismo gesto para el repintado: con Enter el foco se queda en el campo
+            // —el submit sale de ahí— y `pintar` no repinta mientras haya foco
+            // adentro del formulario. Así estaba el defecto: el nombre nuevo llegaba
+            // al disco, el formulario se quedaba abierto sobre una clase que ya se
+            // llamaba de otra manera, y la lista mostraba el nombre viejo.
+            que: 'y guardar con la tecla Enter cierra el formulario igual que el botón',
+            hacer: async () => {
+                await clicTexto(wc, primera, 'Renombrar');
+                await dormir(500);
+                await clic(wc, '#grabar-grabadas .clase-renombre .grabar-num');
+                await vaciarCampo(wc);
+                // Un número que la maqueta no tiene, así que el nombre nuevo se ve.
+                await escribir(wc, '77');
+                await tecla(wc, 'Enter');
+                await dormir(1200);
+            },
+            ademas: async () => {
+                const c = await comoEsta(wc);
+                if (c.renombrando) return 'el formulario quedó abierto después de guardar';
+                const cual = c.nombres.find(n => /Clase 77/.test(n));
+                return cual ? null : `en la lista quedaron: ${c.nombres.join(' | ')}`;
+            },
+            shot: 'renombrada-con-enter'
+        },
+        {
             que: 'borrar pregunta primero, y el cartel nombra lo que se va del disco',
             hacer: async () => {
                 await contestar(wc, false);
