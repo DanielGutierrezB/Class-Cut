@@ -6,14 +6,24 @@
  * mismas funciones que expone `preload.js`, contestando de memoria: la interfaz
  * corre entera en un navegador común, sin Electron, sin Node y sin material.
  *
- * Dos reglas al escribir esto:
+ * Cuatro reglas al escribir esto:
  *
  *   1. **La forma es la de verdad.** Cada objeto de acá tiene los campos que el
  *      motor devuelve, con sus unidades —segundos en la revisión, milisegundos
  *      de reloj en la grabación—. Un campo inventado se ve bien acá y explota
  *      en la app, que es peor que no tener maqueta.
  *
- *   2. **Los casos se eligen, no se repiten.** Cuatro clases iguales no dicen
+ *   2. **Lo que allá se niega, acá se niega.** Con el mismo motivo y con las
+ *      mismas palabras, porque el texto del error es pantalla. Una maqueta que
+ *      dice que sí a todo deja aprobar gestos que la app rechaza, y el estado de
+ *      error —que es la mitad del diseño de un formulario— no se dibuja nunca.
+ *
+ *   3. **Lo que allá tarda, acá tarda.** Hay renglones que existen SOLO mientras
+ *      algo está en vuelo —"Terminando…", "midiendo", la cobertura sin medir— y
+ *      contestando al instante no aparecen. Los tiempos van comprimidos y está
+ *      dicho dónde (ver "Lo que tarda", más abajo).
+ *
+ *   4. **Los casos se eligen, no se repiten.** Cuatro clases iguales no dicen
  *      nada del diseño. Hay una procesada y al día, una que hay que rehacer, una
  *      sin procesar, una que no se puede procesar, una carpeta con avisos y otra
  *      con una clase repetida. En la revisión hay bloques de confianza baja,
@@ -22,6 +32,12 @@
  *
  * No es un simulador: nadie corta nada, nada se guarda en disco. Guardar
  * contesta que sí y devuelve lo que la pantalla necesita para seguir dibujando.
+ *
+ * Y lo que la maqueta NO imita, a propósito, para no tener que averiguarlo dos
+ * veces: no abre ni cierra tomas sola —el reparto se elige, y uno que cambia
+ * debajo de la mano no se puede juzgar—, no oye el micrófono ni dibuja la onda
+ * con lo que entra, y no reparte el trabajo entre procesos. Nada de eso cambia
+ * lo que la pantalla puede ver.
  */
 
 (function () {
@@ -49,6 +65,14 @@ const COLOR = Object.fromEntries(VISTAS.map(v => [v.nombre, v.colorDeMarcador]))
 // caían las cosas hace dos versiones.
 const NOTAS = window.maquetaNotas;
 
+/**
+ * Los números con los que el motor se mueve, servidos desde el motor
+ * (ver `numerosDelMotor` en `tools/maqueta.js`): cada cuánto empuja el estado y
+ * los mínimos del empalme. Por lo mismo que las bandas de lengua: escritos a
+ * mano acá, la maqueta se movía a un ritmo y ofrecía ajustes que la app no.
+ */
+const MOTOR = window.maquetaMotor;
+
 /** El XML y el sidecar de una clase de notas, donde la app los va a poner. */
 function archivosDeNotas(carpeta, nombre) {
     return {
@@ -58,6 +82,27 @@ function archivosDeNotas(carpeta, nombre) {
 }
 
 const espera = ms => new Promise(r => setTimeout(r, ms));
+
+/* ─── Lo que tarda ───────────────────────────────────────────────────────
+ *
+ * El motor no contesta al instante y la maqueta tampoco puede, porque hay
+ * estados de la pantalla que existen SOLO mientras algo tarda: "Terminando…",
+ * "Leyendo la toma 4 con el modelo…", el temario midiéndose. Contestando ya, esos
+ * tres renglones no aparecen nunca y no se pueden aprobar.
+ *
+ * **Los dos números están comprimidos y es la única mentira a propósito de este
+ * archivo.** Allá una consulta al modelo tarda del orden de dos minutos
+ * (`LIMITE_MS` en `engine/lengua.js` y en `engine/empalme.js`, medido, no
+ * estimado) y el cierre de la sesión, lo que tarde releer las tomas pendientes.
+ * Una maqueta que hiciera esperar dos minutos para ver un renglón no se usaría, y
+ * no hacerlos esperar nada es lo que había. Lo que importa de estos números es el
+ * ORDEN —que se vea el estado de espera y que se lo pueda mirar quieto— y no su
+ * valor, así que se comprimen y queda dicho acá.
+ */
+const DEMORA_DEL_MODELO_MS = 8000;
+const DEMORA_DE_CIERRE_MS = 2500;
+/** Lo que tarda releer una toma con el modelo grande, por toma. */
+const DEMORA_DE_RELECTURA_MS = 700;
 
 /* ─── El transcript ──────────────────────────────────────────────────────
  *
@@ -385,12 +430,6 @@ const PROCESABLES = CARPETAS.flatMap(c => c.classes).filter(c => c.processable);
 
 const CERO = Date.parse('2026-09-08T13:00:00');
 
-// El cero de la sesión que se muestra grabando. Los relojes del bloque "La
-// sesión" cuentan contra este número, así que con la fecha fija de arriba dirían
-// que se lleva grabando desde septiembre. Abriendo la maqueta con `?grabando` se
-// cuelga de la hora de ahora y los relojes corren de verdad; sin eso se queda con
-// la fija, que es lo que hace repetibles las capturas.
-let ceroDeLaSesion = CERO;
 const palabra = (ms, texto) => ({ t: ms, texto });
 
 /**
@@ -609,10 +648,16 @@ function comentarSobre(toma, desdeSec, hastaSec, comentario) {
  * lectura): si el corte que la sugerencia señala ya no está en la toma anterior
  * —porque se aceptó el ajuste, o porque alguien arrastró el borde— la sugerencia
  * desaparece sola. Eso es lo que hay que poder mirar después de apretar el botón.
+ *
+ * **Lo guardado y lo que se dibuja son dos cosas, como allá.** En la toma queda
+ * lo que se pagó y lo que se apuntó —`empalme.det` de `medir` y `empalme.ia` de
+ * la consulta, que es como `medir-toma.js` reparte cada medida— y la vista se
+ * arma al servir, en el resumen. Acá estaba al revés: la vista se escribía ENCIMA
+ * del campo `empalme` de la toma en cada lectura, así que el descarte no tenía
+ * dónde vivir y terminó en un campo suelto con otro nombre. Dos mentiras de una:
+ * la forma no era la de allá, y lo que la maqueta guardaba en otro sitio no
+ * entraba en la foto del historial igual que allá.
  */
-
-const EMPALME_MINIMO_RECORTE_MS = 1500;
-const EMPALME_MINIMO_QUEDA_MS = 3000;
 
 /** Un tramo para subrayar, en horas de palabra: la forma de `empalme.tramo`. */
 function tramoDe(id, palabras) {
@@ -637,50 +682,63 @@ function abreLaUltimaFrase(toma) {
     const dichas = toma.palabras || [];
     for (let i = dichas.length - 1; i > 0; i--) {
         if (!/[.!?…]$/.test(dichas[i - 1].texto)) continue;
-        if (toma.outMs - dichas[i].t < EMPALME_MINIMO_RECORTE_MS) continue;
-        if (dichas[i].t - toma.inMs < EMPALME_MINIMO_QUEDA_MS) break;
+        if (toma.outMs - dichas[i].t < MOTOR.empalme.MINIMO_RECORTE_MS) continue;
+        if (dichas[i].t - toma.inMs < MOTOR.empalme.MINIMO_QUEDA_MS) break;
         return dichas[i];
     }
     return null;
 }
 
 /**
- * El empalme de `actual` con `previa`, tal como lo sirve el motor.
+ * Con qué toma va a quedar pegada esta en el XML (`empalme.anterior`).
  *
- * @param {object} pagado lo que contestó el modelo y quedó guardado en la toma:
- *   contra quién y desde qué palabra. Es lo único que allá se guarda, porque es
- *   lo único que se pagó.
+ * No es "la de antes en la lista": es la de antes que va a QUEDAR. Una descartada
+ * no llega al XML, así que la que pega es la anterior a esa. Acá la sugerencia se
+ * colgaba de un par escrito a mano, así que descartar la toma del medio no movía
+ * nada — y en la app la pregunta pasa a ser otra y la respuesta guardada deja de
+ * valer, que es justo lo que hay que poder mirar.
  */
-function empalmeDe(previa, actual, pagado) {
-    if (!previa || !actual || !pagado) return null;
-    if (actual.outMs == null || actual.descartada || previa.descartada) return null;
+function anteriorDeEmpalme(tomas, toma) {
+    if (!toma || toma.descartada) return null;
+    const donde = tomas.findIndex(t => t.id === toma.id);
+    if (donde < 1) return null;
 
-    const vista = {
-        contra: previa.id,
-        parecido: pagado.parecido,
-        estado: 'listo',
-        porque: '',
-        sugerencia: null
-    };
-
-    if (actual.empalmeDescartado === previa.id) {
-        vista.estado = 'descartado';
-        vista.porque = 'Descartaste el ajuste de este empalme.';
-        return vista;
+    for (let i = donde - 1; i >= 0; i--) {
+        const previa = tomas[i];
+        if (previa.descartada) continue;
+        if (previa.inMs == null || previa.outMs == null) continue;
+        if ((previa.palabras || []).length < MOTOR.empalme.MINIMO_PALABRAS) continue;
+        return previa;
     }
+    return null;
+}
 
+/**
+ * La sugerencia, armada contra las palabras de AHORA y con la aduana puesta.
+ *
+ * Es `armarSugerencia` de allá: lo guardado es un corte, y antes de mostrarlo hay
+ * que volver a preguntar si ese corte se puede hacer. La palabra tiene que seguir
+ * en la toma anterior y los dos mínimos tienen que seguir dándose; si no, no hay
+ * botón. Sin esta aduana la maqueta ofrecía un ajuste que la app no ofrece.
+ *
+ * @param {object} pagado lo que contestó el modelo y quedó guardado en la toma
+ *   (`empalme.ia.hallazgos`): contra quién, desde qué palabra y por qué.
+ */
+function armarSugerenciaDeEmpalme(previa, actual, pagado) {
     const dichas = previa.palabras || [];
     const corte = dichas.find(w => w.t === pagado.paredMs);
-    // La palabra del corte ya no está en la toma: el borde se movió y lo que
-    // decía la sugerencia dejó de ser cierto.
-    if (!corte) return vista;
+    // La palabra del corte ya no está en la toma: el borde se movió, o se aceptó
+    // el ajuste, y lo que decía la sugerencia dejó de ser cierto.
+    if (!corte) return null;
+    if (previa.outMs - corte.t < MOTOR.empalme.MINIMO_RECORTE_MS) return null;
+    if (corte.t - previa.inMs < MOTOR.empalme.MINIMO_QUEDA_MS) return null;
 
     const repetido = dichas.filter(w => w.t >= corte.t);
-    vista.sugerencia = {
-        origen: 'modelo',
+    return {
+        origen: pagado.origen,
         porque: pagado.porque,
         enLaAnterior: tramoDe(previa.id, repetido),
-        enEsta: tramoDe(actual.id, (actual.palabras || []).slice(0, repetido.length)),
+        enEsta: tramoDe(actual.id, (actual.palabras || []).slice(0, MOTOR.empalme.CABEZA_PALABRAS)),
         ajuste: {
             tipo: 'borde',
             toma: previa.id,
@@ -691,17 +749,40 @@ function empalmeDe(previa, actual, pagado) {
         },
         descartar: { tipo: 'descartar-ajuste', toma: actual.id, contra: previa.id }
     };
-    return vista;
 }
 
-/** El empalme de todas las tomas de la sesión, rehecho contra el estado de ahora. */
-function empalmesEnVivo(tomas) {
-    for (const toma of tomas) toma.empalme = null;
-    const pagado = enMemoria.empalmePagado;
-    if (!pagado) return;
-    const actual = tomas.find(t => t.id === pagado.toma);
-    const previa = tomas.find(t => t.id === pagado.contra);
-    if (actual) actual.empalme = empalmeDe(previa, actual, pagado);
+/**
+ * El empalme de una toma tal como se dibuja (`empalme.paraLaPantalla`).
+ *
+ * Se rehace en cada lectura y no se guarda, que es lo que hace que una sugerencia
+ * no pueda quedar hablando de algo que ya no existe.
+ */
+function empalmeParaLaPantalla(toma, tomas) {
+    if (!toma || toma.outMs == null || toma.descartada) return null;
+    const previa = anteriorDeEmpalme(tomas, toma);
+    if (!previa) return null;
+
+    const guardado = toma.empalme || {};
+    const ia = guardado.ia || null;
+    const vista = {
+        contra: previa.id,
+        parecido: guardado.det ? guardado.det.parecido : 0,
+        // 'sin-medir' cuando nadie miró todavía; los demás son los del mecanismo
+        // ('midiendo', 'listo', 'falla', 'sin-modelo', 'abstenido') y 'descartado'.
+        estado: ia ? ia.estado : 'sin-medir',
+        porque: ia ? ia.porque : '',
+        sugerencia: null
+    };
+
+    if (guardado.descartado && guardado.descartado.contra === previa.id) {
+        vista.estado = 'descartado';
+        vista.porque = 'Descartaste el ajuste de este empalme.';
+        return vista;
+    }
+
+    const pagado = ((ia && ia.hallazgos) || []).find(h => h && h.contra === previa.id);
+    if (pagado) vista.sugerencia = armarSugerenciaDeEmpalme(previa, toma, pagado);
+    return vista;
 }
 
 // Cuánto lleva grabando la sesión, y en qué segundo abre la toma que sigue en
@@ -712,41 +793,175 @@ const CORRIDOS = 420;
 const ABRE_LA_ULTIMA = 250;
 
 /**
- * La sesión grabando. Sin argumento cuelga de `ceroDeLaSesion`, que es lo que
- * decide si los relojes de arriba están quietos o corriendo.
+ * La sesión que se está grabando, o null si no hay ninguna.
  *
- * Se arma UNA vez por cero y queda guardada (`enMemoria.sesion`). Antes se
- * rearmaba en cada llamada, y eso hacía que la maqueta mintiera en lo peor:
- * descartar una toma, comentar o mover un borde se dibujaba un instante y
- * desaparecía en el repintado siguiente, porque el estado que contestaba el
- * puente era otra vez el de fábrica. Del lado de la app el motor guarda la
- * sesión, así que acá también.
+ * **Null es una respuesta y no un caso raro**, y por eso esto no arma nada solo:
+ * del otro lado hay sesión desde "Iniciar grabación" hasta "Terminar" y en
+ * ningún otro momento (`sesion` en `engine/grabacion.js`), así que todo lo del
+ * puente tiene que saber contestar sin ella. Acá la sesión se armaba a la primera
+ * pregunta y no se soltaba nunca, o sea que la maqueta no podía enseñar la
+ * pantalla sin nada en curso ni lo que pasa después de terminar.
+ *
+ * Se arma UNA vez y queda guardada (`enMemoria.sesion`). Antes se rearmaba en
+ * cada llamada, y eso hacía que la maqueta mintiera en lo peor: descartar una
+ * toma, comentar o mover un borde se dibujaba un instante y desaparecía en el
+ * repintado siguiente, porque el estado que contestaba el puente era otra vez el
+ * de fábrica. Del lado de la app el motor guarda la sesión, así que acá también.
  */
-function sesionEnVivo(ceroMs) {
-    if (ceroMs != null) return armarSesion(ceroMs);
-    if (!enMemoria.sesion || enMemoria.sesion.ceroMs !== ceroDeLaSesion) {
-        enMemoria.sesion = armarSesion(ceroDeLaSesion);
-    }
-    // El temario se pega aparte y la lengua depende de qué tomas quedan, así que
-    // los dos se rehacen al servir: es lo que hace el motor en cada `resumen`.
-    enMemoria.sesion.temario = enMemoria.temario;
-    enMemoria.sesion.lengua = agregadoDeLengua(enMemoria.sesion.tomas);
-    empalmesEnVivo(enMemoria.sesion.tomas);
-    const abierta = enMemoria.sesion.tomas.find(t => t.outMs == null);
-    enMemoria.sesion.abierta = abierta ? abierta.id : null;
-    enMemoria.sesion.historia = {
-        atras: enMemoria.historia.atras.length,
-        adelante: enMemoria.historia.adelante.length,
-        queAtras: ultimo(enMemoria.historia.atras),
-        queAdelante: ultimo(enMemoria.historia.adelante)
-    };
+function sesionEnVivo() {
     return enMemoria.sesion;
+}
+
+/**
+ * Pone a grabar una sesión, con la clase a medio grabar o con nada.
+ *
+ * Vacía es como arranca una de verdad (`vivo.estadoNuevo`: `tomas: []`), y es la
+ * única forma de mirar quieto el estado vacío de la lista —"Todavía no hay tomas.
+ * La primera se abre cuando el profesor cuenta 3, 2, 1"—, que era una pantalla
+ * que la maqueta escondía: apretar "Iniciar grabación" contestaba con una clase
+ * que ya tenía cuatro tomas grabadas.
+ *
+ * Con el reparto puesto es lo que abre `?grabando`, y es lo que hay que mirar
+ * para juzgar el diseño: una clase en curso con sus casos elegidos.
+ */
+function ponerAGrabar(cero, conReparto) {
+    enMemoria.sesion = armarSesion(cero, conReparto);
+    empezarAEmpujar();
+    return enMemoria.sesion;
+}
+
+/** Suelta la sesión, como `soltar()` allá: de acá en más no hay ninguna. */
+function soltarLaSesion() {
+    enMemoria.sesion = null;
+    enMemoria.temario = null;
+    enMemoria.midiendoTemario = false;
+    enMemoria.historia = { atras: [], adelante: [] };
+    pararElEmpujon();
 }
 
 const ultimo = pila => (pila.length ? pila[pila.length - 1].que : '');
 
-function armarSesion(cero) {
-    const tomas = [
+/* ─── Lo que la pantalla recibe ──────────────────────────────────────────
+ *
+ * `espejo.resumen` de este lado: la sesión mirada desde afuera. La sesión guarda
+ * lo que pasó y esto arma lo que se dibuja, y los dos son distintos a propósito
+ * —lo que se calcula se calcula en cada lectura (`repiteA`, la lengua agregada,
+ * el empalme de la pantalla) para que no pueda quedar viejo—.
+ *
+ * Que fuera lo mismo era una mentira de forma: el puente devolvía la sesión con
+ * campos que el motor no manda y con el empalme de la vista escrito encima del
+ * que la toma guarda, así que la pantalla se probaba contra un estado que en la
+ * app no existe.
+ */
+
+function resumenEnVivo() {
+    const s = sesionEnVivo();
+    if (!s) return null;
+    const abierta = s.tomas.find(t => t.outMs == null);
+    return {
+        secuencia: s.secuencia,
+        clase: s.clase,
+        parte: s.parte,
+        curso: s.curso,
+        ceroMs: s.ceroMs,
+        claqueta: s.claqueta,
+        vistas: VISTAS,
+        dir: s.dir,
+        // Dónde van a caer los dos archivos. El motor lo manda con cada resumen y
+        // es de donde el cartel de arriba saca la ruta que muestra.
+        archivos: s.archivos,
+        // Sigue diciendo que sí mientras la sesión exista, incluso cerrando: allá
+        // es una constante del resumen y quien decide que se terminó es que no
+        // haya sesión, no este campo.
+        grabando: true,
+        // El temario del CD con su última cobertura, y si hay una medición en
+        // vuelo: el panel lo dice mientras tarda.
+        temario: enMemoria.temario,
+        midiendoTemario: Boolean(enMemoria.midiendoTemario),
+        // Cómo viene hablando, agregado sobre las tomas que quedan. Va calculado
+        // y no escrito a mano porque del otro lado también lo calcula el motor.
+        lengua: agregadoDeLengua(s.tomas),
+        terminando: Boolean(s.terminando),
+        segundos: s.segundos,
+        abierta: abierta ? abierta.id : null,
+        historia: {
+            atras: enMemoria.historia.atras.length,
+            adelante: enMemoria.historia.adelante.length,
+            queAtras: ultimo(enMemoria.historia.atras),
+            queAdelante: ultimo(enMemoria.historia.adelante)
+        },
+        tomas: s.tomas.map(t => tomaParaLaPantalla(t, s.tomas))
+    };
+}
+
+/**
+ * Una toma como la manda el motor: sus campos y ninguno más.
+ *
+ * La lista es la de `espejo.resumen` y está escrita entera a propósito. Antes
+ * salía la toma tal como la maqueta la guarda, así que la pantalla veía campos
+ * que la app no manda —y podía llegar a dibujar con uno de ellos sin que nada
+ * fallara hasta estar en Electron.
+ */
+function tomaParaLaPantalla(toma, tomas) {
+    return {
+        id: toma.id,
+        vista: toma.vista,
+        comentario: toma.comentario || '',
+        descartada: Boolean(toma.descartada),
+        cerradaSola: Boolean(toma.cerradaSola),
+        pausaAdentro: toma.pausaAdentro || null,
+        repiteA: toma.repiteA || null,
+        cuenta: toma.cuenta || '',
+        inMs: toma.inMs,
+        outMs: toma.outMs,
+        palabras: toma.palabras,
+        lengua: toma.lengua || null,
+        // Rehecho en cada lectura, como allá: la sugerencia habla de una palabra
+        // concreta de la toma anterior, y esa palabra se mueve.
+        empalme: empalmeParaLaPantalla(toma, tomas),
+        antes: toma.antes || [],
+        despues: toma.despues || [],
+        comentarios: toma.comentarios
+    };
+}
+
+function armarSesion(cero, conReparto) {
+    const tomas = conReparto ? elReparto(cero) : [];
+    if (tomas.length) empalmePagado(tomas);
+
+    return {
+        secuencia: '05_curso-de-prueba_2026-09-08_15-20-00',
+        clase: 5, parte: 1, curso: '2609_curso-de-prueba',
+        ceroMs: cero,
+        // La forma entera de `leerClaqueta`: la frase que se oyó alrededor del
+        // golpe y de dónde salió. Sin `origen` y sin `frase` el cartel de arriba
+        // no podía decir ni qué se oyó ni que la puso una persona, o sea que la
+        // mitad de sus estados no se veía.
+        claqueta: { ms: cero + 6000, frase: 'Claqueta 5, clase 5.', confirmada: true, origen: 'golpe' },
+        dir: CURSO,
+        archivos: archivosDeNotas(CURSO, '05_curso-de-prueba_2026-09-08_15-20-00'),
+        // Cuánto audio hay escrito. Allá es `captura.segundos` y crece con el PCM
+        // que manda la ventana; acá lo mueve el reloj en cada empujón.
+        segundos: conReparto ? CORRIDOS : 0,
+        terminando: false,
+        // El reloj de la sesión: hasta dónde se oyó y por qué renglón del guion va
+        // el profesor (ver `seguirHablando`).
+        relojMs: Date.now(),
+        oidoHastaMs: cero + (conReparto ? CORRIDOS : 0),
+        renglon: conReparto ? 4 : 0,
+        porDecir: [],
+        tomas
+    };
+}
+
+/**
+ * El reparto de la clase en curso: los casos elegidos que hay para mirar.
+ *
+ * Va aparte de `armarSesion` porque una sesión de verdad arranca sin nada y esto
+ * es el atajo para no tener que grabar cuatro tomas antes de poder opinar.
+ */
+function elReparto(cero) {
+    return [
         // Dos comentarios en la misma toma, y no uno: con uno solo el
         // subrayado se explica solo, y lo que hay que poder mirar es cómo se
         // distingue cuál es cuál cuando hay varios.
@@ -799,45 +1014,35 @@ function armarSesion(cero) {
         // sesión" le seguía sumando segundos, o sea un ritmo cayéndose sola.
         tomaDe(3, ABRE_LA_ULTIMA, CORRIDOS - ABRE_LA_ULTIMA, { outMs: null, lengua: null }, cero)
     ];
+}
 
-    // El empalme de la 2 con la 1, que es lo que el modelo contestó cuando la 2
-    // cerró. Se guarda acá y no en la toma porque es lo único que allá queda
-    // guardado —lo que se pagó—: la sugerencia se rehace al servir contra las
-    // palabras de ese momento. La 2 ya venía con la nota "Repite el arranque",
-    // así que es la que corresponde.
+/**
+ * El empalme de la 2 con la 1: lo que el modelo contestó cuando la 2 cerró.
+ *
+ * **Va colgando de la toma y en los dos campos que allá usa cada medida**: `det`
+ * es lo que se apuntó gratis y `ia` lo que contestó el proveedor, que es como
+ * `medir-toma.js` reparte todo lo que se mide de una toma. Se guarda el corte y
+ * el porqué y no la sugerencia, porque la sugerencia se rehace al servir contra
+ * las palabras de ese momento. La 2 ya venía con la nota "Repite el arranque",
+ * así que es la que corresponde.
+ */
+function empalmePagado(tomas) {
     const corte = abreLaUltimaFrase(tomas[0]);
-    enMemoria.empalmePagado = corte ? {
-        toma: tomas[1].id,
-        contra: tomas[0].id,
-        parecido: 0.62,
-        paredMs: corte.t,
-        porque: 'Las dos tomas explican que hay que darle contexto de todo el proyecto y no un pedido puntual.'
-    } : null;
-
-    return {
-        secuencia: '05_curso-de-prueba_2026-09-08_15-20-00',
-        clase: 5, parte: 1, curso: '2609_curso-de-prueba',
-        ceroMs: cero,
-        claqueta: { ms: cero + 6000, confirmada: true },
-        vistas: VISTAS,
-        dir: CURSO,
-        // Dónde van a caer los dos archivos. El motor lo manda con cada resumen y
-        // es de donde el cartel de arriba saca la ruta que muestra.
-        archivos: archivosDeNotas(CURSO, '05_curso-de-prueba_2026-09-08_15-20-00'),
-        grabando: true,
-        terminando: false,
-        segundos: CORRIDOS,
-        abierta: 4,
-        // El temario del CD arranca vacío, que es como arranca una clase: el
-        // bloque de cobertura se mira primero en su estado pendiente, y pegar la
-        // lista (`grabarTemario`) es lo que lo llena.
-        temario: enMemoria.temario,
-        midiendoTemario: false,
-        // Cómo viene hablando, agregado sobre las tomas que quedan. Va calculado
-        // y no escrito a mano porque del otro lado también lo calcula el motor.
-        lengua: agregadoDeLengua(tomas),
-        historia: { atras: 0, adelante: 0, queAtras: '', queAdelante: '' },
-        tomas
+    if (!corte) return;
+    tomas[1].empalme = {
+        det: { version: 1, contra: tomas[0].id, parecido: 0.62, porRegla: null },
+        ia: {
+            estado: 'listo',
+            porque: '',
+            modelo: 'claude-sonnet-5-thinking-high',
+            hallazgos: [{
+                contra: tomas[0].id,
+                origen: 'modelo',
+                paredMs: corte.t,
+                porque: 'Las dos tomas explican que hay que darle contexto de todo el proyecto y no un pedido puntual.',
+                cita: (tomas[0].palabras || []).filter(w => w.t >= corte.t).map(w => w.texto).join(' ')
+            }]
+        }
     };
 }
 
@@ -852,7 +1057,8 @@ function armarSesion(cero) {
  */
 
 function tomaEnVivo(id) {
-    return sesionEnVivo().tomas.find(t => t.id === id) || null;
+    const sesion = sesionEnVivo();
+    return (sesion && sesion.tomas.find(t => t.id === id)) || null;
 }
 
 const fotoDeToma = t => (t ? JSON.parse(JSON.stringify(t)) : null);
@@ -871,17 +1077,36 @@ const fotoDeToma = t => (t ? JSON.parse(JSON.stringify(t)) : null);
  */
 const porElPuente = x => (x == null ? x : JSON.parse(JSON.stringify(x)));
 
+/**
+ * Un cambio a mano sobre la clase en curso (`cambiosToma.editar`).
+ *
+ * **Lo que allá no se hace, acá tampoco**, y eso es la mitad del valor de esto:
+ * un gesto que la maqueta acepta y la app rechaza deja probar una pantalla que no
+ * existe. Los tres que se plantan —el borde que no se movió, reabrir la que no es
+ * la última, eliminar una que no está descartada— tienen su porqué al lado.
+ *
+ * @throws si el tipo de cambio no existe, como `vivo.aplicar`: el canal de allá
+ *   no lo atrapa, así que la ventana recibe una promesa rota y no un estado.
+ */
 function manoEnVivo(cambio) {
     const c = cambio || {};
     const sesion = sesionEnVivo();
+    if (!sesion) return null;
     const toma = tomaEnVivo(c.toma);
-    if (!toma) return sesion;
+    if (!toma) return resumenEnVivo();
 
     const antes = fotoDeToma(toma);
+    let sigue = true;
+
     if (c.tipo === 'vista') toma.vista = c.vista;
     else if (c.tipo === 'nota') toma.comentario = String(c.texto || '');
-    else if (c.tipo === 'descartar') toma.descartada = Boolean(c.descartada);
-    else if (c.tipo === 'comentar') {
+    else if (c.tipo === 'descartar') {
+        toma.descartada = Boolean(c.descartada);
+        // Lo que la toma decía deja de contar para la clase, así que un objetivo
+        // que estaba cubierto por ella deja de estarlo: allá se vuelve a medir la
+        // cobertura en el mismo gesto (`temarioSesion.pedir` en `editar`).
+        pedirLaCobertura();
+    } else if (c.tipo === 'comentar') {
         toma.comentarios = (toma.comentarios || []).concat([{
             desdeMs: Number(c.desdeMs), hastaMs: Number(c.hastaMs),
             texto: String(c.texto || ''), comentario: String(c.comentario || '')
@@ -892,29 +1117,71 @@ function manoEnVivo(cambio) {
         // Contra quién se descartó, y no un simple sí: si la toma pasa a empalmar
         // con otra, la pregunta es otra y esta marca no tiene que valer.
         //
-        // Y en la TOMA, no en un campo suelto de `enMemoria`, porque es donde lo
-        // guarda el motor (`empalme.descartar`, que escribe `empalme.descartado`).
-        // Lo que cuelga de la toma entra en la foto de `fotoDeToma`, así que
-        // descartar se deshace con Cmd-Z como todo lo demás; en un campo aparte
-        // la maqueta mentía justo en eso.
-        toma.empalmeDescartado = Number(c.contra);
+        // Y en `empalme.descartado` de la toma, que es donde lo escribe
+        // `empalme.descartar`: lo que cuelga de la toma entra en la foto de
+        // `fotoDeToma`, así que descartar se deshace con Cmd-Z como todo lo demás.
+        toma.empalme = {
+            ...(toma.empalme || {}),
+            descartado: { contra: Number(c.contra), ms: Date.now() }
+        };
     } else if (c.tipo === 'borde') {
-        repartirEnMemoria(toma, c.borde, Number(c.paredMs));
+        // Un borde que cae donde ya estaba no es un cambio, y uno que cruza al
+        // otro no se mueve: los dos gestos llegan de un arrastre que volvió a su
+        // sitio o que se pasó de largo, y un paso en el historial que al
+        // deshacerse no se ve hace apretar de nuevo pensando que no funcionó.
+        const estaba = c.borde === 'in' ? toma.inMs : toma.outMs;
+        sigue = c.paredMs != null && Number(c.paredMs) !== estaba &&
+            moverElBorde(toma, c.borde, Number(c.paredMs));
     } else if (c.tipo === 'reabrir') {
-        toma.outMs = null;
-        toma.despues = [];
+        reabrirEnMemoria(sesion, toma);
     } else if (c.tipo === 'eliminar') {
-        if (!toma.descartada) return sesion;
-        sesion.tomas.splice(sesion.tomas.indexOf(toma), 1);
+        // Sin descartarla antes no se elimina: el botón solo existe en una
+        // descartada, así que esto es la red de abajo y se planta en silencio.
+        sigue = toma.descartada;
+        if (sigue) sesion.tomas.splice(sesion.tomas.indexOf(toma), 1);
+    } else {
+        throw new Error(`Cambio sin definir: ${c.tipo}`);
     }
 
-    anotarEnMemoria({
-        que: comoSeLlamaEnMemoria(c),
-        id: toma.id,
-        antes,
-        despues: c.tipo === 'eliminar' ? null : fotoDeToma(toma)
-    });
-    return sesionEnVivo();
+    if (sigue) {
+        anotarEnMemoria({
+            que: comoSeLlamaEnMemoria(c),
+            id: toma.id,
+            antes,
+            despues: c.tipo === 'eliminar' ? null : fotoDeToma(toma)
+        });
+    }
+    return resumenEnVivo();
+}
+
+/**
+ * El borde movido, con las dos reglas de `vivo.moverBorde`: un IN no pasa el OUT
+ * y un OUT no pasa el IN. Acá se movía sin preguntar, así que la maqueta dejaba
+ * dar vuelta una toma.
+ *
+ * @returns {boolean} si se movió
+ */
+function moverElBorde(toma, cual, paredMs) {
+    if (cual === 'in' && toma.outMs != null && paredMs >= toma.outMs) return false;
+    if (cual === 'out' && toma.inMs != null && paredMs <= toma.inMs) return false;
+    repartirEnMemoria(toma, cual, paredMs);
+    return true;
+}
+
+/**
+ * Reabrir: solo la última, y solo si no hay otra abierta (`cambiosToma.reabrir`).
+ *
+ * Dos tomas abiertas a la vez rompen todo lo demás —el ciclo de señales le mete
+ * las palabras a "la abierta" y no hay tal cosa—, así que allá el gesto se planta.
+ * Acá reabría cualquiera: la maqueta podía dejar la pantalla con dos tomas en
+ * curso, que es un estado que la app no puede tener.
+ */
+function reabrirEnMemoria(sesion, toma) {
+    const tomas = sesion.tomas;
+    if (tomas.some(t => t.outMs == null) || toma !== tomas[tomas.length - 1]) return;
+    toma.outMs = null;
+    toma.cerradaSola = false;
+    toma.despues = [];
 }
 
 function comoSeLlamaEnMemoria(c) {
@@ -924,8 +1191,9 @@ function comoSeLlamaEnMemoria(c) {
     if (c.tipo === 'descartar') return `${c.descartada ? 'descartar' : 'recuperar'} ${cual}`;
     if (c.tipo === 'comentar') return `comentar «${String(c.texto || '').slice(0, 30)}»`;
     if (c.tipo === 'borrar-comentario') return `quitar un comentario de ${cual}`;
-    if (c.tipo === 'descartar-ajuste') return `descartar el ajuste de ${cual}`;
+    if (c.tipo === 'descartar-ajuste') return `descartar el ajuste de corte de ${cual}`;
     if (c.tipo === 'borde') return `mover el ${c.borde === 'in' ? 'IN' : 'OUT'} de ${cual}`;
+    if (c.tipo === 'reabrir') return `reabrir ${cual}`;
     if (c.tipo === 'eliminar') return `eliminar ${cual}`;
     if (c.tipo === 'cerrar') return `cerrar ${cual}`;
     return `el cambio en ${cual}`;
@@ -937,20 +1205,22 @@ function anotarEnMemoria(paso) {
 }
 
 function volverEnMemoria(hacia) {
+    const sesion = sesionEnVivo();
+    if (!sesion) return { ok: false, estado: null };
     const desde = hacia === 'adelante' ? enMemoria.historia.adelante : enMemoria.historia.atras;
     const a = hacia === 'adelante' ? enMemoria.historia.atras : enMemoria.historia.adelante;
     const paso = desde[desde.length - 1];
-    if (!paso) return { ok: false, estado: sesionEnVivo() };
+    if (!paso) return { ok: false, estado: resumenEnVivo() };
 
     const foto = hacia === 'adelante' ? paso.despues : paso.antes;
-    const tomas = sesionEnVivo().tomas;
+    const tomas = sesion.tomas;
     if (foto && foto.outMs == null && tomas.some(t => t.id !== paso.id && t.outMs == null)) {
         return {
             ok: false,
             error: `No puedo ${hacia === 'adelante' ? 'rehacer' : 'deshacer'} «${paso.que}»: ` +
                 'mientras tanto se abrió otra toma, y dos tomas abiertas a la vez rompen ' +
                 'el ciclo de señales. Cerrá la de ahora y volvé a intentar.',
-            estado: sesionEnVivo()
+            estado: resumenEnVivo()
         };
     }
 
@@ -966,7 +1236,9 @@ function volverEnMemoria(hacia) {
         const detras = tomas.findIndex(t => t.id > paso.id);
         tomas.splice(detras === -1 ? tomas.length : detras, 0, foto);
     }
-    return { ok: true, que: paso.que, estado: sesionEnVivo() };
+    // Deshacer un descarte también mueve la cobertura, como allá.
+    pedirLaCobertura();
+    return { ok: true, que: paso.que, estado: resumenEnVivo() };
 }
 
 function grabadas() {
@@ -1000,6 +1272,30 @@ function grabadas() {
 }
 
 /**
+ * La sesión que se acaba de terminar, ya como una clase de la lista.
+ *
+ * Es el sidecar que escribe `terminar()`: lo mismo que se estaba grabando, sin la
+ * sesión. Hace falta porque si no la clase recién terminada se evaporaba —la
+ * maqueta volvía a la pantalla de reposo y la lista de grabadas seguía teniendo
+ * las tres de siempre—, y lo primero que hace cualquiera después de terminar es
+ * buscarla ahí.
+ */
+function comoQuedaGrabada(sesion) {
+    const tomas = porElPuente(sesion.tomas);
+    return {
+        secuencia: sesion.secuencia,
+        clase: sesion.clase, parte: sesion.parte, curso: sesion.curso,
+        ceroMs: sesion.ceroMs,
+        claqueta: sesion.claqueta,
+        vistas: VISTAS,
+        lengua: agregadoDeLengua(tomas),
+        tomas,
+        carpeta: sesion.dir,
+        archivos: sesion.archivos
+    };
+}
+
+/**
  * La paleta entera, una toma por vista y en el orden en que se ofrecen.
  *
  * No pretende ser una clase: es para poder aprobar los colores de un vistazo sin
@@ -1027,6 +1323,8 @@ function muestrarioDeVistas(hecha) {
 
 const enMemoria = {
     notas: {}, planes: {}, temario: null,
+    // Si hay una medición de cobertura en vuelo, como `sesion.midiendoTemario`.
+    midiendoTemario: false,
     // La sesión que se está grabando, para que lo que se le hace quede hecho, y
     // lo que se le hizo, para poder volver (ver `sesionEnVivo`).
     sesion: null,
@@ -1034,19 +1332,19 @@ const enMemoria = {
 };
 
 /**
- * El temario pegado y su cobertura, de mentira.
+ * El temario recién pegado, sin medir (`temarioSesion.poner`).
  *
- * Del lado de la app esto lo parte `engine/temario.js` y lo mide un modelo; acá
- * hace falta un parseo mínimo para que la lista pegada se vea partida, y una
- * cobertura inventada para poder mirar los dos estados a la vez. **Deja un
- * objetivo cubierto y otro sin cubrir a propósito**: con todos cubiertos o todos
- * faltando, la mitad del diseño del bloque no aparece nunca.
+ * Del lado de la app esto lo parte `engine/temario.js`; acá hace falta un parseo
+ * mínimo para que la lista pegada se vea partida.
  *
- * `como: 'ia'` es lo que dibuja la medición normal; poniéndolo en `'palabras'`
- * se ve el cartel de "es una aproximación", y con `fallo` el de "no se pudo
- * medir". Los tres estados se miran cambiando esta función.
+ * **Sale sin cobertura y eso es el arreglo.** La medición la hace un modelo y
+ * tarda, así que allá el estado vuelve con `cobertura: null` y
+ * `midiendoTemario: true`, y el resultado llega después por un aviso. Acá la
+ * lista volvía ya medida en el mismo suspiro, o sea que el renglón que el panel
+ * muestra mientras se mide —el único que explica por qué la lista está unos
+ * segundos sin resultado— no existía en la maqueta y no se podía aprobar.
  */
-function temarioDe(texto) {
+function temarioPegado(texto) {
     const objetivos = String(texto || '')
         .split(/\r?\n/)
         .map(r => r.replace(/^\s*(?:[-–—*•·]+\s*|\d{1,2}\s*[.)\-–]\s+)/, '').trim())
@@ -1058,6 +1356,27 @@ function temarioDe(texto) {
         .map((tema, i) => ({ n: i + 1, texto: tema }));
     if (!objetivos.length) return null;
 
+    return {
+        texto: String(texto || ''),
+        objetivos,
+        origen: 'pegado',
+        cobertura: null,
+        fallo: null,
+        abstenido: null
+    };
+}
+
+/**
+ * La cobertura de mentira, para poder mirar los dos estados a la vez.
+ *
+ * **Deja un objetivo cubierto y otro sin cubrir a propósito**: con todos
+ * cubiertos o todos faltando, la mitad del diseño del bloque no aparece nunca.
+ *
+ * `como: 'ia'` es lo que dibuja la medición normal; poniéndolo en `'palabras'`
+ * se ve el cartel de "es una aproximación", y con `fallo` el de "no se pudo
+ * medir". Los tres estados se miran cambiando esta función.
+ */
+function coberturaDe(objetivos) {
     // Las tomas cerradas de la sesión: es de donde tiene que salir el número que
     // se muestra al lado de un objetivo cubierto, porque es el que se puede ir a
     // mirar. Inventarlo dejaría el panel señalando tomas que no están.
@@ -1073,20 +1392,79 @@ function temarioDe(texto) {
     const cubiertos = medidos.filter(o => o.cubierto).length;
 
     return {
-        texto: String(texto || ''),
-        objetivos,
-        origen: 'pegado',
-        fallo: null,
-        cobertura: {
-            como: 'ia',
-            medidoEn: new Date().toISOString(),
-            modelo: 'claude-sonnet-5-thinking-high',
-            huella: `maqueta-${objetivos.length}`,
-            cubiertos,
-            faltan: medidos.length - cubiertos,
-            objetivos: medidos
-        }
+        como: 'ia',
+        medidoEn: new Date().toISOString(),
+        modelo: 'claude-sonnet-5-thinking-high',
+        huella: `maqueta-${objetivos.length}`,
+        cubiertos,
+        faltan: medidos.length - cubiertos,
+        objetivos: medidos
     };
+}
+
+/**
+ * Larga la medición de la cobertura, y una sola a la vez (`temarioSesion.pedir`).
+ *
+ * Lo que llega después llega por el mismo camino que allá: `espejo.fijar`, o sea
+ * un aviso con el estado entero. Sin pantalla que lo pida y sin que nadie toque
+ * nada, que es lo que no se podía verificar hasta que la maqueta empujó.
+ */
+function pedirLaCobertura() {
+    if (enMemoria.midiendoTemario || !enMemoria.temario) return;
+    enMemoria.midiendoTemario = true;
+    setTimeout(() => {
+        enMemoria.midiendoTemario = false;
+        if (!enMemoria.temario || !sesionEnVivo()) return;
+        enMemoria.temario = {
+            ...enMemoria.temario,
+            cobertura: coberturaDe(enMemoria.temario.objetivos),
+            fallo: null
+        };
+        empujar();
+    }, DEMORA_DEL_MODELO_MS);
+}
+
+/**
+ * Lo que el motor le hace a una toma que acaba de quedar cerrada.
+ *
+ * Son las dos fases de `medir-toma.js`, y la separación es lo que hay que poder
+ * mirar: `medir` es sincrónico y no falla —el panel tiene número apenas la toma
+ * cierra— y la consulta al modelo tarda y llega después, así que entre las dos
+ * hay un rato en que el bloque dice "midiendo". Ese rato no existía acá: una toma
+ * cerrada a mano se quedaba sin medida para siempre, y `midiendo` —que es un
+ * estado que la pantalla dibuja distinto en dos bloques— no se veía nunca.
+ */
+function medirLaTomaCerrada(toma) {
+    const sesion = sesionEnVivo();
+    if (!sesion) return;
+    const midiendo = () => ({ estado: 'midiendo', porque: '', hallazgos: [] });
+
+    toma.lengua = lenguaDe(Math.max(1, Math.round((toma.outMs - toma.inMs) / 1000)),
+        { ia: midiendo() });
+    const previa = anteriorDeEmpalme(sesion.tomas, toma);
+    if (previa) {
+        toma.empalme = {
+            det: { version: 1, contra: previa.id, parecido: 0.31, porRegla: null },
+            ia: midiendo()
+        };
+    }
+    // Y el texto bueno pide medir el temario otra vez: hay material nuevo, que es
+    // el latido de allá (`temarioSesion.pedir` en `relecturas.rehacer`).
+    pedirLaCobertura();
+
+    setTimeout(() => {
+        // La sesión puede haberse cerrado, y la toma puede haberse eliminado o
+        // deshecho mientras el modelo pensaba: allá el aviso se cae solo cuando
+        // ya no hay dónde escribir.
+        const ahora = sesionEnVivo();
+        if (!ahora || !ahora.tomas.includes(toma)) return;
+        toma.lengua = lenguaDe(Math.max(1, Math.round((toma.outMs - toma.inMs) / 1000)));
+        // Sin hallazgo: la maqueta no puede tener dos tomas que se repitan de
+        // verdad —el guion es genérico— y decir que sí sería subrayar un tramo
+        // que no repite nada. Lo que se mira acá es el camino, no el hallazgo.
+        if (toma.empalme) toma.empalme.ia = { estado: 'listo', porque: '', hallazgos: [] };
+        empujar();
+    }, DEMORA_DEL_MODELO_MS);
 }
 
 /**
@@ -1105,16 +1483,8 @@ let yaGrabadas = null;
 const listaGrabadas = () => (yaGrabadas || (yaGrabadas = grabadas()));
 
 /**
- * El mismo cambio que `vivo.aplicar` del lado del motor, y solo los mismos: los
- * que se resuelven con lo que ya está escrito. Mover un borde entra —las orillas
- * de la toma están acá, así que es repartir de nuevo lo mismo— y reabrir sobre
- * una clase cerrada tiene que fallar acá también, porque en la app falla.
- */
-/**
  * Las tres listas juntas, el borde corrido, y a repartir de nuevo: es lo que hace
- * `moverBordeGuardado` allá, en cuatro líneas y sin sus reglas. Acá alcanza con
- * que la maqueta muestre el texto repartido; lo que decide qué borde es legal se
- * prueba con el motor de verdad.
+ * `moverBordeGuardado` allá, en cuatro líneas.
  *
  * Lo usan las dos: la clase en curso y una ya grabada. Es lo mismo que del otro
  * lado, donde el reparto vive en un solo sitio por el mismo motivo.
@@ -1128,12 +1498,29 @@ function repartirEnMemoria(toma, borde, paredMs) {
     toma.despues = toma.outMs == null ? [] : guardadas.filter(w => w.t >= toma.outMs);
 }
 
+/**
+ * Un cambio sobre una clase ya grabada (`clasesGrabadas.editarGrabada`).
+ *
+ * **Los que entran son los de `vivo.aplicar` y ni uno más ni uno menos**: los que
+ * se resuelven con lo que ya está escrito. `descartar-ajuste` entra —el descarte
+ * es una marca en la toma y no pide audio— y acá quedaba afuera, así que el botón
+ * "Descartar ajuste" de una clase terminada parecía roto en la maqueta y anda en
+ * la app. `reabrir` queda afuera y con su motivo, y lo que no existe es un error
+ * de programa.
+ *
+ * Y el borde tiene el límite de allá: fuera del texto guardado no se mueve. Acá
+ * se movía siempre, o sea que la maqueta dejaba arrastrar el OUT de una clase
+ * terminada más allá de lo que se leyó del audio, que es el gesto que en la app
+ * contesta "usá Regenerar".
+ *
+ * @throws como allá; el puente lo atrapa y lo devuelve como `{ok:false, error}`.
+ */
 function editarEnMemoria(json, cambio) {
     const c = cambio || {};
     const clase = listaGrabadas().find(x => x.archivos.json === json);
-    if (!clase) return { ok: false, error: 'No encuentro esa clase.' };
+    if (!clase) throw new Error('No encuentro esa clase.');
     const toma = clase.tomas.find(x => x.id === c.toma);
-    if (!toma) return { ok: false, error: `Esa clase no tiene la toma ${c.toma}.` };
+    if (!toma) throw new Error(`Esa clase no tiene la toma ${c.toma}.`);
 
     if (c.tipo === 'vista') toma.vista = c.vista;
     else if (c.tipo === 'nota') toma.comentario = String(c.texto || '');
@@ -1145,22 +1532,161 @@ function editarEnMemoria(json, cambio) {
         }]);
     } else if (c.tipo === 'borrar-comentario') {
         toma.comentarios = (toma.comentarios || []).filter((_x, i) => i !== c.indice);
-    } else if (c.tipo === 'borde') {
-        repartirEnMemoria(toma, c.borde, Number(c.paredMs));
-    } else {
-        return {
-            ok: false,
-            error: `Sobre una clase ya grabada no se puede "${c.tipo}": ` +
-                'con la clase cerrada eso pide volver a oír el audio, y eso es "Regenerar".'
+    } else if (c.tipo === 'descartar-ajuste') {
+        toma.empalme = {
+            ...(toma.empalme || {}),
+            descartado: { contra: Number(c.contra), ms: Date.now() }
         };
+    } else if (c.tipo === 'borde') {
+        bordeDeLoGuardado(toma, c.borde, Number(c.paredMs));
+    } else if (c.tipo === 'reabrir') {
+        throw new Error('Reabrir es de la clase que se está grabando. Con la ' +
+            'clase cerrada, una toma sin OUT no llega al XML: para que termine ' +
+            'más adelante, arrastrá la línea roja.');
+    } else {
+        throw new Error(`Cambio sin definir: ${c.tipo}`);
     }
-    return { ok: true, archivos: clase.archivos };
+    return { archivos: clase.archivos };
+}
+
+/**
+ * El borde de una clase terminada: dentro del texto que quedó guardado y nada
+ * más (`moverBordeGuardado`).
+ *
+ * Con la clase cerrada no hay ciclo que relea nada, así que el único texto que
+ * respalda el borde es el que está en el sidecar —la toma y sus dos orillas—. Más
+ * allá, el transcript seguiría diciendo lo de antes mientras el marcador dice
+ * otra cosa, y ese cue es lo que reancla el bloque en post.
+ */
+function bordeDeLoGuardado(toma, borde, paredMs) {
+    const guardadas = (toma.antes || []).concat(toma.palabras || [], toma.despues || []);
+    const ultima = guardadas[guardadas.length - 1];
+    if (!guardadas.length || !Number.isFinite(paredMs) ||
+        paredMs < guardadas[0].t || paredMs > ultima.t) {
+        throw new Error('Ese borde cae fuera del texto que quedó guardado. ' +
+            'Corrilo hasta donde llega el gris y usá "Regenerar": relee la toma ' +
+            'del audio y deja otros segundos de contexto para seguir.');
+    }
+    // Un borde que cruza al otro no explota: no se mueve y la línea vuelve a su
+    // sitio sola al repintar, igual que en la clase en curso.
+    moverElBorde(toma, borde, paredMs);
 }
 
 /* ─── El puente ──────────────────────────────────────────────────────────── */
 
 const oyentes = {};
 const avisar = (canal, payload) => { if (oyentes[canal]) oyentes[canal](payload); };
+
+/* ─── El empujón del estado ──────────────────────────────────────────────
+ *
+ * **El motor manda el estado entero cada tres segundos, haya novedades o no.** Es
+ * la pasada del ciclo de señales (`buscarSenales` en `engine/grabacion.js`): se
+ * oye lo último, se abren o cierran tomas, y al final va el estado con lo que se
+ * acaba de oír al lado. Además lo manda `espejo.fijar` en cada cosa que cambia
+ * lejos de un gesto: una medida que llegó, la cobertura del temario, un borde
+ * releído.
+ *
+ * La maqueta no mandaba NADA, y eso escondía la mitad de esta pantalla: todo lo
+ * que la interfaz hace entre dos repintados espontáneos —que es donde vivió la
+ * familia entera de bugs de esta tanda: el foco, la tarjeta ocupada, el
+ * comentario abierto al margen— solo se podía verificar con un sustituto, un
+ * repintado disparado a mano desde otro gesto. Y un sustituto no prueba lo mismo:
+ * un gesto trae un clic, y el empujón llega sin que nadie toque nada.
+ *
+ * Va por el mismo canal (`grabar-aviso`), con la misma forma
+ * (`{tipo:'estado', estado, eventos, oyendo}`) y a la misma cadencia, que llega
+ * servida desde el motor y no copiada acá (`MOTOR.CICLO_MS`).
+ */
+
+let elEmpujon = null;
+
+function empezarAEmpujar() {
+    if (elEmpujon) return;
+    elEmpujon = setInterval(unaPasada, MOTOR.CICLO_MS);
+}
+
+function pararElEmpujon() {
+    clearInterval(elEmpujon);
+    elEmpujon = null;
+}
+
+/** Una pasada del ciclo de señales: se oye lo último y va el estado. */
+function unaPasada() {
+    const sesion = sesionEnVivo();
+    if (!sesion) return pararElEmpujon();
+    empujar(seguirHablando(sesion));
+}
+
+/**
+ * El estado a la ventana.
+ *
+ * **`oyendo` va SOLO en el aviso del ciclo y no en los de `espejo.fijar`**, y la
+ * diferencia se ve en la pantalla: la línea "Oyendo:" se apaga cuando el campo
+ * llega vacío y se queda como está cuando no llega, así que mandarlo en todos los
+ * avisos la borraría cada vez que se mide una toma.
+ *
+ * @param {{eventos:Array, oyendo:string}} [oido] lo que trajo la pasada, si esto
+ *   viene del ciclo
+ */
+function empujar(oido) {
+    const estado = resumenEnVivo();
+    if (!estado) return;
+    const aviso = { tipo: 'estado', estado: porElPuente(estado) };
+    if (oido) Object.assign(aviso, oido);
+    avisar('grabar-aviso', aviso);
+}
+
+/**
+ * Lo que se dijo desde la pasada anterior: el audio crece y la toma abierta se
+ * llena.
+ *
+ * Es lo que hace `aplicarSenales` con las palabras del ciclo liviano, y hace falta
+ * por lo que dice el motor de su propio empujón: "así las palabras de la toma
+ * abierta van apareciendo en pantalla, que es lo que dice «esto está oyendo bien»
+ * sin tener que esperar a que la toma cierre". Con una toma abierta congelada, el
+ * empujón de la maqueta sería un repintado que dibuja siempre lo mismo, y una
+ * pantalla que no se mueve no prueba que se pueda leer mientras se mueve.
+ *
+ * El reloj es el de la sesión y no `Date.now()`: la clase de la maqueta puede
+ * tener su cero fijo —eso es lo que hace repetibles las capturas— y las palabras
+ * tienen que seguir donde las dejó, no nueve horas más adelante.
+ *
+ * Lo que NO hace la maqueta es abrir y cerrar tomas sola. Está dicho en el
+ * encabezado del archivo: el reparto se elige, y un reparto que cambia debajo de
+ * la mano no se puede juzgar ni verificar. Cerrar una toma se prueba con el botón.
+ */
+function seguirHablando(sesion) {
+    const paso = Date.now() - sesion.relojMs;
+    sesion.relojMs += paso;
+    // Cuánto audio hay escrito, que allá lo mueve el PCM que manda la ventana.
+    sesion.segundos += Math.round(paso / 1000);
+
+    const desde = sesion.oidoHastaMs;
+    sesion.oidoHastaMs += paso;
+    const dichas = loQueSeDiceEntre(sesion, desde, sesion.oidoHastaMs);
+
+    // A la toma abierta y a ninguna otra. Entre dos tomas lo que se dice no es de
+    // nadie y aun así se oye: es lo único que avisa de que el micrófono está
+    // agarrando la sala en vez del Rodecaster antes de media clase.
+    const abierta = sesion.tomas.find(t => t.outMs == null);
+    if (abierta) abierta.palabras.push(...dichas);
+    return { eventos: [], oyendo: dichas.map(w => w.texto).join(' ') };
+}
+
+/** Las palabras que se dicen entre dos momentos, al ritmo del curso. */
+function loQueSeDiceEntre(sesion, desdeMs, hastaMs) {
+    const cuantas = Math.round((RITMO_DE_HABLA * (hastaMs - desdeMs)) / 60000);
+    if (cuantas < 1) return [];
+    const paso = (hastaMs - desdeMs) / (cuantas + 1);
+    const dichas = [];
+    for (let n = 0; n < cuantas; n++) {
+        if (!sesion.porDecir.length) {
+            sesion.porDecir = GUION[sesion.renglon++ % GUION.length].split(' ');
+        }
+        dichas.push(palabra(Math.round(desdeMs + paso * (n + 1)), sesion.porDecir.shift()));
+    }
+    return dichas;
+}
 
 window.cc = {
     appInfo: async () => ({ version: '0.9.0-maqueta', arch: 'arm64', electron: '33.2.0', platform: 'darwin' }),
@@ -1315,24 +1841,75 @@ window.cc = {
         return { peaks: picos(fromSec, toSec, payload.buckets || 900), durationSec: DURACION_SEC, fromSec, toSec };
     },
 
-    grabarIniciar: async () => ({ ok: true, estado: porElPuente(sesionEnVivo()) }),
+    /**
+     * "Iniciar grabación": una sesión NUEVA, o sea vacía.
+     *
+     * Como allá: sin carpeta no arranca, con una sesión en curso no arranca, y la
+     * que arranca no tiene ninguna toma —las abre el profesor contando—. Acá
+     * contestaba siempre que sí y con la clase de la maqueta ya medio grabada, así
+     * que ni el error ni el estado vacío de la lista se podían mirar.
+     */
+    grabarIniciar: async payload => {
+        const p = payload || {};
+        if (!p.dir) return { ok: false, error: 'Falta la carpeta donde guardar las notas.' };
+        if (sesionEnVivo()) return { ok: false, error: 'Ya hay una grabación en curso.' };
+        ponerAGrabar(Date.now(), false);
+        return { ok: true, estado: porElPuente(resumenEnVivo()) };
+    },
     grabarPcm: () => {},
     // El estado pelado, como el canal de verdad: la pantalla se lo guarda tal
     // cual (`vista.estado = await …`), así que envuelto en `{ok, estado}` dejaba
     // la vista con un objeto que no era un estado y la pantalla se vaciaba.
-    grabarClaqueta: async () => porElPuente(sesionEnVivo()),
-    // Tarda: en la app el motor guarda la lista y le pregunta al modelo, y lo que
-    // hay que poder mirar es que el panel no se rompa mientras eso pasa.
-    grabarTemario: async texto => {
-        enMemoria.temario = temarioDe(texto);
-        await espera(400);
-        return porElPuente(sesionEnVivo());
+    //
+    // Y la claqueta queda EN LA HORA QUE LLEGA y con `origen: 'editor'`, que es lo
+    // que hace que el cartel diga "puesta a mano": acá se ignoraba el argumento y
+    // se contestaba la claqueta de fábrica, o sea que apretar el botón no movía
+    // nada y el estado que el botón existe para producir no se veía nunca.
+    grabarClaqueta: async paredMs => {
+        const sesion = sesionEnVivo();
+        if (!sesion) return null;
+        sesion.claqueta = {
+            ms: Number(paredMs) || Date.now(),
+            frase: '',
+            confirmada: true,
+            origen: 'editor'
+        };
+        return porElPuente(resumenEnVivo());
     },
+    /**
+     * La lista pegada, sin medir todavía.
+     *
+     * Vuelve en el acto y con `midiendoTemario` puesto, como allá: la medición
+     * sale detrás y llega por un aviso (ver `pedirLaCobertura`).
+     */
+    grabarTemario: async texto => {
+        if (!sesionEnVivo()) return null;
+        enMemoria.temario = temarioPegado(texto);
+        pedirLaCobertura();
+        return porElPuente(resumenEnVivo());
+    },
+    // Sin demora, y es a propósito: allá esto es memoria y dos escrituras en
+    // disco, o sea que vuelve en el mismo suspiro. Y esa velocidad es lo que hace
+    // dura la prueba — la respuesta cae en un microtask, o sea ENTRE el mousedown
+    // y el mouseup del clic que la pidió, que es exactamente la ventana donde el
+    // repintado se comía el clic siguiente. Demorarla acá ablandaría el arnés.
     grabarEditar: async cambio => porElPuente(manoEnVivo(cambio)),
-    grabarEditarGrabada: async (json, cambio) => { await espera(120); return editarEnMemoria(json, cambio); },
+    // Envuelto acá y no adentro, como en `ipc/grabar.js`: el motor tira con el
+    // motivo y el puente lo convierte en `{ok:false, error}`, que es lo que la
+    // pantalla muestra tal cual.
+    grabarEditarGrabada: async (json, cambio) => {
+        await espera(120);
+        try {
+            return { ok: true, ...editarEnMemoria(json, cambio) };
+        } catch (err) {
+            return { ok: false, error: err.message };
+        }
+    },
     grabarCerrarToma: async () => {
-        const abierta = sesionEnVivo().tomas.find(t => t.outMs == null);
-        if (!abierta) return porElPuente(sesionEnVivo());
+        const sesion = sesionEnVivo();
+        if (!sesion) return null;
+        const abierta = sesion.tomas.find(t => t.outMs == null);
+        if (!abierta) return porElPuente(resumenEnVivo());
         const antes = fotoDeToma(abierta);
         // En su última palabra, como `finDeToma` del otro lado.
         const ultima = (abierta.palabras || [])[(abierta.palabras || []).length - 1];
@@ -1342,21 +1919,84 @@ window.cc = {
             que: comoSeLlamaEnMemoria({ tipo: 'cerrar', toma: abierta.id }),
             id: abierta.id, antes, despues: fotoDeToma(abierta)
         });
-        return porElPuente(sesionEnVivo());
+        // El estado vuelve YA y la medida llega después, que es el orden de allá:
+        // cerrar una toma la encola para releerla y medirla, y eso tarda.
+        medirLaTomaCerrada(abierta);
+        return porElPuente(resumenEnVivo());
     },
     grabarDeshacer: async () => porElPuente(volverEnMemoria('atras')),
     grabarRehacer: async () => porElPuente(volverEnMemoria('adelante')),
-    // Sin `?grabando` contesta null, que es como abre la app: sin nada en curso.
-    // Con `?grabando` contesta la sesión, así la pantalla la encuentra sola por
-    // el mismo camino que del otro lado y no hay que empujarle un estado a mano.
-    grabarEstado: async () => (abreGrabando() ? porElPuente(sesionEnVivo()) : null),
-    grabarVistas: async () => VISTAS,
-    grabarListar: async () => listaGrabadas(),
-    grabarRegenerar: async () => ({ ok: true }),
-    grabarTerminar: async () => porElPuente(Object.assign(sesionEnVivo(), {
-        grabando: false,
-        archivos: archivosDeNotas(CURSO, sesionEnVivo().secuencia)
-    })),
+    // Null mientras no haya nada grabando, que es como abre la app; con
+    // `?grabando` la sesión ya está puesta y la pantalla la encuentra sola por el
+    // mismo camino que del otro lado.
+    grabarEstado: async () => porElPuente(resumenEnVivo()),
+    grabarVistas: async () => porElPuente(VISTAS),
+    // Copiadas, y sin la que se está grabando. Acá salía la lista VIVA: la ventana
+    // se quedaba con el mismo objeto que la maqueta sigue tocando, así que un
+    // cambio posterior aparecía solo en pantalla sin que nadie repintara nada —la
+    // misma mentira que tenía `grabarEditar` antes de `porElPuente`.
+    grabarListar: async () => {
+        const sesion = sesionEnVivo();
+        return porElPuente(listaGrabadas()
+            .filter(c => !sesion || c.secuencia !== sesion.secuencia));
+    },
+    /**
+     * Releer una clase terminada con el modelo grande.
+     *
+     * Con una grabación en curso NO se puede: el Whisper de las señales tiene la
+     * GPU (`gpu.ocupada` en `clasesGrabadas.regenerar`), y eso es lo primero que
+     * contesta. Acá contestaba `{ok:true}` pelado y en el acto, así que la maqueta
+     * dejaba regenerar mientras grababa —que la app prohíbe— y la tarjeta no podía
+     * mostrar su cuenta de tomas releídas, que llega por aviso.
+     */
+    grabarRegenerar: async json => {
+        if (sesionEnVivo()) {
+            return { ok: false, error: 'Terminá la grabación en curso antes de regenerar una clase.' };
+        }
+        const clase = listaGrabadas().find(c => c.archivos.json === json);
+        if (!clase) return { ok: false, error: 'No encuentro esa clase.' };
+        const tomas = clase.tomas.filter(t => t.inMs != null && t.outMs != null);
+        for (let i = 0; i < tomas.length; i++) {
+            await espera(DEMORA_DE_RELECTURA_MS);
+            avisar('grabar-aviso', { tipo: 'regenerando', json, hechas: i + 1, total: tomas.length });
+        }
+        return { ok: true, tomas: tomas.length, sinAudio: 0, archivos: clase.archivos };
+    },
+    /**
+     * "Terminar": se cierra lo abierto, se relee lo pendiente y se suelta todo.
+     *
+     * Tarda, y eso es lo que pone el botón en "Terminando…" — el estado se empuja
+     * antes de la espera para que la pantalla lo diga mientras pasa.
+     *
+     * Lo que devuelve es el resumen con `archivos`, o sea que sigue diciendo
+     * `grabando: true`: allá es una constante del resumen y quien decide que se
+     * terminó es que después no haya sesión. Y no hay: la sesión se suelta, la
+     * clase pasa a la lista de las grabadas y `grabarEstado` contesta null.
+     */
+    grabarTerminar: async () => {
+        const sesion = sesionEnVivo();
+        if (!sesion) return null;
+        sesion.terminando = true;
+        empujar();
+
+        // El reloj de las señales para acá, en el primer renglón del cierre y no
+        // al final (`cerrarLoAbierto`): de acá en más nadie oye nada, así que la
+        // toma abierta cierra en su última palabra y no en la hora de ahora.
+        pararElEmpujon();
+        const abierta = sesion.tomas.find(t => t.outMs == null);
+        if (abierta) {
+            const ultima = (abierta.palabras || [])[(abierta.palabras || []).length - 1];
+            abierta.outMs = ultima ? ultima.t + 400 : abierta.inMs + 1000;
+            abierta.cerradaSola = true;
+            abierta.despues = [];
+        }
+        await espera(DEMORA_DE_CIERRE_MS);
+
+        const salida = { ...resumenEnVivo(), archivos: sesion.archivos };
+        listaGrabadas().unshift(comoQuedaGrabada(sesion));
+        soltarLaSesion();
+        return porElPuente(salida);
+    },
     onGrabarAviso: cb => { oyentes['grabar-aviso'] = cb; },
 
     reveal: async t => { window.alert(`Mostraría en el Finder:\n${t}`); return { ok: true }; },
@@ -1381,20 +2021,23 @@ window.cc = {
  * abriendo la app nunca se ven quietos. El camino corto es abrir
  * `localhost:4321/?grabando`; desde la consola del navegador:
  *
- *   maqueta.grabando()     la pantalla de grabar, con una sesión en curso
+ *   maqueta.grabando()     pinta la sesión en curso donde esté
+ *   maqueta.empujar()      un empujón del estado a mano, sin esperar el ciclo
  *   maqueta.cargar()       vuelve a meter las dos carpetas
  */
 window.maqueta = {
     sesionEnVivo,
-    grabando: () => window.dev.grabarEstado(sesionEnVivo()),
-    // Para poder descartar una toma y ver que las tasas se mueven, que es lo que
-    // hay que poder mirar del bloque de lenguaje: el motor rehace el agregado en
-    // cada aviso, así que la maqueta necesita poder rehacerlo igual.
+    resumenEnVivo,
+    // Para tocar la sesión desde la consola y ver el resultado sin esperar los
+    // tres segundos del ciclo:
     //
-    //   const s = maqueta.sesionEnVivo();
-    //   s.tomas[1].descartada = true;
-    //   s.lengua = maqueta.agregadoDeLengua(s.tomas);
-    //   dev.grabarEstado(s);
+    //   maqueta.sesionEnVivo().tomas[1].descartada = true;
+    //   maqueta.empujar();
+    //
+    // El agregado de lenguaje ya no hay que rehacerlo a mano: `resumenEnVivo` lo
+    // calcula en cada lectura, igual que el motor.
+    empujar: () => empujar(),
+    grabando: () => window.dev.grabarEstado(resumenEnVivo()),
     agregadoDeLengua,
     cargar: cargarCarpetas,
     datos: { CARPETAS, VISTAS, revision: id => claseEnRevision(id || PROCESABLES[0].id, 1) }
@@ -1425,8 +2068,15 @@ const abreGrabando = () => new URLSearchParams(location.search).has('grabando');
  * Para verlo vacío, se borra la lista desde el mismo desplegable.
  */
 function arrancarGrabando() {
-    ceroDeLaSesion = Date.now() - CORRIDOS * 1000;
-    enMemoria.temario = temarioDe([
+    // Colgado de la hora de ahora y no de la fecha fija: los relojes del bloque
+    // "La sesión" cuentan contra el cero, así que con la fija dirían que se lleva
+    // grabando desde septiembre.
+    ponerAGrabar(Date.now() - CORRIDOS * 1000, true);
+    // Ya medido, y por eso puesto a mano en vez de pedido: una clase a medio
+    // grabar ya tuvo tiempo de que le contestaran, y lo que hay para mirar es la
+    // lista con unos temas dichos y otros no. El camino lento —pegar y esperar—
+    // se ejercita pegando una lista nueva desde el mismo desplegable.
+    const temario = temarioPegado([
         'Objetivos de la clase:',
         '- Mostrar la diferencia entre pedir algo puntual y dar contexto del proyecto',
         '- Explicar qué es spec driven development y por qué cambia la forma de escribir código',
@@ -1434,6 +2084,7 @@ function arrancarGrabando() {
         '- Enseñar a revisar lo que el modelo devuelve antes de aceptarlo',
         '- Dejar el proyecto corriendo con la primera especificación aplicada'
     ].join('\n'));
+    enMemoria.temario = { ...temario, cobertura: coberturaDe(temario.objetivos) };
     window.dev.abrirGrabar();
 }
 

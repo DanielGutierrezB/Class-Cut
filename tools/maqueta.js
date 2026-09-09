@@ -48,6 +48,8 @@ const { pedazoPedido } = require('./../engine/media-server');
 const vivo = require('./../engine/notas-vivo');
 const workspace = require('./../engine/workspace');
 const lengua = require('./../engine/lengua');
+const grabacion = require('./../engine/grabacion');
+const empalme = require('./../engine/empalme');
 const cli = require('./lib/cli');
 const plan = require('./maqueta/plan');
 
@@ -227,7 +229,33 @@ function vistasParaElNavegador() {
         // Las bandas con las que un número entra en zona o no. Estaban copiadas a
         // mano en la maqueta con el argumento de que un navegador pelado no puede
         // importar el motor — que dejó de ser cierto el día que esto existió.
-        'window.maquetaLengua = ' + JSON.stringify({ BANDAS: lengua.BANDAS }) + ';\n';
+        'window.maquetaLengua = ' + JSON.stringify({ BANDAS: lengua.BANDAS }) + ';\n' +
+        'window.maquetaMotor = ' + JSON.stringify(numerosDelMotor()) + ';\n';
+}
+
+/**
+ * Los números con los que el motor se mueve, y con los que la maqueta se tiene
+ * que mover para que verificar contra ella valga algo.
+ *
+ * `CICLO_MS` es cada cuánto el motor empuja el estado a la ventana. La maqueta lo
+ * necesita porque manda el mismo empujón, y llega servido por lo mismo que las
+ * bandas: copiado, la maqueta podía empujar a otro ritmo que la app y el arnés
+ * estaría verificando un mundo que no existe.
+ *
+ * Los del empalme son los dos mínimos con los que un ajuste se puede ofrecer y
+ * cuántas palabras del arranque se subrayan. Estaban escritos a mano en `cc.js`,
+ * así que la maqueta podía ofrecer un ajuste que la app no ofrece.
+ */
+function numerosDelMotor() {
+    return {
+        CICLO_MS: grabacion.CICLO_MS,
+        empalme: {
+            MINIMO_PALABRAS: empalme.MINIMO_PALABRAS,
+            MINIMO_RECORTE_MS: empalme.MINIMO_RECORTE_MS,
+            MINIMO_QUEDA_MS: empalme.MINIMO_QUEDA_MS,
+            CABEZA_PALABRAS: empalme.CABEZA_PALABRAS
+        }
+    };
 }
 
 /**

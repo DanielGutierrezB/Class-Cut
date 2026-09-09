@@ -602,9 +602,9 @@ function casos(wc) {
         {
             que: 'y un repintado que empieza en otra toma tampoco se lo cierra',
             // La otra mitad: la tarjeta se rehace por cualquier motivo —acá, un
-            // gesto en la toma 2; en la app, el estado que llega cada tres
-            // segundos— y el margen tiene que volver a abrirse sobre la tarjeta
-            // nueva. Si no, mirar un comentario duraría hasta el empujón siguiente.
+            // gesto en la toma 2— y el margen tiene que volver a abrirse sobre la
+            // tarjeta nueva. Si no, mirar un comentario duraría hasta el repintado
+            // siguiente.
             hacer: async () => {
                 await clic(wc, boton(2, 'PV'));
                 await dormir(500);
@@ -614,6 +614,35 @@ function casos(wc) {
                 if (!como.abierto || !como.cuantos) return 'el comentario se cerró solo';
                 if (!como.resaltadas) return 'el tramo del comentario dejó de estar resaltado';
                 return como.puesta === 'MG' ? null : `la toma 1 quedó mostrando ${como.puesta}`;
+            }
+        },
+        {
+            que: 'y el empujón de cada tres segundos, sin que nadie toque nada, tampoco',
+            // El mismo caso que el de arriba pero de verdad, y son dos pruebas
+            // distintas. Arriba el repintado sale de un clic: hay un gesto, hay
+            // foco moviéndose, hay una respuesta del puente. Acá no hay nada — el
+            // estado llega solo por `grabar-aviso`, que es como llega en la app la
+            // mayor parte del tiempo, y ese camino no se podía verificar hasta que
+            // la maqueta empezó a empujar.
+            //
+            // El cambio se le hace a la sesión de la maqueta por abajo y no con un
+            // botón, justamente para que el único que pueda traerlo a la pantalla
+            // sea el empujón. Y se espera un ciclo y monedas: menos es una carrera
+            // con el reloj del motor.
+            hacer: async () => {
+                await mirar(wc, `(() => {
+                    window.maqueta.sesionEnVivo().tomas.find(t => t.id === 1).vista = 'S';
+                    return 'cambiada por abajo';
+                })()`);
+                const antes = await mirar(wc, enPantalla(1));
+                if (antes !== 'MG') throw new Error(`la toma 1 se repintó sola antes de tiempo (${antes})`);
+                await dormir(4000);
+            },
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElMargen(1));
+                if (como.puesta !== 'S') return `el empujón no llegó a la tarjeta: muestra ${como.puesta}`;
+                if (!como.abierto || !como.cuantos) return 'el empujón se llevó el comentario abierto';
+                return como.resaltadas ? null : 'el tramo del comentario dejó de estar resaltado';
             }
         },
         {
@@ -717,11 +746,15 @@ async function enElectron() {
     let codigo = 0;
     try {
         await win.loadURL(url);
-        await esperarSesion(win.webContents);
         const pasos = banderas('paso');
         if (pasos.length) {
+            // Sin esperar ninguna sesión: los pasos a mano son justamente para
+            // mirar lo que la ronda no supone —la pantalla en reposo, una sesión
+            // recién iniciada y vacía, la de después de "Terminar"—, y exigirle
+            // cuatro tomas a eso lo dejaba fuera del alcance del arnés.
             for (const crudo of pasos) await correrPaso(win.webContents, JSON.parse(crudo));
         } else {
+            await esperarSesion(win.webContents);
             codigo = (await ronda(win.webContents)).length ? 1 : 0;
         }
     } catch (e) {
