@@ -74,6 +74,7 @@ const FILES = [
     'repasar.test.js',
     'verificar-corte.test.js',
     'media-server.test.js',
+    'desestructurar.test.js',
     'prproj.test.js',
     'prproj-destino.test.js',
     'prproj-panel.test.js',

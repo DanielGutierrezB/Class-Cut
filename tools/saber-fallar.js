@@ -38,6 +38,14 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'los GUID de los marcadores se pierden en un segundo module.exports',
+        archivo: 'engine/prproj-moldes.js',
+        de: '    CLASE_MARKERS,\n    CLASE_MARKER,\n',
+        a: '',
+        filtro: 'desestructurar',
+        caen: ['todo lo desestructurado existe del otro lado']
+    },
+    {
         que: 'generar un proyecto pisa el que ya estaba, con la tarde de edición adentro',
         archivo: 'ipc/prproj.js',
         de: '        const otro = path.join(dir, `${base} ${n}${ext}`);\n        if (!fs.existsSync(otro)) return otro;',
@@ -512,15 +520,32 @@ const REVERSIONES = [
         caen: ['con clases procesadas manda The Cutter']
     },
     {
-        que: 'el proyecto se escribe encima del que ya estaba en la carpeta',
+        que: 'el motor arranca sin que le digan dónde escribir, y después inventa',
         archivo: 'engine/prproj-curso.js',
-        de: '    if (!fs.existsSync(primera)) return { ruta: primera, corrida: 0 };',
-        a: '    return { ruta: primera, corrida: 0 };',
+        de: "    if (!op.destino) return { ...vacio, error: 'No me dijeron dónde escribir el proyecto.' };\n",
+        a: '',
         filtro: 'prproj-curso',
-        caen: [
-            'si ya hay uno, se escribe al lado y no encima',
-            'y si hay varios, sigue contando'
-        ]
+        caen: ['sin destino no se arranca, aunque todo lo demás esté']
+    },
+    {
+        que: 'una escritura fallida deja la carpeta del destino recién creada y vacía',
+        archivo: 'engine/prproj.js',
+        de: '            if (laCreamos) {\n'
+            + '                // Solo si quedó vacía: si alguien más metió algo adentro mientras\n'
+            + '                // tanto, borrarla sería llevarse puesto lo ajeno.\n'
+            + '                try { fs.rmdirSync(carpeta); } catch (e2) { /* con algo adentro, se queda */ }\n'
+            + '            }\n',
+        a: '',
+        filtro: 'prproj.test',
+        caen: ['y si la escritura falla, no queda una carpeta vacía']
+    },
+    {
+        que: 'al fallar se borra la carpeta del destino aunque ya estuviera de antes',
+        archivo: 'engine/prproj.js',
+        de: '        const laCreamos = !fs.existsSync(carpeta);',
+        a: '        const laCreamos = true;',
+        filtro: 'prproj.test',
+        caen: ['pero una carpeta que ya estaba no se toca']
     },
     {
         que: 'los intermedios del pipeline entran como si fueran clases',

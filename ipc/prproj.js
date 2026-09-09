@@ -17,6 +17,8 @@ const path = require('path');
 const zlib = require('zlib');
 const ajustes = require('../engine/ajustes');
 const curso = require('../engine/prproj-curso');
+const prproj = require('../engine/prproj');
+const moldes = require('../engine/prproj-moldes');
 
 /**
  * Dónde cae el proyecto de un curso.
@@ -62,9 +64,13 @@ function alLado(destino) {
  * tarde y en el peor momento. Acá el error todavía tiene un arreglo obvio, que es
  * elegir otro.
  *
- * La revisión es la mínima que distingue un proyecto de Premiere de cualquier
- * otra cosa con esa extensión: que descomprima y que adentro esté el nodo raíz.
- * Más que eso sería adivinar qué va a poder clonar el motor, y de eso sabe él.
+ * Y se le pregunta al MOTOR qué le falta, en vez de revisar acá por arriba que
+ * sea un proyecto y confiar. La diferencia no es teórica: el proyecto que el
+ * editor armó a mano —el que se llama «Plantilla», el que cualquiera elegiría—
+ * abre perfecto y no sirve de molde, porque importó los XML de antes del arreglo
+ * del estéreo y Premiere le metió los diez WAV en mono. No tiene ni un corte
+ * estéreo del que copiar. Con una revisión por arriba eso se descubría a mitad
+ * del armado del curso, con un mensaje que no dice qué hacer.
  */
 function porQueNoSirve(ruta) {
     let crudo = null;
@@ -76,6 +82,19 @@ function porQueNoSirve(ruta) {
     }
     if (!crudo.slice(0, 400).includes('<PremiereData')) {
         return 'Ese archivo se abre pero no es un proyecto de Premiere.';
+    }
+
+    let faltan;
+    try {
+        faltan = moldes.loQueFalta(moldes.detectarMoldes(prproj.Proyecto.leer(ruta)));
+    } catch (err) {
+        return `Ese proyecto se abre pero no lo pude recorrer: ${err.message}`;
+    }
+    if (faltan.length) {
+        return 'Ese proyecto abre, pero no tiene de dónde copiar:\n\n· ' + faltan.join('\n· ')
+            + '\n\nLa plantilla se usa de molde, así que tiene que tener puesto en una '
+            + 'secuencia un ejemplo de cada cosa. Sirve cualquier proyecto tuyo donde '
+            + 'hayas tirado a la línea de tiempo un video, un audio mono y un audio estéreo.';
     }
     return null;
 }

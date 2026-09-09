@@ -135,26 +135,6 @@ function ubicarFuente(carpeta) {
     };
 }
 
-/**
- * Dónde se escribe, sin pisar nada.
- *
- * Si el nombre está tomado se agrega ` (2)`, ` (3)`, y quien llamó se entera por
- * `avisos`. Es a propósito y no pereza: el `.prproj` de al lado puede tener
- * horas de trabajo del editor encima, y un generador que lo sobrescribe en
- * silencio es un generador que no se puede correr dos veces sin miedo. Que
- * queden dos archivos es un problema de dos segundos; perder el de ayer, no.
- */
-function rutaLibre(carpeta, nombre) {
-    const primera = path.join(carpeta, `${nombre}.prproj`);
-    if (!fs.existsSync(primera)) return { ruta: primera, corrida: 0 };
-    for (let i = 2; i < 200; i++) {
-        const ruta = path.join(carpeta, `${nombre} (${i}).prproj`);
-        if (!fs.existsSync(ruta)) return { ruta, corrida: i };
-    }
-    return { ruta: path.join(carpeta, `${nombre} (${Date.now()}).prproj`), corrida: -1 };
-}
-
-
 // ─── Armar el proyecto ───────────────────────────────────────────────
 
 /**
@@ -271,8 +251,19 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
 /**
  * Arma un `.prproj` con una secuencia por clase del curso.
  *
+ * **El destino llega hecho y acá no se discute.** El nombre del proyecto sale de
+ * la carpeta del curso, así que el segundo apretón del botón apunta siempre al
+ * mismo archivo — y ese archivo no es un resultado sino el lugar donde el editor
+ * abre Premiere y trabaja: para cuando alguien vuelva a generar puede haber una
+ * tarde de edición adentro. Entonces hay que preguntar antes de pisarlo, y
+ * preguntar es un diálogo, y los diálogos viven en el proceso principal. `ipc`
+ * resuelve el choque y llama con la ruta ya libre. Acá no se calcula ningún
+ * nombre: dos lugares que deciden dónde se escribe es como aparece un archivo
+ * donde nadie lo busca.
+ *
  * @param {object} opciones
  * @param {string} opciones.carpeta   la ruta raíz del curso
+ * @param {string} opciones.destino   la ruta completa del `.prproj` a escribir
  * @param {string} opciones.plantilla un `.prproj` del que copiar los moldes
  * @param {function} [opciones.avisar] recibe `{hecho, total, que}` mientras arma
  * @param {number} [opciones.semilla] para que dos corridas den el mismo archivo
@@ -287,6 +278,7 @@ async function generar(opciones) {
     if (!fs.existsSync(op.carpeta)) {
         return { ...vacio, error: `La carpeta «${op.carpeta}» no está.` };
     }
+    if (!op.destino) return { ...vacio, error: 'No me dijeron dónde escribir el proyecto.' };
     if (!op.plantilla || !fs.existsSync(op.plantilla)) {
         return {
             ...vacio,
@@ -362,23 +354,16 @@ async function generar(opciones) {
         };
     }
 
-    const curso = workspace.safeName(path.basename(path.resolve(op.carpeta)));
     let resumen;
     try {
-        resumen = poblar(taller, clases, curso, avisos, decir);
+        resumen = poblar(taller, clases, avisos, decir);
     } catch (e) {
         return { ...vacio, fuente: fuente.tipo, error: `Se cortó armando el proyecto: ${e.message}` };
     }
 
-    const { ruta, corrida } = rutaLibre(op.carpeta, curso);
-    if (corrida) {
-        avisos.push(`Ya había un «${curso}.prproj» en la carpeta y no lo toqué:`
-            + ` esto se guardó como «${path.basename(ruta)}».`);
-    }
-
     try {
         decir(clases.length, clases.length, 'Guardando el proyecto…');
-        proyecto.guardar(ruta);
+        proyecto.guardar(op.destino);
     } catch (e) {
         // `guardar` verifica antes de escribir, así que un fallo acá quiere decir
         // que el grafo quedó mal y que NO se escribió nada. Se dice así.
@@ -391,7 +376,7 @@ async function generar(opciones) {
 
     return {
         ok: true,
-        ruta,
+        ruta: op.destino,
         clases: resumen.clases,
         fuente: fuente.tipo,
         avisos,
@@ -427,7 +412,7 @@ async function generar(opciones) {
  * color— y el editor espera encontrarlos armados al abrir. Un bin vacío cuesta
  * un objeto; que falte cuesta que lo cree a mano trece veces.
  */
-function poblar(taller, clases, curso, avisos, decir) {
+function poblar(taller, clases, avisos, decir) {
     const raiz = taller.raizDelPanel();
 
     // Lo primero de todo: descolgar lo que traía la plantilla, así lo generado
@@ -478,7 +463,6 @@ module.exports = {
     generar,
     ubicarFuente,
     xmlsDe,
-    rutaLibre,
     INTERMEDIOS,
     MAESTRO,
     BIN_SECUENCIAS,

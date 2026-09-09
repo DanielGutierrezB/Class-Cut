@@ -303,6 +303,51 @@ module.exports = t => {
         fs.rmSync(dir, { recursive: true, force: true });
     });
 
+    t.test('la carpeta del destino se crea si no está', () => {
+        // El proyecto va en un `Proyecto/` propio y la primera vez no existe.
+        // Quien llama pasa la ruta completa y no tiene por qué preparar el
+        // terreno antes.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-prproj-'));
+        const ruta = path.join(dir, 'Proyecto', 'nuevo.prproj');
+        new prproj.Proyecto(juguete()).guardar(ruta);
+        t.ok(fs.existsSync(ruta), 'el archivo tiene que estar');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('y si la escritura falla, no queda una carpeta vacía', () => {
+        // Una carpeta `Proyecto/` vacía manda al editor a buscar adentro un
+        // archivo que nunca se escribió. Se crea al escribir y se deshace si la
+        // escritura no llega.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-prproj-'));
+        const carpeta = path.join(dir, 'Proyecto');
+        const p = new prproj.Proyecto(juguete());
+        const escribir = fs.writeFileSync;
+        fs.writeFileSync = () => { throw new Error('el disco dijo que no'); };
+        let tiro = null;
+        try { p.guardar(path.join(carpeta, 'x.prproj')); } catch (e) { tiro = e; }
+        fs.writeFileSync = escribir;
+        t.ok(tiro, 'tenía que tirar');
+        t.ok(!fs.existsSync(carpeta), 'la carpeta que creamos se deshace');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('pero una carpeta que ya estaba no se toca, aunque esté vacía', () => {
+        // Vacía es justamente el caso que distingue. Con algo adentro se salva
+        // sola —`rmdir` no borra una carpeta con contenido—, así que solo esta
+        // prueba dice si de verdad se está mirando quién la creó. Y borrarla
+        // sería llevarse puesto algo ajeno: el editor pudo haberla hecho él.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-prproj-'));
+        const carpeta = path.join(dir, 'Proyecto');
+        fs.mkdirSync(carpeta);
+        const p = new prproj.Proyecto(juguete());
+        const escribir = fs.writeFileSync;
+        fs.writeFileSync = () => { throw new Error('el disco dijo que no'); };
+        try { p.guardar(path.join(carpeta, 'x.prproj')); } catch (e) { /* se espera */ }
+        fs.writeFileSync = escribir;
+        t.ok(fs.existsSync(carpeta), 'la que no creamos nosotros se queda');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
 
     t.group('prproj · el tiempo en ticks');
 

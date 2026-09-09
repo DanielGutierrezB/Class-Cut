@@ -574,10 +574,27 @@ class Proyecto {
         const revision = this.verificar();
         if (!revision.ok) throw new Error(`el grafo no cierra: ${comoSeLee(revision)}`);
         const texto = this.texto();
+        const carpeta = path.dirname(ruta);
         const tmp = `${ruta}.tmp-${process.pid}-${Date.now()}`;
-        fs.mkdirSync(path.dirname(ruta), { recursive: true });
-        fs.writeFileSync(tmp, comprimir(texto));
-        fs.renameSync(tmp, ruta);
+        // La carpeta puede no existir todavía: el proyecto va en un `Proyecto/`
+        // propio y la primera vez hay que crearlo. Se anota si lo creamos
+        // nosotros para poder deshacerlo — un fallo a mitad de la escritura que
+        // deja una carpeta vacía manda al editor a buscar adentro un archivo
+        // que nunca se escribió.
+        const laCreamos = !fs.existsSync(carpeta);
+        if (laCreamos) fs.mkdirSync(carpeta, { recursive: true });
+        try {
+            fs.writeFileSync(tmp, comprimir(texto));
+            fs.renameSync(tmp, ruta);
+        } catch (e) {
+            try { fs.unlinkSync(tmp); } catch (e2) { /* puede no haber llegado a existir */ }
+            if (laCreamos) {
+                // Solo si quedó vacía: si alguien más metió algo adentro mientras
+                // tanto, borrarla sería llevarse puesto lo ajeno.
+                try { fs.rmdirSync(carpeta); } catch (e2) { /* con algo adentro, se queda */ }
+            }
+            throw e;
+        }
         return { ruta, bytesXml: Buffer.byteLength(texto, 'utf8'), objetos: this.bloques.length };
     }
 }

@@ -217,7 +217,16 @@ function loQueFalta(moldes) {
         secuencia: 'una secuencia con al menos una pista de video y una de audio',
         itemDeSecuencia: 'el ítem de panel de esa secuencia',
         bin: 'un bin',
-        corteVideo: 'un corte de video en alguna línea de tiempo'
+        corteVideo: 'un corte de video en alguna línea de tiempo',
+        // Los dos tipos de audio, y los dos hacen falta: cada clase trae WAV de
+        // los dos —las dos COMBO son mono y las otras ocho estéreo— así que una
+        // plantilla a la que le falte uno alcanza para empezar y se cae a mitad
+        // de camino. Es el caso del proyecto que el editor armó importando los
+        // XML viejos: ahí Premiere metió TODO en mono, porque el XML pedía un
+        // canal por clip, así que no tiene ni un estéreo del que copiar. Que se
+        // sepa antes de tocar nada, y con qué hacer.
+        corteMono: 'un corte de audio MONO en alguna línea de tiempo',
+        corteEstereo: 'un corte de audio ESTÉREO en alguna línea de tiempo'
     };
     return Object.keys(imprescindibles)
         .filter(n => !moldes[n])
@@ -265,18 +274,6 @@ module.exports = {
     TIPO_VIDEO,
     CLASE_MARKERS,
     CLASE_MARKER,
-    TIPO_AUDIO,
-    FRONTERA_DEL_CORTE,
-    FRONTERA_DEL_MEDIO,
-    ETIQUETAS,
-    COLOR_DE,
-    detectarMoldes,
-    loQueFalta,
-    elegir,
-    canalesDeclarados,
-    mayorIdDePanel
-};module.exports = {
-    TIPO_VIDEO,
     TIPO_AUDIO,
     FRONTERA_DEL_CORTE,
     FRONTERA_DEL_MEDIO,

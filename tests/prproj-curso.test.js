@@ -122,32 +122,27 @@ module.exports = t => {
     });
 
 
-    t.group('el proyecto del curso · no pisar nada');
+    t.group('el proyecto del curso · el destino llega hecho');
 
-    t.test('con el nombre libre, se usa el nombre del curso', () => {
-        const dir = carpeta({});
-        const r = curso.rutaLibre(dir, 'mi-curso');
-        t.eq(path.basename(r.ruta), 'mi-curso.prproj');
-        t.eq(r.corrida, 0);
-        fs.rmSync(dir, { recursive: true, force: true });
+    t.test('sin destino no se arranca, aunque todo lo demás esté', () => {
+        // El motor no inventa nombres. Si nadie le dijo dónde escribir, es que
+        // el puente se olvidó de resolverlo, y adivinar una ruta acá sería
+        // dejar el archivo donde nadie lo va a buscar.
+        const dir = carpeta({ 'The Cutter/una.xml': xmlDe('una') });
+        return curso.generar({ carpeta: dir, plantilla: __filename }).then(r => {
+            t.eq(r.ok, false);
+            t.ok(/dónde escribir/.test(r.error), `esperaba que dijera dónde: ${r.error}`);
+            fs.rmSync(dir, { recursive: true, force: true });
+        });
     });
 
-    t.test('si ya hay uno, se escribe al lado y no encima', () => {
-        // El .prproj de al lado puede tener horas de trabajo del editor encima.
-        // Que queden dos archivos es un problema de dos segundos; perder el de
-        // ayer, no.
-        const dir = carpeta({ 'mi-curso.prproj': 'lo de ayer' });
-        const r = curso.rutaLibre(dir, 'mi-curso');
-        t.eq(path.basename(r.ruta), 'mi-curso (2).prproj');
-        t.eq(r.corrida, 2);
-        t.eq(fs.readFileSync(path.join(dir, 'mi-curso.prproj'), 'utf8'), 'lo de ayer', 'el viejo intacto');
-        fs.rmSync(dir, { recursive: true, force: true });
-    });
-
-    t.test('y si hay varios, sigue contando', () => {
-        const dir = carpeta({ 'c.prproj': 'a', 'c (2).prproj': 'b', 'c (3).prproj': 'c' });
-        t.eq(path.basename(curso.rutaLibre(dir, 'c').ruta), 'c (4).prproj');
-        fs.rmSync(dir, { recursive: true, force: true });
+    t.test('el motor no calcula ninguna ruta por su cuenta', () => {
+        // Dos lugares que deciden el nombre y uno solo que manda es exactamente
+        // cómo aparece un archivo escrito donde nadie lo busca. El cálculo vive
+        // en `ipc/prproj.js` y acá no tiene que quedar ni el resto.
+        t.eq(typeof curso.rutaLibre, 'undefined');
+        const fuente = fs.readFileSync(path.join(__dirname, '..', 'engine', 'prproj-curso.js'), 'utf8');
+        t.eq(/\$\{[^}]*\}\.prproj/.test(fuente), false, 'no se arma ningún nombre de .prproj');
     });
 
 
@@ -158,8 +153,8 @@ module.exports = t => {
         // esto tirara, el botón quedaría girando para siempre.
         return Promise.all([
             curso.generar({}),
-            curso.generar({ carpeta: '/no/existe/nada', plantilla: '/tampoco' }),
-            curso.generar({ carpeta: os.tmpdir(), plantilla: '/no/hay/plantilla.prproj' })
+            curso.generar({ carpeta: '/no/existe/nada', destino: '/tampoco/x.prproj', plantilla: '/tampoco' }),
+            curso.generar({ carpeta: os.tmpdir(), destino: path.join(os.tmpdir(), 'x.prproj'), plantilla: '/no/hay/plantilla.prproj' })
         ]).then(([sinNada, sinCarpeta, sinPlantilla]) => {
             for (const r of [sinNada, sinCarpeta, sinPlantilla]) {
                 t.eq(r.ok, false);
@@ -177,7 +172,7 @@ module.exports = t => {
             'The Cutter/01_clase.xml': xmlDe('01_clase'),
             'no-soy-un-proyecto.prproj': 'esto no es gzip'
         });
-        return curso.generar({ carpeta: dir, plantilla: path.join(dir, 'no-soy-un-proyecto.prproj') })
+        return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 'x.prproj'), plantilla: path.join(dir, 'no-soy-un-proyecto.prproj') })
             .then(r => {
                 t.eq(r.ok, false);
                 t.eq(r.fuente, 'cortes', 'la fuente ya estaba decidida y se informa igual');
@@ -188,11 +183,12 @@ module.exports = t => {
 
     t.test('XML que no se pueden leer: se avisa de cada uno y no se escribe nada', () => {
         const dir = carpeta({ 'The Cutter/01_clase.xml': 'esto no tiene secuencia' });
-        return curso.generar({ carpeta: dir, plantilla: __filename }).then(r => {
+        const destino = path.join(dir, 'Proyecto', 'x.prproj');
+        return curso.generar({ carpeta: dir, destino, plantilla: __filename }).then(r => {
             t.eq(r.ok, false);
             t.eq(r.fuente, 'cortes');
             t.ok(r.avisos.some(a => /01_clase\.xml/.test(a)), 'el aviso dice qué archivo era');
-            t.eq(fs.readdirSync(dir).filter(f => f.endsWith('.prproj')).length, 0);
+            t.ok(!fs.existsSync(path.dirname(destino)), 'ni siquiera se creó la carpeta del destino');
             fs.rmSync(dir, { recursive: true, force: true });
         });
     });
@@ -218,7 +214,7 @@ module.exports = t => {
                 'The Cutter/01_clase.xml': xmlDe('01_clase'),
                 'The Cutter/02_clase.xml': xmlDe('02_clase')
             });
-            return curso.generar({ carpeta: dir, plantilla: PLANTILLA, semilla: 1 }).then(r => {
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 'salida.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
                 t.eq(r.clases, 2);
                 t.eq(r.fuente, 'cortes');
@@ -235,7 +231,7 @@ module.exports = t => {
 
         t.test('la fuente de notas da secuencias con marcadores y sin material', () => {
             const dir = carpeta({ 'xml/01_notas.xml': xmlDe('01_notas') });
-            return curso.generar({ carpeta: dir, plantilla: PLANTILLA, semilla: 1 }).then(r => {
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 'salida.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
                 t.eq(r.fuente, 'notas');
                 t.ok(r.avisos.some(a => /no el material ni los cortes/.test(a)),

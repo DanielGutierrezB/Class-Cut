@@ -48,7 +48,15 @@ const cli = require('./lib/cli');
  * carpetas. El árbol que se ve en la ventana de proyecto está del lado de los
  * GUID.
  *
- * @returns {{porId: Map<number, obj>, porUid: Map<string, obj>}}
+ * **Y los `ObjectID` no son únicos en todo el archivo.** Adentro de `<Project>`
+ * hay un segundo espacio de numeración que arranca de nuevo en 1: `ObjectID=1`
+ * es el `Project` afuera y un `ProjectViewState` adentro. Son unas decenas de
+ * choques. Un índice que guarde uno por número pierde la mitad de cada par en
+ * silencio y después contesta con el que le tocó, que es peor que no contestar.
+ * Por eso `porId` guarda una LISTA por número y quien pregunta se entera de que
+ * hay más de uno.
+ *
+ * @returns {{porId: Map<number, obj[]>, porUid: Map<string, obj>, choques: number}}
  */
 function leerGrafo(xml) {
     const porId = new Map();
@@ -93,7 +101,7 @@ function leerGrafo(xml) {
                 hasta: -1
             };
             if (dueño) dueño.obj.hijos.push(obj);
-            if (obj.id != null) porId.set(obj.id, obj);
+            if (obj.id != null) porId.set(obj.id, [...(porId.get(obj.id) || []), obj]);
             if (obj.uid) porUid.set(obj.uid, obj);
             pila.push({ etiqueta, obj });
             continue;
@@ -113,7 +121,9 @@ function leerGrafo(xml) {
             if (!mío.obj.campos.has(etiqueta)) mío.obj.campos.set(etiqueta, texto);
         }
     }
-    return { porId, porUid };
+    let choques = 0;
+    for (const suyos of porId.values()) choques += suyos.length - 1;
+    return { porId, porUid, choques };
 }
 
 const campo = (o, n) => (o && o.campos.get(n)) || null;
@@ -164,30 +174,28 @@ function main() {
     }
     const crudo = fs.readFileSync(ruta);
     const xml = (crudo[0] === 0x1f && crudo[1] === 0x8b ? zlib.gunzipSync(crudo) : crudo).toString('utf8');
-    const { porId, porUid } = leerGrafo(xml);
-    const todos = [...new Set([...porId.values(), ...porUid.values()])];
+    const { porId, porUid, choques } = leerGrafo(xml);
+    const todos = [...new Set([...[...porId.values()].flat(), ...porUid.values()])];
     console.log(`${ruta}`);
     console.log(`  ${(crudo.length / 1e6).toFixed(2)} MB comprimido · ${(xml.length / 1e6).toFixed(2)} MB de XML`);
-    console.log(`  ${todos.length} objetos · ${porId.size} con ObjectID numérico · ${porUid.size} con ObjectUID (GUID)`);
+    console.log(`  ${todos.length} objetos · ${porId.size} números de ObjectID · ${porUid.size} con ObjectUID (GUID)`);
+    if (choques) {
+        console.log(`  ${choques} número(s) usados más de una vez: los ObjectID se reinician adentro de <Project>`);
+    }
 
-    const busca = clave => (typeof clave === 'string' && clave.includes('-') ? porUid : porId).get(clave);
+    /** Todos los que responden a esa clave. Son varios cuando el número choca. */
+    const busca = clave => (typeof clave === 'string' && clave.includes('-')
+        ? [porUid.get(clave)].filter(Boolean)
+        : porId.get(clave) || []);
 
     const unoSolo = cli.arg('objeto', null);
     if (unoSolo != null) {
-        const o = busca(String(unoSolo).includes('-') ? String(unoSolo) : Number(unoSolo));
-        if (!o) { console.error(`No hay objeto ${unoSolo}`); process.exit(1); }
-        console.log(`\n─── ${camino(o)} ───`);
-        console.log(`  ClassID ${o.claseUid} · Version ${o.version} · ${o.hijos.length} hijos anidados`);
-        console.log('  campos propios:');
-        for (const [k, v] of o.campos) console.log(`    ${k} = ${v.length > 110 ? v.slice(0, 110) + '…' : v}`);
-        console.log('  apunta a:');
-        for (const r of o.refs.slice(0, Number(cli.arg('refs', 40)))) {
-            const d = busca(r.a);
-            console.log(`    ${r.campo} → ${r.a}${d ? `  (${como(d)})` : '  (¡no está!)'}`);
+        const cuales = busca(String(unoSolo).includes('-') ? String(unoSolo) : Number(unoSolo));
+        if (!cuales.length) { console.error(`No hay objeto ${unoSolo}`); process.exit(1); }
+        if (cuales.length > 1) {
+            console.log(`\n  ojo: ${cuales.length} objetos llevan el número ${unoSolo}. Van todos.`);
         }
-        if (cli.arg('crudo', null) != null) {
-            console.log(`\n  crudo:\n${xml.slice(o.desde, Math.min(o.hasta, o.desde + Number(cli.arg('largo', 4000))))}`);
-        }
+        for (const o of cuales) mostrar(o, xml, busca);
         return;
     }
 
@@ -200,7 +208,7 @@ function main() {
             for (const [k, v] of o.campos) console.log(`    ${k} = ${v.length > 110 ? v.slice(0, 110) + '…' : v}`);
             for (const r of o.refs.slice(0, Number(cli.arg('refs', 12)))) {
                 const d = busca(r.a);
-                console.log(`    → ${r.campo} ${r.a}${d ? `  (${como(d)})` : ''}`);
+                console.log(`    → ${r.campo} ${r.a}${d.length ? `  (${d.map(como).join(' | ')})` : ''}`);
             }
         }
         return;
@@ -217,6 +225,22 @@ function main() {
 
     console.log('\n─── la ventana de proyecto ───');
     for (const l of arbolDeBins(porUid)) console.log(`  ${l}`);
+}
+
+/** Un objeto: sus campos propios y a dónde apunta. */
+function mostrar(o, xml, busca) {
+    console.log(`\n─── ${camino(o)} ───`);
+    console.log(`  ClassID ${o.claseUid} · Version ${o.version} · ${o.hijos.length} hijos anidados`);
+    console.log('  campos propios:');
+    for (const [k, v] of o.campos) console.log(`    ${k} = ${v.length > 110 ? v.slice(0, 110) + '…' : v}`);
+    console.log('  apunta a:');
+    for (const r of o.refs.slice(0, Number(cli.arg('refs', 40)))) {
+        const d = busca(r.a);
+        console.log(`    ${r.campo} → ${r.a}${d.length ? `  (${d.map(como).join(' | ')})` : '  (¡no está!)'}`);
+    }
+    if (cli.arg('crudo', null) != null) {
+        console.log(`\n  crudo:\n${xml.slice(o.desde, Math.min(o.hasta, o.desde + Number(cli.arg('largo', 4000))))}`);
+    }
 }
 
 if (require.main === module) main();

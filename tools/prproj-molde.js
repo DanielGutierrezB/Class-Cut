@@ -307,7 +307,10 @@ function revisarCurso(rutaPlantilla, carpeta, dir) {
     fs.symlinkSync(path.dirname(fuente.xmls[0]), path.join(trabajo, path.basename(path.dirname(fuente.xmls[0]))));
 
     const arranque = Date.now();
-    return curso.generar({ carpeta: trabajo, plantilla: rutaPlantilla, semilla: 20260909 }).then(r => {
+    // El destino lo decide `ipc/prproj.js` en la app; acá se arma el mismo que
+    // armaría él, para que la herramienta pruebe el camino de verdad.
+    const destino = path.join(trabajo, 'Proyecto', `${path.basename(trabajo)}.prproj`);
+    return curso.generar({ carpeta: trabajo, destino, plantilla: rutaPlantilla, semilla: 20260909 }).then(r => {
         revisar('el curso se armó', r.ok, r.error || `${r.clases} clases en ${Date.now() - arranque} ms`);
         if (!r.ok) return;
         revisar('dice de qué fuente salió', r.fuente === fuente.tipo, r.fuente);
