@@ -1064,6 +1064,17 @@ function tomaEnVivo(id) {
 const fotoDeToma = t => (t ? JSON.parse(JSON.stringify(t)) : null);
 
 /**
+ * Si dos fotos dicen lo mismo, o sea si el cambio cambió algo
+ * (`historial.mismaFoto`).
+ *
+ * Allá se comparan campo por campo porque las fotos comparten los objetos de
+ * adentro y no se pueden serializar por cualquier cosa que tengan; acá las fotos
+ * ya son un clon de JSON, así que la comparación honesta es la de sus textos.
+ * Contesta lo mismo, que es lo único que la maqueta necesita copiar.
+ */
+const mismaFoto = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
  * Lo que contesta el puente es una COPIA, como del otro lado.
  *
  * El `contextBridge` de Electron manda todo por un canal, así que lo que llega a
@@ -1096,7 +1107,6 @@ function manoEnVivo(cambio) {
     if (!toma) return resumenEnVivo();
 
     const antes = fotoDeToma(toma);
-    let sigue = true;
 
     if (c.tipo === 'vista') toma.vista = c.vista;
     else if (c.tipo === 'nota') toma.comentario = String(c.texto || '');
@@ -1120,37 +1130,46 @@ function manoEnVivo(cambio) {
         // Y en `empalme.descartado` de la toma, que es donde lo escribe
         // `empalme.descartar`: lo que cuelga de la toma entra en la foto de
         // `fotoDeToma`, así que descartar se deshace con Cmd-Z como todo lo demás.
-        toma.empalme = {
-            ...(toma.empalme || {}),
-            descartado: { contra: Number(c.contra), ms: Date.now() }
-        };
+        //
+        // Descartar dos veces el mismo empalme no es un cambio, y allá tampoco lo
+        // es: sin esta línea la marca se reescribía con la hora de ahora, que
+        // alcanza para que el historial anote un paso que al deshacerse no se ve.
+        const marca = (toma.empalme || {}).descartado;
+        if (!marca || marca.contra !== Number(c.contra)) {
+            toma.empalme = {
+                ...(toma.empalme || {}),
+                descartado: { contra: Number(c.contra), ms: Date.now() }
+            };
+        }
     } else if (c.tipo === 'borde') {
-        // Un borde que cae donde ya estaba no es un cambio, y uno que cruza al
-        // otro no se mueve: los dos gestos llegan de un arrastre que volvió a su
-        // sitio o que se pasó de largo, y un paso en el historial que al
-        // deshacerse no se ve hace apretar de nuevo pensando que no funcionó.
+        // Un borde que cae donde ya estaba no se mueve, y uno que cruza al otro
+        // tampoco: los dos gestos llegan de un arrastre que volvió a su sitio o
+        // que se pasó de largo. Del historial se ocupa `anotarEnMemoria`, que ve
+        // que la toma quedó igual.
         const estaba = c.borde === 'in' ? toma.inMs : toma.outMs;
-        sigue = c.paredMs != null && Number(c.paredMs) !== estaba &&
+        if (c.paredMs != null && Number(c.paredMs) !== estaba) {
             moverElBorde(toma, c.borde, Number(c.paredMs));
+        }
     } else if (c.tipo === 'reabrir') {
         reabrirEnMemoria(sesion, toma);
     } else if (c.tipo === 'eliminar') {
         // Sin descartarla antes no se elimina: el botón solo existe en una
         // descartada, así que esto es la red de abajo y se planta en silencio.
-        sigue = toma.descartada;
-        if (sigue) sesion.tomas.splice(sesion.tomas.indexOf(toma), 1);
+        if (toma.descartada) sesion.tomas.splice(sesion.tomas.indexOf(toma), 1);
     } else {
         throw new Error(`Cambio sin definir: ${c.tipo}`);
     }
 
-    if (sigue) {
-        anotarEnMemoria({
-            que: comoSeLlamaEnMemoria(c),
-            id: toma.id,
-            antes,
-            despues: c.tipo === 'eliminar' ? null : fotoDeToma(toma)
-        });
-    }
+    // La foto de después es null cuando la toma ya no está en la sesión, y eso se
+    // mira en la LISTA y no en el tipo del cambio, igual que allá: un `eliminar`
+    // que se plantó deja la toma donde estaba, así que su foto es la de antes y
+    // `anotarEnMemoria` no anota nada.
+    anotarEnMemoria({
+        que: comoSeLlamaEnMemoria(c),
+        id: toma.id,
+        antes,
+        despues: sesion.tomas.includes(toma) ? fotoDeToma(toma) : null
+    });
     return resumenEnVivo();
 }
 
@@ -1196,12 +1215,64 @@ function comoSeLlamaEnMemoria(c) {
     if (c.tipo === 'reabrir') return `reabrir ${cual}`;
     if (c.tipo === 'eliminar') return `eliminar ${cual}`;
     if (c.tipo === 'cerrar') return `cerrar ${cual}`;
+    // Los dos que no son de ninguna toma, así que no la nombran.
+    if (c.tipo === 'claqueta') return 'poner la claqueta';
+    if (c.tipo === 'temario') return `${String(c.texto || '').trim() ? 'pegar' : 'sacar'} el temario`;
     return `el cambio en ${cual}`;
 }
 
+/**
+ * Anota un paso, si es que hizo algo (`anotar` en `engine/deshacer.js`).
+ *
+ * El portero está acá y no en cada gesto por lo mismo que allá: así no hay forma
+ * de que uno nuevo se olvide de preguntar. Un paso que al deshacerse no se ve
+ * hace apretar de nuevo pensando que el botón no funciona, y encima se come el
+ * Cmd-Z que iba para el cambio de verdad.
+ */
 function anotarEnMemoria(paso) {
+    if (mismaFoto(paso.antes, paso.despues)) return;
     enMemoria.historia.atras.push(paso);
     enMemoria.historia.adelante.length = 0;
+}
+
+/* ─── Los dos pasos que no son de ninguna toma ───────────────────────────
+ *
+ * La claqueta puesta a mano y el temario pegado también se deshacen allá, y van
+ * en la MISMA pila que los cambios de toma para que el orden de deshacer sea el
+ * orden de los gestos (ver `engine/deshacer.js`).
+ *
+ * La única diferencia de forma con el motor es dónde vive cada campo: allá los
+ * dos cuelgan de `sesion.estado` y acá la claqueta está en la sesión y el
+ * temario en `enMemoria`. El paso guarda el NOMBRE del campo, igual que allá, y
+ * el ida y vuelta a dónde está guardado se resuelve en estas dos funciones.
+ */
+
+function campoDeLaSesion(campo) {
+    const sesion = sesionEnVivo();
+    if (campo === 'claqueta') return sesion ? sesion.claqueta : null;
+    return enMemoria.temario;
+}
+
+function ponerCampoDeLaSesion(campo, valor) {
+    const copia = valor ? JSON.parse(JSON.stringify(valor)) : null;
+    if (campo === 'claqueta') {
+        const sesion = sesionEnVivo();
+        if (sesion) sesion.claqueta = copia;
+        return;
+    }
+    enMemoria.temario = copia;
+}
+
+/** La foto de un campo de la sesión (`historial.fotoDeCampo`). */
+const fotoDeCampo = v => (v ? JSON.parse(JSON.stringify(v)) : null);
+
+function anotarDeLaSesionEnMemoria(campo, antes, cambio) {
+    anotarEnMemoria({
+        que: comoSeLlamaEnMemoria(cambio),
+        campo,
+        antes,
+        despues: fotoDeCampo(campoDeLaSesion(campo))
+    });
 }
 
 function volverEnMemoria(hacia) {
@@ -1214,7 +1285,12 @@ function volverEnMemoria(hacia) {
 
     const foto = hacia === 'adelante' ? paso.despues : paso.antes;
     const tomas = sesion.tomas;
-    if (foto && foto.outMs == null && tomas.some(t => t.id !== paso.id && t.outMs == null)) {
+    // La única cosa que no se puede deshacer, y es de las tomas: un paso de la
+    // sesión no repone ninguna, así que la pregunta no le corresponde. Hecha
+    // igual lo plantaría, porque un paso sin `id` hace que cualquier toma
+    // abierta cuente como "la otra" (ver `volver` en `engine/cambios-toma.js`).
+    if (!paso.campo && foto && foto.outMs == null &&
+        tomas.some(t => t.id !== paso.id && t.outMs == null)) {
         return {
             ok: false,
             error: `No puedo ${hacia === 'adelante' ? 'rehacer' : 'deshacer'} «${paso.que}»: ` +
@@ -1226,6 +1302,15 @@ function volverEnMemoria(hacia) {
 
     desde.pop();
     a.push(paso);
+    if (paso.campo) {
+        ponerCampoDeLaSesion(paso.campo, foto);
+        // Un temario repuesto vuelve con la cobertura que se le había medido
+        // CONTRA esa lista, así que no se vuelve a medir. Allá lo decide la
+        // huella (`hayQueMedir`); pedirlo igual dejaría el panel diciendo
+        // "midiendo" donde la app muestra el resultado en el acto.
+        if (!enMemoria.temario || !enMemoria.temario.cobertura) pedirLaCobertura();
+        return { ok: true, que: paso.que, estado: resumenEnVivo() };
+    }
     const donde = tomas.findIndex(t => t.id === paso.id);
     if (!foto) {
         if (donde >= 0) tomas.splice(donde, 1);
@@ -1975,15 +2060,20 @@ window.cc = {
     // que hace que el cartel diga "puesta a mano": acá se ignoraba el argumento y
     // se contestaba la claqueta de fábrica, o sea que apretar el botón no movía
     // nada y el estado que el botón existe para producir no se veía nunca.
+    // Y deja su paso en el historial, como allá: no es de ninguna toma, pero
+    // reescribe el archivo igual, así que se deshace con Cmd-Z como todo lo demás
+    // (`claqueta` en `engine/grabacion.js`).
     grabarClaqueta: async paredMs => {
         const sesion = sesionEnVivo();
         if (!sesion) return null;
+        const antes = fotoDeCampo(sesion.claqueta);
         sesion.claqueta = {
             ms: Number(paredMs) || Date.now(),
             frase: '',
             confirmada: true,
             origen: 'editor'
         };
+        anotarDeLaSesionEnMemoria('claqueta', antes, { tipo: 'claqueta' });
         return porElPuente(resumenEnVivo());
     },
     /**
@@ -1991,10 +2081,19 @@ window.cc = {
      *
      * Vuelve en el acto y con `midiendoTemario` puesto, como allá: la medición
      * sale detrás y llega por un aviso (ver `pedirLaCobertura`).
+     *
+     * Pegar la MISMA lista otra vez se planta antes de tocar nada, como allá: sin
+     * eso el gesto tira la cobertura ya medida para volver a medir lo mismo, y
+     * deja un paso en el historial que al deshacerse no se ve.
      */
     grabarTemario: async texto => {
         if (!sesionEnVivo()) return null;
-        enMemoria.temario = temarioPegado(texto);
+        const antes = fotoDeCampo(enMemoria.temario);
+        const nuevo = temarioPegado(texto);
+        if (antes && nuevo && antes.texto === nuevo.texto) return porElPuente(resumenEnVivo());
+
+        enMemoria.temario = nuevo;
+        anotarDeLaSesionEnMemoria('temario', antes, { tipo: 'temario', texto });
         pedirLaCobertura();
         return porElPuente(resumenEnVivo());
     },
