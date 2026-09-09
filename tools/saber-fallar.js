@@ -173,6 +173,61 @@ const REVERSIONES = [
         a: '            if (leido) Object.assign(toma, { ...leido, relectura: toma.relectura || leido.relectura });',
         filtro: 'relectura',
         caen: ['regenerar limpia la marca']
+    },
+    {
+        que: 'la maqueta se queda con el motor que cargó al arrancar',
+        archivo: 'tools/maqueta.js',
+        de: '    const guardado = olvidarElMotor();',
+        a: '    const guardado = {};',
+        filtro: 'maqueta',
+        caen: [
+            'lo que se inyecta sale del disco y no del caché de módulos',
+            'y deja el caché de módulos exactamente como estaba'
+        ]
+    },
+    {
+        que: 'suelta solo las cinco hojas y deja el tronco del motor en el caché',
+        archivo: 'tools/maqueta.js',
+        de: '        if (clave.startsWith(MOTOR + path.sep)) {',
+        a: "        const hojas = ['notas-vivo.js', 'lengua.js', 'grabacion.js', 'empalme.js', 'workspace.js'];\n"
+            + '        if (hojas.includes(path.basename(clave))) {',
+        filtro: 'maqueta',
+        caen: ['lo que se inyecta sale del disco y no del caché de módulos']
+    },
+    {
+        que: 'la copia recién leída del motor se queda en el caché de módulos',
+        archivo: 'tools/maqueta.js',
+        de: '        olvidarElMotor();\n        Object.assign(require.cache, guardado);\n',
+        a: '',
+        filtro: 'maqueta',
+        caen: ['y deja el caché de módulos exactamente como estaba']
+    },
+    {
+        que: 'la huella del disco no mira el disco',
+        archivo: 'tools/maqueta.js',
+        de: "    return suma.digest('hex').slice(0, 12);",
+        a: "    return 'siempre-igual';",
+        filtro: 'maqueta',
+        caen: ['la huella cambia cuando cambia un archivo, y no cuando no']
+    },
+    {
+        que: 'el material de relleno se da por bueno sin mirar con qué plan se armó',
+        archivo: 'tools/maqueta.js',
+        de: "    const alDia = fs.existsSync(marca) && fs.readFileSync(marca, 'utf8') === sello;",
+        a: '    const alDia = true;',
+        filtro: 'maqueta',
+        caen: [
+            'con el plan cambiado se rehace todo',
+            'sin sello se rehace: es material de antes de que esto se sellara'
+        ]
+    },
+    {
+        que: 'el índice de la maqueta no carga el vigía',
+        archivo: 'tools/maqueta.js',
+        de: "        '<script src=\"maqueta/vigia.js\"></script>\\n' +\n",
+        a: '',
+        filtro: 'maqueta',
+        caen: ['el índice carga el vigía, detrás de las vistas y delante de la app']
     }
 ];
 
