@@ -59,7 +59,7 @@ function conSeleccion(cuerpo) {
 
 module.exports = async t => {
     const src = nombre => pathToFileURL(path.join(__dirname, '..', 'src', 'js', nombre)).href;
-    const tomas = await import(src('grabar/tomas.js'));
+    const tomas = await import(src('grabar/palabras.js'));
     const formato = await import(src('formato.js'));
 
     t.group('tomas en vivo · la hora del día en pantalla');

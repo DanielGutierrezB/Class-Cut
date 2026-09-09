@@ -1,0 +1,128 @@
+/**
+ * grabar-empalme.css — El aviso de que dos tomas seguidas dicen lo mismo, y el
+ * ajuste de un clic que lo saca.
+ *
+ * El subrayado de advertencia sobre las dos puntas del par, y el bloque con el
+ * porqué del modelo y sus dos botones. Qué se dibuja para cada estado del motor
+ * está en `src/js/grabar/empalme.js`; acá está cómo se ve.
+ *
+ * Aparte de `grabar.css` porque esa hoja está en el techo de mil líneas que el
+ * proyecto se puso, y es la misma salida que ya tomaron `grabar-analisis.css` y
+ * `grabar-teclas.css`. La frontera es de una sola pieza: todo lo que existe
+ * porque una toma puede volver a decir lo de la anterior, y nada más.
+ *
+ * Se carga DESPUÉS de `grabar.css` (ver `src/index.html`), por lo mismo que las
+ * otras dos: lo de acá se apoya en `.toma`, en su texto y en su tinta, y no hace
+ * más que agregarles algo.
+ */
+
+/* ── Lo repetido: un subrayado de aviso, que no es un comentario ──────────
+ *
+ * Las dos puntas del par van subrayadas: el final de la toma anterior y el
+ * arranque de la que cerró. Esa marca tiene que leerse como OTRA COSA que un
+ * comentario a un metro de la pantalla, y las dos pueden caer sobre la misma
+ * palabra: es de esperar que alguien comente justo la frase que el profesor
+ * volvió a decir.
+ *
+ * **La diferencia la lleva la forma de la línea y no el color**, y eso no es una
+ * preferencia: sobre los cinco fondos de vista el color no alcanza para llevarla
+ * solo. La ficha se tiñe con un 10% del color de su vista, así que el cuerpo va
+ * de #1d2632 a #282731 según la toma, y cualquier tinta que se elija cambia un
+ * poco de carácter en cada una. Una línea RECTA y una ONDULADA, en cambio, se
+ * distinguen igual en las cinco, no piden discriminar tonos y no dependen de que
+ * el que mira vea bien el rojo. Y la convención ya está aprendida: recta es
+ * "alguien escribió algo acá" y ondulada es "la máquina cree que esto está mal".
+ * Es exactamente el motivo por el que los puntos azules se descartaron para los
+ * comentarios —"se leía como una palabra mal escrita"—, que es justo lo que un
+ * aviso de repetición sí quiere decir.
+ *
+ * **El color refuerza, y salió por descarte.** Cerúleo, rosa, verde, turquesa y
+ * malva son las cinco vistas y ya significan "esta toma va así"; el ámbar es el
+ * comentario y, en `.toma-resumen-marca`, "acá alguien dejó algo dicho". Lo que
+ * queda es el rojo, y el rojo en esta pantalla ya quiere decir una cosa
+ * concreta: es la línea del OUT. En la toma anterior, lo ondulado es exactamente
+ * el texto que queda del lado de afuera cuando «Ajustar corte» sube esa misma
+ * línea roja hasta donde arranca la onda, así que la marca y la línea dicen lo
+ * mismo y el botón se explica solo. Del lado de la toma nueva la onda no se va a
+ * ningún lado —es la otra mitad del par—, y eso lo dice el globito de cada
+ * tramo, que nombra la toma de enfrente.
+ *
+ * Contra los cinco cuerpos el rojo cae entre 4,4:1 y 5,0:1, medido y no supuesto,
+ * bastante por encima del 3:1 que pide una marca que no es texto. El ámbar del
+ * comentario está en 8:1, o sea que la más fuerte sigue siendo la del comentario:
+ * el aviso avisa y no grita, que es lo que corresponde a algo que el modelo
+ * puede haber leído mal.
+ *
+ * **Y sin fondo teñido**, que es la otra mitad del reparto: el lavado ámbar
+ * queda como firma exclusiva del comentario. Una palabra con las dos marcas se
+ * ve como lo que es —un comentario que además está repetido— y no como una
+ * tercera cosa que habría que aprender.
+ *
+ * En una variable, como `--subrayado`, para que el día que esto se retoque haya
+ * un solo sitio donde hacerlo. */
+.toma { --aviso-repetido: var(--err); }
+
+/* Con `text-decoration` y no con `box-shadow`, justo al revés que el comentario,
+   y por eso mismo: son dos mecanismos que no se pelean por el mismo pixel. La
+   onda va pegada a las letras y la línea recta del comentario al pie de la caja,
+   así que en una palabra que tenga las dos se ven las dos, sin tener que inventar
+   una tercera marca para el cruce.
+
+   `skip-ink: none` porque una onda cortada por cada "p" y cada "j" se lee como
+   ruido de dibujo y no como una línea. */
+.toma-palabra.es-repetida {
+    text-decoration: underline wavy var(--aviso-repetido);
+    text-decoration-thickness: 1px;
+    text-decoration-skip-ink: none;
+    text-underline-offset: 2px;
+}
+
+/* ── El ajuste que se ofrece debajo de la toma ────────────────────────────
+ *
+ * El porqué del modelo, qué va a pasar si se aprieta, y los dos botones debajo.
+ * Con el canto del color del aviso, que es lo que lo ata a las palabras onduladas
+ * de acá arriba y a las de la toma de antes — el mismo recurso con el que la
+ * tarjeta de un comentario se ata a su tramo ámbar (`.toma-com`).
+ *
+ * Sobre `--surface-2` y no sobre un lavado rojo: esto aparece mientras la clase
+ * se está grabando, y un fondo rojo ahí es una alarma. Lo que pasó es que dos
+ * frases se parecen, y el que graba decide. */
+.toma-empalme {
+    margin-top: 10px;
+    padding: 9px 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--aviso-repetido);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+
+.toma-empalme-porque { margin: 0; color: var(--text); }
+
+/* Cuántos segundos y cuántas palabras se van. Escrito y no en un globito porque
+   esto se aprieta en medio de una clase, y ahí nadie se queda quieto esperando a
+   que aparezca un título. */
+.toma-empalme-cuanto {
+    margin: 4px 0 0;
+    color: var(--text-dim);
+}
+
+.toma-empalme-acciones {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+/* En un flex con `gap`, el margen suelto de `.btn-inline` se suma y sobra. */
+.toma-empalme-acciones .btn-inline { margin-left: 0; }
+
+/* Lo que queda cuando no hay nada que apretar: el empalme que se descartó y el
+   que todavía se está mirando. Un renglón apagado y sin canto de color, porque no
+   es un aviso: es el recibo de que la decisión quedó tomada, o de que la
+   respuesta viene en camino. Los otros cuatro estados no dibujan nada, y el
+   porqué de cada uno está en `queDecir` (`src/js/grabar/empalme.js`). */
+.toma-empalme-nota {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--text-mute);
+}

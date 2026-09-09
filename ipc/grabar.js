@@ -80,6 +80,27 @@ function registrar({ ipcMain, app, send, anotar }) {
     });
 
     ipcMain.handle('grabar-cerrar-toma', () => grabacion.cerrarToma());
+
+    /**
+     * Deshacer y rehacer lo que el editor hizo a mano.
+     *
+     * Contestan `{ok, que, error, estado}` y no el estado pelado como los demás
+     * canales de acá, porque hay dos cosas que la ventana no puede saber sola:
+     * qué paso se acaba de revertir —lo dice en el aviso, que si no un cambio
+     * revertido lejos del scroll es invisible— y por qué un paso no se pudo
+     * revertir (una toma nueva abierta encima, ver `engine/deshacer.js`).
+     */
+    ipcMain.handle('grabar-deshacer', () => {
+        const r = grabacion.deshacer();
+        anotar('grabar.deshace', { que: r.que || '', pudo: r.ok });
+        return r;
+    });
+
+    ipcMain.handle('grabar-rehacer', () => {
+        const r = grabacion.rehacer();
+        anotar('grabar.rehace', { que: r.que || '', pudo: r.ok });
+        return r;
+    });
     ipcMain.handle('grabar-estado', () => grabacion.resumen());
     // Las vistas viajan con el estado de la grabación en curso, pero una clase ya
     // terminada también deja cambiarlas y ahí no hay estado del que sacarlas.

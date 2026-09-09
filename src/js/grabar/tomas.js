@@ -1,109 +1,36 @@
 'use strict';
 /**
- * tomas.js — La lista de tomas, dibujada.
+ * tomas.js — La tarjeta de una toma y la lista que las contiene.
  *
  * Lo que se ve es el estado que manda el motor, sin copia local: la vista no
  * guarda nada suyo, así que lo que está en pantalla y lo que se acaba de
  * escribir en el XML son la misma cosa. Cambiar algo es pedirle el cambio al
  * motor y volver a dibujar con lo que conteste.
  *
- * Las palabras van de a una en su propio `span` con su hora del día encima, como
- * en el guion del visor de cortes (`src/js/visor/guion.js`) y por el mismo
- * motivo: sobre eso se puede seleccionar para comentar y se puede hacer clic
- * derecho para mover un borde a una palabra concreta.
+ * La única excepción es cómo se está MIRANDO la lista —qué tomas están plegadas,
+ * si las descartadas se ven— y eso no va al motor a propósito: no es algo que se
+ * le hizo a la clase, es algo que se le hizo a la pantalla, y el XML es lo
+ * primero. Vive en `index.js` y llega acá como `mirada`.
+ *
+ * El texto de cada toma —sus palabras, sus dos bordes y el subrayado de lo
+ * comentado— se fue a `palabras.js`, y los comentarios al margen a `margen.js`,
+ * cuando este archivo pasó los seiscientos renglones. La frontera es la que el
+ * DOM ya tenía: acá lo que rodea al texto, allá lo que está dentro de él.
  */
 
 import { fmtDur, fmtHora } from '../formato.js';
-import { spansSeleccionados } from '../seleccion.js';
-
-/**
- * Las palabras que caen dentro de una selección del texto.
- *
- * Se lee del DOM y no de un rango de tiempo porque lo que el editor seleccionó
- * son palabras en la pantalla: de ahí salen las horas de los extremos, que es
- * lo que se convierte en el largo del marcador.
- *
- * @returns {{desdeMs:number, hastaMs:number, texto:string}|null}
- */
-export function seleccion(dentroDe) {
-    // Las orillas no: un comentario sobre una palabra que quedó fuera de la toma
-    // sería un marcador en un sitio del que no sale ningún bloque.
-    const elegidas = spansSeleccionados(dentroDe, '.toma-palabra:not(.es-orilla)');
-    if (!elegidas.length) return null;
-
-    const horas = elegidas.map(s => Number(s.dataset.t)).filter(n => !isNaN(n));
-    if (!horas.length) return null;
-    return {
-        desdeMs: Math.min(...horas),
-        hastaMs: Math.max(...horas),
-        texto: elegidas.map(s => s.textContent.trim()).join(' ').trim()
-    };
-}
-
-/**
- * La caja para escribir el comentario, pegada a la toma que se comentó.
- *
- * Igual que en el guion del visor: cita lo seleccionado arriba, para que se vea
- * sobre qué se está comentando cuando la selección se pierda al hacer clic en el
- * campo.
- */
-function abrirCaja(dentroDe, ancla, acciones, tomaId) {
-    const previa = dentroDe.querySelector('.toma-caja');
-    if (previa) previa.remove();
-
-    const caja = document.createElement('div');
-    caja.className = 'toma-caja';
-
-    const cita = document.createElement('div');
-    cita.className = 'toma-caja-cita';
-    cita.textContent = `«${ancla.texto}»`;
-
-    const campo = document.createElement('textarea');
-    campo.className = 'toma-caja-campo';
-    campo.rows = 2;
-    campo.placeholder = 'Tu comentario para el editor…';
-
-    const botones = document.createElement('div');
-    botones.className = 'toma-caja-acciones';
-    const ok = document.createElement('button');
-    ok.className = 'btn btn-primary btn-inline';
-    ok.type = 'button';
-    ok.textContent = 'Comentar';
-    ok.onclick = () => {
-        const texto = campo.value.trim();
-        if (!texto) return;
-        caja.remove();
-        window.getSelection().removeAllRanges();
-        acciones.alCambiar({ tipo: 'comentar', toma: tomaId, ...ancla, comentario: texto });
-    };
-    const no = document.createElement('button');
-    no.className = 'btn btn-ghost btn-inline';
-    no.type = 'button';
-    no.textContent = 'Cancelar';
-    no.onclick = () => { caja.remove(); };
-    botones.append(ok, no);
-
-    caja.append(cita, campo, botones);
-    dentroDe.append(caja);
-    campo.focus();
-}
-
-function spanDePalabra(w) {
-    const span = document.createElement('span');
-    span.className = 'toma-palabra';
-    span.dataset.t = w.t;
-    span.title = fmtHora(w.t);
-    span.textContent = w.texto;
-    return span;
-}
+import { textoDe, bordeConElDerecho, seleccion } from './palabras.js';
+import * as margen from './margen.js';
+import * as plegado from './plegado.js';
+import * as empalme from './empalme.js';
 
 /* ─── Las piezas de una toma ─────────────────────────────────────────────
  *
  * Separadas porque una toma se dibuja de dos maneras: la de la clase que se está
  * grabando (`pintarToma`) y la de una que ya terminó (`pintarLeida`). Muestran lo
- * mismo y se les puede hacer lo mismo; lo único que cambia son los dos botones
- * que solo tienen sentido con el ciclo de señales corriendo, "Cerrar acá" y
- * "Reabrir".
+ * mismo y se les puede hacer lo mismo; lo que cambia son los botones que solo
+ * tienen sentido con el ciclo de señales corriendo —"Cerrar acá", "Reabrir"— y
+ * "Eliminar", que borra de una sesión y una sesión terminada ya no existe.
  */
 
 function tarjetaDe(toma) {
@@ -164,268 +91,14 @@ function avisosDe(toma) {
     return avisos;
 }
 
-/* ─── El texto, sus orillas y los dos bordes ─────────────────────────────
- *
- * Lo que se dibuja no es solo la toma: alrededor va, en gris, lo que se dijo
- * justo antes y justo después (las "orillas", que arma `repartir` en
- * `engine/notas-vivo.js`). Entre medio van las dos líneas que marcan dónde
- * empieza y dónde termina, y esas se arrastran.
- *
- * Antes esto era invisible: los bordes existían pero no se veían, y moverlos era
- * hacer clic derecho sobre una palabra y contestar un diálogo de "¿IN u OUT?"
- * sin poder ver qué texto se estaba metiendo o sacando. El clic derecho sigue,
- * que para un salto de doscientas palabras arrastrar no sirve.
- */
-
-const BORDES = {
-    in: { clase: 'es-in', que: 'Acá empieza la toma' },
-    out: { clase: 'es-out', que: 'Acá termina la toma' }
-};
-
-function barraDeBorde(cual, movible) {
-    const barra = document.createElement('span');
-    barra.className = `toma-borde ${BORDES[cual].clase}`;
-    barra.dataset.borde = cual;
-    barra.title = movible ? `${BORDES[cual].que}. Arrastrá para moverlo.` : BORDES[cual].que;
-    barra.setAttribute('aria-label', cual === 'in' ? 'IN de la toma' : 'OUT de la toma');
-    return barra;
-}
-
-/**
- * Gris lo que está fuera de los bordes.
- *
- * Se calcula recorriendo lo dibujado y no de los tiempos, para que valga igual
- * mientras se arrastra: la línea ya se movió en la pantalla pero el motor todavía
- * no sabe nada, y lo que tiene que verse es dónde quedaría.
- */
-function marcarOrillas(texto) {
-    let fuera = true;
-    for (const hijo of texto.children) {
-        if (hijo.classList.contains('toma-borde')) {
-            fuera = hijo.dataset.borde === 'out';
-            continue;
-        }
-        hijo.classList.toggle('es-orilla', fuera);
-    }
-}
-
-/**
- * Subraya las palabras sobre las que hay un comentario.
- *
- * Un comentario se hace seleccionando un pedazo del texto, y hasta acá lo único
- * que quedaba de esa selección era la cita en la fila de abajo. O sea que el
- * texto se veía igual con comentarios que sin ellos: para saber sobre qué frase
- * era había que leer la cita y volver a buscarla arriba, y con cinco comentarios
- * en una toma larga eso es leer la toma entera cinco veces. El marcador que se
- * escribe en el XML sí abarca esas palabras, así que la pantalla estaba
- * mostrando menos de lo que ya sabía.
- *
- * Se marca por la hora de cada palabra y no por lo que se seleccionó, porque es
- * la hora lo que el comentario guarda (`comentar` en `engine/notas-vivo.js`) y es
- * de donde salen los extremos del marcador: lo subrayado es exactamente lo que
- * va a llegar subrayado a la secuencia.
- */
-function marcarComentados(texto, toma) {
-    const rangos = (toma.comentarios || []).map(c => [Number(c.desdeMs), Number(c.hastaMs)]);
-    if (!rangos.length) return;
-    for (const span of texto.querySelectorAll('.toma-palabra')) {
-        const t = Number(span.dataset.t);
-        const cuales = rangos
-            .map(([desde, hasta], i) => (t >= desde && t <= hasta ? i : -1))
-            .filter(i => i >= 0);
-        if (!cuales.length) continue;
-        span.classList.add('es-comentada');
-        // Cuál de los comentarios, para poder resaltar solo el suyo al pasar por
-        // encima de una fila. Pueden ser varios: dos comentarios se pueden pisar.
-        span.dataset.com = cuales.join(' ');
-    }
-}
-
-/** La palabra que quedó después de la línea: su hora es la del borde. */
-function palabraDespuesDe(barra) {
-    let n = barra.nextElementSibling;
-    while (n && !n.classList.contains('toma-palabra')) n = n.nextElementSibling;
-    return n;
-}
-
-function arrastrarBordes(texto, toma, acciones) {
-    for (const barra of texto.querySelectorAll('.toma-borde')) {
-        barra.onpointerdown = e => {
-            // Sin esto el arrastre selecciona texto, y al soltar se abre la caja
-            // de comentario encima de lo que se estaba moviendo.
-            e.preventDefault();
-            empezarAMover(texto, barra, toma, acciones);
-        };
-    }
-}
-
-/**
- * Arrastrar una línea hasta el hueco entre dos palabras.
- *
- * La línea se mueve EN EL TEXTO mientras se arrastra —no es un fantasma aparte—,
- * así que el renglón se reacomoda solo y se ve exactamente cómo va a quedar. Al
- * soltar se le pide el cambio al motor. Con la clase en curso, el motor relee la
- * toma y siempre deja contexto nuevo de los dos lados; con la clase ya cerrada
- * reparte de nuevo lo que hay guardado, así que la orilla hacia donde se fue el
- * borde se va gastando y volver a llenarla es "Regenerar". Si el motor no acepta
- * el movimiento —un IN más allá del OUT— contesta el mismo estado y el repintado
- * devuelve la línea a su sitio.
- *
- * **Los eventos se escuchan en la ventana y no en la línea**, y no es un detalle
- * de estilo: mover la línea de sitio la saca del documento y la vuelve a meter, y
- * eso suelta la captura del puntero. Con `setPointerCapture` el arrastre avanzaba
- * exactamente una palabra y se trababa ahí, porque el resto de los movimientos se
- * los quedaba lo que hubiera debajo del cursor.
- */
-function empezarAMover(texto, barra, toma, acciones) {
-    const previa = palabraDespuesDe(barra);
-    const desde = previa ? previa.dataset.t : null;
-    barra.classList.add('es-arrastrando');
-    texto.classList.add('es-moviendo');
-
-    const mover = e => {
-        const span = palabraBajo(texto, e.clientX, e.clientY);
-        if (!span) return;
-        // A qué lado de la palabra: por la mitad, como cualquier cursor de texto.
-        // Si ya está de ese lado no se toca, que mover el nodo en cada pixel hace
-        // saltar el renglón entero.
-        const caja = span.getBoundingClientRect();
-        if (e.clientX > caja.left + caja.width / 2) {
-            if (barra.previousElementSibling === span) return;
-            span.after(barra);
-        } else {
-            if (barra.nextElementSibling === span) return;
-            span.before(barra);
-        }
-        marcarOrillas(texto);
-    };
-
-    const soltar = () => {
-        window.removeEventListener('pointermove', mover);
-        window.removeEventListener('pointerup', soltar);
-        window.removeEventListener('pointercancel', soltar);
-        barra.classList.remove('es-arrastrando');
-        texto.classList.remove('es-moviendo');
-
-        const palabra = palabraDespuesDe(barra);
-        const paredMs = palabra ? palabra.dataset.t : null;
-        if (paredMs === null || paredMs === desde) { marcarOrillas(texto); return; }
-        acciones.alCambiar({
-            tipo: 'borde', toma: toma.id, borde: barra.dataset.borde, paredMs: Number(paredMs)
-        });
-    };
-
-    window.addEventListener('pointermove', mover);
-    window.addEventListener('pointerup', soltar);
-    window.addEventListener('pointercancel', soltar);
-}
-
-function palabraBajo(texto, x, y) {
-    const donde = document.elementFromPoint(x, y);
-    const span = donde && donde.closest('.toma-palabra');
-    return span && texto.contains(span) ? span : null;
-}
-
-/**
- * @param {object|null} acciones si viene, las líneas se arrastran; si no, el texto
- *   se lee y nada más (una clase leída de una carpeta ajena, sin dónde escribir)
- */
-function textoDe(toma, acciones) {
-    const texto = document.createElement('div');
-    // Sin a quién pedirle el cambio, las líneas se ven igual —dicen de dónde a
-    // dónde va la toma— pero no se arrastran, y no pueden aparentarlo.
-    texto.className = acciones ? 'toma-texto es-movible' : 'toma-texto';
-    const palabra = w => texto.append(spanDePalabra(w), document.createTextNode(' '));
-
-    for (const w of toma.antes || []) palabra(w);
-    texto.append(barraDeBorde('in', Boolean(acciones)), document.createTextNode(' '));
-
-    const palabras = toma.palabras || [];
-    for (const w of palabras) palabra(w);
-    if (!palabras.length) {
-        const vacio = document.createElement('span');
-        vacio.className = 'toma-vacio';
-        vacio.textContent = toma.outMs == null
-            ? 'Escuchando…'
-            : 'Sin texto: no se oyó a nadie en esta toma.';
-        texto.append(vacio, document.createTextNode(' '));
-    }
-
-    // Una toma abierta no tiene OUT todavía, y lo que se está diciendo ahora es
-    // suyo: dibujarle una línea de salida y una orilla sería inventarle un final.
-    if (toma.outMs != null) {
-        texto.append(barraDeBorde('out', Boolean(acciones)), document.createTextNode(' '));
-        for (const w of toma.despues || []) palabra(w);
-    }
-
-    marcarOrillas(texto);
-    marcarComentados(texto, toma);
-    if (acciones) arrastrarBordes(texto, toma, acciones);
-    return texto;
-}
-
-/**
- * Seleccionar un pedazo del texto abre la caja para comentarlo.
- *
- * Se mira en el turno siguiente porque durante el `mouseup` la selección todavía
- * no está cerrada y sale vacía.
- */
-function comentarSeleccion(caja, texto, acciones, tomaId) {
-    texto.onmouseup = () => {
-        setTimeout(() => {
-            const elegido = seleccion(texto);
-            if (elegido) abrirCaja(caja, elegido, acciones, tomaId);
-        }, 0);
-    };
-}
-
-/**
- * Los comentarios sobre pedazos del texto, una fila cada uno.
- *
- * Pasar por encima de una fila resalta arriba las palabras que son suyas. Con un
- * comentario el subrayado ya alcanza, pero con varios todos se ven igual y la
- * cita se corta: la fila es lo que dice cuál es cuál.
- *
- * @param {HTMLElement} texto sobre el que se resalta; `marcarComentados` ya dejó
- *   en cada palabra a qué comentarios pertenece
- */
-function comentariosDe(toma, texto) {
-    return (toma.comentarios || []).map((c, i) => {
-        const fila = document.createElement('p');
-        fila.className = 'toma-com';
-        const que = document.createElement('span');
-        que.className = 'toma-com-que';
-        que.textContent = c.comentario;
-        const donde = document.createElement('span');
-        donde.className = 'toma-com-donde';
-        donde.textContent = `«${c.texto}»`;
-        fila.append(que, donde);
-
-        const suyas = () => texto.querySelectorAll(`.toma-palabra[data-com~="${i}"]`);
-        fila.onmouseenter = () => {
-            fila.classList.add('es-mirando');
-            for (const s of suyas()) s.classList.add('es-mirando');
-        };
-        fila.onmouseleave = () => {
-            fila.classList.remove('es-mirando');
-            for (const s of suyas()) s.classList.remove('es-mirando');
-        };
-        return fila;
-    });
-}
-
-/** Las filas de comentarios con su "Quitar", que solo va donde se puede quitar. */
-function filasDeComentarios(toma, texto, acciones) {
-    return comentariosDe(toma, texto).map((fila, i) => {
-        if (!acciones) return fila;
-        const quitar = document.createElement('button');
-        quitar.className = 'btn btn-ghost btn-inline';
-        quitar.type = 'button';
-        quitar.textContent = 'Quitar';
-        quitar.onclick = () => acciones.alCambiar({ tipo: 'borrar-comentario', toma: toma.id, indice: i });
-        fila.append(quitar);
-        return fila;
-    });
+function botonChico(texto, titulo, alClic) {
+    const boton = document.createElement('button');
+    boton.className = 'btn btn-ghost btn-inline';
+    boton.type = 'button';
+    boton.textContent = texto;
+    if (titulo) boton.title = titulo;
+    boton.onclick = alClic;
+    return boton;
 }
 
 /**
@@ -433,6 +106,10 @@ function filasDeComentarios(toma, texto, acciones) {
  * nada, que es lo que hace falta cuando hay veinte tomas y hay que encontrar
  * las del screen recorder de un vistazo. Cada botón lleva el color de su vista,
  * el mismo del borde de la toma.
+ *
+ * Las teclas P, R, S, M y X hacen lo mismo sobre la toma activa (`teclas.js`), y
+ * salen de la inicial de estos mismos rótulos: es lo que las hace adivinables sin
+ * tener que enseñarlas.
  */
 function selectorDeVistas(toma, vistas, acciones) {
     const grupo = document.createElement('div');
@@ -446,13 +123,72 @@ function selectorDeVistas(toma, vistas, acciones) {
         boton.classList.toggle('is-elegida', v.nombre === toma.vista);
         boton.dataset.vista = v.nombre;
         boton.textContent = v.nombre;
-        boton.title = v.titulo;
+        boton.title = `${v.titulo} · tecla ${v.nombre.charAt(0)}`;
         boton.setAttribute('role', 'radio');
         boton.setAttribute('aria-checked', String(v.nombre === toma.vista));
         boton.onclick = () => acciones.alCambiar({ tipo: 'vista', toma: toma.id, vista: v.nombre });
         grupo.append(boton);
     }
     return grupo;
+}
+
+/**
+ * El botón de plegar, y lo que queda dicho de una toma plegada.
+ *
+ * Qué se dice y por qué eso vive en `plegado.js`; acá está solo el dibujo. Lo que
+ * importa del resumen es que no repite nada de la cabecera —número, horas, largo
+ * y vista ya están ahí— y que no esconde el trabajo de nadie: si la toma tiene
+ * comentarios o una nota, plegada lo sigue diciendo.
+ */
+function resumenPlegado(toma) {
+    const { asomo, cuanto, marcas } = plegado.resumenDe(toma);
+    const caja = document.createElement('div');
+    caja.className = 'toma-resumen';
+
+    if (asomo) {
+        const dice = document.createElement('p');
+        dice.className = 'toma-resumen-dice';
+        dice.textContent = asomo;
+        caja.append(dice);
+    }
+
+    const datos = document.createElement('p');
+    datos.className = 'toma-resumen-datos';
+    const cuantas = document.createElement('span');
+    cuantas.textContent = cuanto;
+    datos.append(cuantas);
+    for (const marca of marcas) {
+        const etiqueta = document.createElement('span');
+        etiqueta.className = 'toma-resumen-marca';
+        etiqueta.textContent = marca;
+        datos.append(etiqueta);
+    }
+    caja.append(datos);
+    return caja;
+}
+
+/**
+ * "Plegar" es uno más de la fila de botones de la cabecera, sin estilo propio.
+ *
+ * Se probó con el triangulito que gira de la lista de clases
+ * (`.clase.es-hecha > summary::before`), que era el gesto ya conocido, y en esta
+ * cabecera no se lee: al lado de "Descartar" y del grupo de vistas, una punta de
+ * diez píxeles parece un adorno del borde y no algo que se aprieta.
+ *
+ * Y es un botón y no un `<details>` como allá porque el estado no vive en el DOM:
+ * la ficha se redibuja cada tres segundos y el `[open]` se perdería en cada
+ * repintado. Lo de adentro tampoco se esconde con CSS —se pinta o no se pinta—,
+ * así que `<details>` no tendría nada que abrir.
+ */
+function botonDePliegue(toma, plegada, mirada) {
+    const boton = botonChico(plegada ? 'Desplegar' : 'Plegar',
+        plegada
+            ? 'Volver a ver el texto de esta toma'
+            : 'Dejar solo un resumen, para ir limpiando la vista',
+        () => mirada.alPlegar(toma.id, !plegada));
+    boton.classList.add('toma-pliegue');
+    boton.setAttribute('aria-expanded', String(!plegada));
+    return boton;
 }
 
 /**
@@ -466,16 +202,20 @@ function selectorDeVistas(toma, vistas, acciones) {
  * del XML es un rango más ancho que cada toma, así que correr un borde ahí adentro
  * no relee nada.
  *
- * Lo único que queda afuera es "Reabrir", que sin el ciclo de señales corriendo
- * dejaría la toma sin OUT y por lo tanto fuera del XML.
+ * Lo que queda afuera es "Reabrir" —sin el ciclo de señales dejaría la toma sin
+ * OUT y por lo tanto fuera del XML— y "Eliminar", que saca una toma de la sesión
+ * que se está grabando y de una clase cerrada no hay sesión de la que sacarla: lo
+ * que hay es un archivo, y borrarle una toma de abajo no se puede deshacer con la
+ * misma tecla que todo lo demás.
  *
  * @param {object} toma como quedó en el archivo con la hora del día (`sidecar`)
- * @param {object} estado por `vistas`; lo demás no hace falta con la clase cerrada
+ * @param {object} estado por `vistas` y `repetidos`; lo demás no hace falta con
+ *   la clase cerrada
  * @param {object|null} [acciones] { alCambiar(comando), alBorde({toma, paredMs}) };
  *   sin esto se lee y nada más
  */
 export function pintarLeida(toma, estado, acciones) {
-    return dibujar(toma, estado, acciones || null, false);
+    return dibujar(toma, estado, acciones || null, false, null);
 }
 
 /**
@@ -485,19 +225,24 @@ export function pintarLeida(toma, estado, acciones) {
  * @param {object} estado el resumen entero, por `vistas`, `tomas` y `abierta`
  * @param {object} acciones { alCambiar(comando), alCerrar(), alBorde({toma, paredMs}) };
  *   los comandos son los de `editar` en `engine/grabacion.js`
+ * @param {object} mirada { plegadas: Set<number>, alPlegar(id, plegada) }
  */
-function pintarToma(toma, estado, acciones) {
-    return dibujar(toma, estado, acciones, true);
+function pintarToma(toma, estado, acciones, mirada) {
+    return dibujar(toma, estado, acciones, true, mirada);
 }
 
 /**
- * @param {boolean} enVivo si la clase se está grabando ahora. Es lo único que
- *   cambia entre las dos maneras de dibujar una toma, y ya solo cambia los dos
- *   botones del ciclo de señales: "Cerrar acá" y "Reabrir".
+ * @param {boolean} enVivo si la clase se está grabando ahora
+ * @param {object|null} mirada cómo se está mirando la lista; sin esto no hay
+ *   pliegue, que es de la lista de la clase en curso y no de una tarjeta suelta
  */
-function dibujar(toma, estado, acciones, enVivo) {
+function dibujar(toma, estado, acciones, enVivo, mirada) {
     const caja = tarjetaDe(toma);
     const cabeza = cabezaDe(toma);
+    // Los tramos que esta toma tiene que subrayar como aviso. Se arman una vez
+    // por lista y llegan repartidos, porque un empalme habla de dos tomas y
+    // cuelga de una sola: la tarjeta no puede saberlo mirándose a sí misma.
+    const repetidos = (estado.repetidos && estado.repetidos.get(toma.id)) || [];
 
     // Sin nada que hacerle —una clase terminada que solo se lee— se dibuja lo que
     // dice y se acaba: los botones y el campo no pueden estar ahí sin funcionar.
@@ -507,30 +252,36 @@ function dibujar(toma, estado, acciones, enVivo) {
             caja.append(cabeza);
             return caja;
         }
-        caja.append(cabeza, ...avisosDe(toma));
+        caja.append(cabeza, ...avisosDe(toma), ...conEmpalme(toma, null));
         if (toma.comentario) {
             const nota = document.createElement('p');
             nota.className = 'toma-nota-leida';
             nota.textContent = toma.comentario;
             caja.append(nota);
         }
-        const soloLeer = textoDe(toma, null);
-        caja.append(soloLeer, ...filasDeComentarios(toma, soloLeer, null));
+        caja.append(cuerpoDe(toma, null, null, repetidos));
         return caja;
     }
 
-    const tirar = document.createElement('button');
-    tirar.className = 'btn btn-ghost btn-inline';
-    tirar.type = 'button';
-    tirar.textContent = toma.descartada ? 'Recuperar' : 'Descartar';
-    // Descartar es explícito: "Retomamos" no descarta la anterior sola,
-    // porque a veces se retoma para agregar y no para repetir.
-    tirar.onclick = () => acciones.alCambiar({
-        tipo: 'descartar', toma: toma.id, descartada: !toma.descartada
-    });
+    const tirar = botonChico(toma.descartada ? 'Recuperar' : 'Descartar',
+        toma.descartada
+            ? 'Vuelve al XML con la vista que tenía'
+            : 'La deja fuera del XML, pero la conserva',
+        // Descartar es explícito: "Retomamos" no descarta la anterior sola,
+        // porque a veces se retoma para agregar y no para repetir.
+        () => acciones.alCambiar({ tipo: 'descartar', toma: toma.id, descartada: !toma.descartada }));
 
     if (toma.descartada) {
         cabeza.append(marcaDeDescartada(), tirar);
+        // Eliminar solo acá, colgando de una toma que ya está descartada: son dos
+        // decisiones y no una, y por eso esto no pregunta nada. La otra mitad de
+        // por qué no hay cartel es que se deshace con Cmd-Z como todo lo demás
+        // (ver `eliminar` en `engine/grabacion.js`).
+        if (enVivo) {
+            cabeza.append(botonChico('Eliminar',
+                'La borra de la sesión: no queda ni descartada. Se deshace con Cmd-Z.',
+                () => acciones.alCambiar({ tipo: 'eliminar', toma: toma.id })));
+        }
         caja.append(cabeza);
         return caja;
     }
@@ -538,12 +289,9 @@ function dibujar(toma, estado, acciones, enVivo) {
     cabeza.append(selectorDeVistas(toma, estado.vistas || [], acciones));
 
     if (enVivo && toma.outMs == null) {
-        const cerrar = document.createElement('button');
-        cerrar.className = 'btn btn-ghost btn-inline';
-        cerrar.type = 'button';
-        cerrar.textContent = 'Cerrar acá';
-        cerrar.onclick = () => acciones.alCerrar();
-        cabeza.append(cerrar);
+        cabeza.append(botonChico('Cerrar acá',
+            'Cierra la toma en su última palabra, sin esperar el "Pausa"',
+            () => acciones.alCerrar()));
     } else {
         cabeza.append(tirar);
 
@@ -553,63 +301,139 @@ function dibujar(toma, estado, acciones, enVivo) {
         // no va a hacer nada es peor que no ofrecerlo.
         const ultima = estado.tomas ? estado.tomas[estado.tomas.length - 1] : null;
         if (enVivo && toma === ultima && !estado.abierta) {
-            const reabrir = document.createElement('button');
-            reabrir.className = 'btn btn-ghost btn-inline';
-            reabrir.type = 'button';
-            reabrir.textContent = 'Reabrir';
-            reabrir.title = 'Si "Pausa" cerró de más, la toma sigue';
-            reabrir.onclick = () => acciones.alCambiar({ tipo: 'reabrir', toma: toma.id });
-            cabeza.append(reabrir);
+            cabeza.append(botonChico('Reabrir', 'Si "Pausa" cerró de más, la toma sigue',
+                () => acciones.alCambiar({ tipo: 'reabrir', toma: toma.id })));
         }
+    }
+
+    // La abierta no se pliega: es lo que la persona está mirando.
+    const plegada = Boolean(mirada && mirada.plegadas.has(toma.id));
+    if (mirada && plegado.sePuedePlegar(toma)) {
+        cabeza.append(botonDePliegue(toma, plegada, mirada));
     }
 
     caja.append(cabeza, ...avisosDe(toma));
 
-    const nota = document.createElement('input');
-    nota.className = 'toma-nota';
-    nota.type = 'text';
-    nota.placeholder = 'Comentar';
-    nota.value = toma.comentario || '';
-    // Al salir del campo y no en cada tecla: cada cambio reescribe el XML.
-    nota.onchange = () => acciones.alCambiar({ tipo: 'nota', toma: toma.id, texto: nota.value });
-    caja.append(nota);
+    if (plegada) {
+        caja.classList.add('es-plegada');
+        caja.append(resumenPlegado(toma));
+        return caja;
+    }
+
+    caja.append(...conEmpalme(toma, acciones), cuerpoDe(toma, acciones, caja, repetidos));
+    return caja;
+}
+
+/**
+ * El aviso de empalme, si hay alguno que dar.
+ *
+ * Devuelve una lista para poder no devolver nada: es lo que pasa en casi todas
+ * las tomas —la primera de la clase, las que no repiten, y las tres situaciones
+ * en que no hay modelo con qué mirarlo— y ahí la tarjeta tiene que quedar
+ * exactamente como estaba (ver `queDecir` en `grabar/empalme.js`).
+ */
+function conEmpalme(toma, acciones) {
+    const bloque = empalme.bloqueDe(toma, acciones);
+    return bloque ? [bloque] : [];
+}
+
+/**
+ * La nota, el texto y la columna del margen, que van juntos.
+ *
+ * En una caja propia y no sueltos en la tarjeta porque el margen los reparte en
+ * dos columnas cuando hay un comentario abierto: la cabecera se queda de punta a
+ * punta y lo que se angosta es el texto, que es lo que tiene al lado la tarjeta
+ * del comentario.
+ */
+function cuerpoDe(toma, acciones, tarjeta, repetidos) {
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'toma-cuerpo';
+
+    const columna = document.createElement('div');
+    columna.className = 'toma-columna';
+
+    if (acciones) {
+        const nota = document.createElement('input');
+        nota.className = 'toma-nota';
+        nota.type = 'text';
+        nota.placeholder = 'Comentar';
+        nota.value = toma.comentario || '';
+        // Al salir del campo y no en cada tecla: cada cambio reescribe el XML.
+        nota.onchange = () => acciones.alCambiar({ tipo: 'nota', toma: toma.id, texto: nota.value });
+        columna.append(nota);
+    }
 
     // Los bordes se mueven igual con la clase abierta que cerrada: correrlos
     // dentro de las orillas guardadas es repartir de nuevo palabras que ya están,
     // no volver a oír (ver `moverBordeGuardado` en `engine/notas-vivo.js`).
     const texto = textoDe(toma, acciones);
-    if (acciones.alBorde) {
-        // Clic derecho sobre una palabra: mover un borde a esa palabra. Sigue
-        // estando aunque las líneas se arrastren, porque para un salto de
-        // doscientas palabras arrastrar no sirve. Es el mismo gesto que en la
-        // onda del visor de cortes.
-        texto.oncontextmenu = e => {
-            const span = e.target.closest('.toma-palabra');
-            if (!span) return;
-            e.preventDefault();
-            acciones.alBorde({ toma: toma.id, paredMs: Number(span.dataset.t) });
-        };
+    if (acciones) {
+        bordeConElDerecho(texto, toma, acciones);
+        comentarSeleccion(tarjeta, texto, acciones, toma.id);
     }
+    // El clic sobre un tramo subrayado abre su comentario también en una clase
+    // leída: mirar lo que alguien anotó no necesita poder escribir.
+    margen.cablearTramos(texto, toma, acciones);
+    // Y el aviso de repetición encima, después de los comentarios: una palabra
+    // puede llevar las dos marcas y la de acá se suma a la que ya esté.
+    empalme.marcarRepetidos(texto, repetidos);
 
-    comentarSeleccion(caja, texto, acciones, toma.id);
-    caja.append(texto, ...filasDeComentarios(toma, texto, acciones));
-    return caja;
+    columna.append(texto);
+    const alMargen = document.createElement('div');
+    alMargen.className = 'toma-margen';
+    cuerpo.append(columna, alMargen);
+    return cuerpo;
 }
 
 /**
- * La tarjeta que no se puede rehacer: aquella en la que alguien está escribiendo.
+ * Seleccionar un pedazo del texto abre la caja para comentarlo, al margen.
  *
- * Vale tanto por el foco como por la caja de comentario abierta, porque la caja
- * se puede perder el foco sin cerrarse —haciendo clic en la cita, por ejemplo— y
- * rehacerla igual borraría lo escrito y la selección sobre la que se comentaba.
+ * Se mira en el turno siguiente porque durante el `mouseup` la selección todavía
+ * no está cerrada y sale vacía.
  */
-function tarjetaOcupada(donde) {
+function comentarSeleccion(tarjeta, texto, acciones, tomaId) {
+    texto.onmouseup = () => {
+        setTimeout(() => {
+            const elegido = seleccion(texto);
+            if (elegido) margen.abrirCaja(tarjeta, elegido, acciones, tomaId);
+        }, 0);
+    };
+}
+
+/* ─── La lista ───────────────────────────────────────────────────────────── */
+
+/**
+ * Las tarjetas que no se pueden rehacer, por id.
+ *
+ * Son dos cosas y las dos son trabajo a medio hacer. Una es el campo donde
+ * alguien está escribiendo: sacarlo del documento se lleva puesto el foco, y con
+ * el estado del motor llegando cada tres segundos, comentar una toma mientras la
+ * clase seguía era imposible —a media frase el cursor se iba solo—. La otra es un
+ * comentario abierto al margen: se abre a mano, con un clic sobre su tramo, y un
+ * repintado que lo cierre cada tres segundos lo vuelve inservible.
+ *
+ * Son varias y no una: se puede tener un comentario abierto en la toma 2 y estar
+ * escribiendo la nota de la 5 al mismo tiempo.
+ *
+ * **Un botón con el foco no ocupa la tarjeta**, y esa distinción no es cosmética:
+ * antes se miraba si la tarjeta contenía a `document.activeElement`, y Chromium le
+ * da el foco al botón que se acaba de apretar. O sea que apretar "Descartar", una
+ * vista o "Plegar" dejaba a su propia tarjeta marcada como ocupada, y la tarjeta
+ * no se rehacía nunca: el cambio se escribía en el XML y en la pantalla no pasaba
+ * nada hasta que alguien hiciera clic en otra parte. Perder el foco de un botón
+ * que ya se apretó, en cambio, no se ve.
+ */
+function tarjetasOcupadas(donde) {
     const foco = document.activeElement;
+    const escribiendo = foco && /^(INPUT|TEXTAREA)$/.test(foco.tagName) ? foco : null;
+    const ocupadas = new Map();
     for (const tarjeta of donde.children) {
         if (!tarjeta.dataset || !tarjeta.dataset.toma) continue;
-        if (tarjeta.contains(foco) || tarjeta.querySelector('.toma-caja')) return tarjeta;
+        if ((escribiendo && tarjeta.contains(escribiendo)) || tarjeta.classList.contains('es-comentando')) {
+            ocupadas.set(Number(tarjeta.dataset.toma), tarjeta);
+        }
     }
-    return null;
+    return ocupadas;
 }
 
 /**
@@ -617,9 +441,7 @@ function tarjetaOcupada(donde) {
  *
  * Rehacerla entera es una línea —`donde.textContent = ''`, que es lo que había—
  * y el problema es que sacar del documento el campo donde alguien está
- * escribiendo le quita el foco. Con el estado del motor llegando cada tres
- * segundos, comentar una toma mientras la clase seguía era imposible: a media
- * frase el cursor se iba solo y lo escrito se perdía.
+ * escribiendo le quita el foco.
  */
 function acomodar(donde, nuevas) {
     for (const vieja of [...donde.children]) {
@@ -635,15 +457,23 @@ function acomodar(donde, nuevas) {
 /**
  * Dibuja la lista entera de la clase en curso.
  *
- * De la más nueva a la más vieja: la que importa mirar es la que está pasando, y
- * con veinte tomas la de arriba tendría que buscarse con la barra.
+ * **De la más vieja a la más nueva**, que es el orden en que la clase pasó: una
+ * clase se lee como se dio, y mientras se graba lo que importa es lo último que se
+ * dijo, o sea el final. Estuvo al revés y el argumento era que la que importa
+ * mirar quedara arriba sin usar la barra; el precio era leer la clase de abajo
+ * hacia arriba, que es lo que nadie hace con un texto. Que lo último quede a la
+ * vista lo resuelve el scroll, que se pega al fondo solo (`pegado.js`).
  *
- * La tarjeta que se está escribiendo se queda como está hasta que suelten el
- * foco. O sea que su texto deja de crecer un rato: es a propósito, porque quien
- * está escribiendo un comentario está mirando su comentario, y a cambio no se le
- * mueve el suelo. Lo que se está oyendo sigue a la vista arriba, en "Oyendo:".
+ * La tarjeta que se está escribiendo, y la que tiene un comentario abierto al
+ * margen, se quedan como están hasta que las suelten. O sea que su texto deja de
+ * crecer un rato: es a propósito, porque quien está escribiendo un comentario
+ * está mirando su comentario, y a cambio no se le mueve el suelo. Lo que se está
+ * oyendo sigue a la vista arriba, en "Oyendo:".
+ *
+ * @param {object|null} mirada { plegadas: Set<number>, sinDescartadas: boolean,
+ *   alPlegar(id, plegada) }
  */
-export function pintar(donde, estado, acciones) {
+export function pintar(donde, estado, acciones, mirada) {
     // Con una línea de borde en la mano no se repinta. El estado del motor llega
     // cada tres segundos, y rehacer la lista en medio del gesto cambia la línea
     // por otra: el arrastre se cortaba solo, a mitad de camino y sin avisar.
@@ -659,9 +489,12 @@ export function pintar(donde, estado, acciones) {
         return;
     }
 
-    const ocupada = tarjetaOcupada(donde);
-    acomodar(donde, [...estado.tomas].reverse().map(toma =>
-        ocupada && Number(ocupada.dataset.toma) === toma.id
-            ? ocupada
-            : pintarToma(toma, estado, acciones)));
+    // Los tramos a subrayar salen de la lista entera y no de cada toma: el
+    // empalme de la toma 3 subraya también el final de la 2, así que la tarjeta
+    // de la 2 no puede armarlo sola. Se cuelgan del estado en una copia para no
+    // escribirle encima al que mandó el motor.
+    const conTramos = { ...estado, repetidos: empalme.tramosPorToma(estado.tomas) };
+    const ocupadas = tarjetasOcupadas(donde);
+    acomodar(donde, plegado.alaVista(estado.tomas, mirada).map(toma =>
+        ocupadas.get(toma.id) || pintarToma(toma, conTramos, acciones, mirada)));
 }

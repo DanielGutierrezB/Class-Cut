@@ -272,6 +272,13 @@ function sidecar(estado) {
             // agregado tiene que poder rehacerse sin volver a medir nada: lo que
             // cambia es cuáles cuentan, no lo que se midió de cada una.
             lengua: t.lengua || null,
+            // Cómo pega con la toma anterior (`engine/empalme.js`). De acá se
+            // guarda lo poco que no se puede rehacer leyendo: lo que contestó el
+            // modelo, que se pagó, y que el editor descartó el ajuste. La
+            // sugerencia misma no se guarda —se rehace cada vez que se mira—
+            // porque el texto de una toma cambia cuando se la relee o se le mueve
+            // un borde, y una sugerencia vieja señalaría una palabra que ya no está.
+            empalme: t.empalme || null,
             // Lo que se dijo pegado a cada borde. Se guarda para que mover un IN o
             // un OUT en una clase ya grabada se siga haciendo mirando el texto, sin
             // tener que releer el audio para saber qué hay del otro lado.

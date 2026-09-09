@@ -35,6 +35,18 @@ export function recordar(clave, valor) {
     try { localStorage.setItem(clave, String(valor)); } catch { /* modo privado */ }
 }
 
+/**
+ * Tirar una preferencia guardada.
+ *
+ * Es para cuando una clave dejó de significar lo que significaba: heredarla sería
+ * aplicar la elección de alguien a una pregunta que no es la que contestó. Se
+ * borra en vez de ignorarse para que no quede dando vueltas y alguien la vuelva a
+ * leer más adelante creyendo que sirve.
+ */
+export function olvidar(clave) {
+    try { localStorage.removeItem(clave); } catch { /* modo privado */ }
+}
+
 // Quién está en cada paso del cabezal y a cuál se puede ir vive en `pasos.js`:
 // dejó de ser "pintar el número que toca" cuando los pasos se volvieron
 // navegables en las dos direcciones.

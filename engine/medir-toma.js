@@ -39,11 +39,18 @@ const gpu = require('./gpu');
 /**
  * Los medidores dados de alta, en orden de alta.
  *
- * Cada uno es `{ clave, medir(toma), conModelo({toma, cliente, signal}) }`:
+ * Cada uno es `{ clave, medir(toma, contexto), conModelo({toma, tomas, cliente, signal}) }`:
  *
  *   clave      dónde queda el resultado dentro de la toma (`toma[clave]`)
  *   medir      sincrónico; devuelve el objeto determinista, o null si no aplica
  *   conModelo  opcional; async, devuelve `{hallazgos}` o `{error}`
+ *
+ * **Las demás tomas de la sesión llegan por `contexto` y `tomas`.** Casi todo lo
+ * que se mide es de la toma sola —cómo se habló adentro—, pero no todo: si una
+ * toma pega bien con la anterior es una pregunta sobre el par (`empalme.js`), y
+ * el par no se puede armar mirando una sola. Va como dato de la llamada y no
+ * como campo de la toma porque cuál es la anterior cambia cuando alguien
+ * descarta una, y una referencia guardada quedaría apuntando a la de antes.
  *
  * La lista es global y no de la sesión a propósito: los medidores son código, no
  * datos de una grabación, y darlos de alta al cargar el módulo evita que una
@@ -75,14 +82,17 @@ let esperando = null;
  * independientes de un panel, y que uno tenga un bug no es motivo para que el
  * profesor pierda los números de los otros.
  *
+ * @param {object} toma la que acaba de quedar cerrada
+ * @param {object} [contexto] { tomas } — las de la sesión, para los medidores
+ *   que miden algo del par y no de la toma sola
  * @returns {Array<string>} las claves que quedaron con medida nueva
  */
-function medir(toma) {
+function medir(toma, contexto) {
     const puestas = [];
     for (const medidor of medidores) {
         let det = null;
         try {
-            det = medidor.medir(toma);
+            det = medidor.medir(toma, contexto);
         } catch (err) {
             det = null;
         }
@@ -209,9 +219,10 @@ function bombear() {
  * vivo se convierte en una factura. Lo que falló sí se reintenta en la próxima
  * relectura, que es cuando puede haber cambiado algo.
  *
- * @param {object} params { toma, avisar, signal, cliente, proveedor } — los dos
- *   últimos son para las pruebas y para el arnés: con un cliente puesto no se
- *   lee la configuración, y con un proveedor puesto no se lee Ajustes.
+ * @param {object} params { toma, tomas, avisar, signal, cliente, proveedor } —
+ *   `tomas` son las de la sesión, para el medidor que pregunta por el par; los
+ *   dos últimos son para las pruebas y para el arnés: con un cliente puesto no
+ *   se lee la configuración, y con un proveedor puesto no se lee Ajustes.
  */
 async function conModelo(params) {
     const p = params || {};
@@ -249,7 +260,7 @@ async function conModelo(params) {
     avisar();
 
     for (const medidor of pendientes) {
-        const salida = await carril(() => pedir(medidor, toma, puesto, p.signal));
+        const salida = await carril(() => pedir(medidor, toma, p.tomas, puesto, p.signal));
         // La desplazada se borra en vez de escribirse: dejar "midiendo" sería
         // mentir —no se está midiendo— y dejar una falla sería acusar de un error
         // que no hubo. Sin estado, el panel simplemente no la muestra.
@@ -260,9 +271,9 @@ async function conModelo(params) {
 }
 
 /** Una consulta de un medidor, con todo lo que puede salir mal ya contestado. */
-async function pedir(medidor, toma, puesto, signal) {
+async function pedir(medidor, toma, tomas, puesto, signal) {
     try {
-        const salida = await medidor.conModelo({ toma, cliente: puesto.cliente, signal });
+        const salida = await medidor.conModelo({ toma, tomas, cliente: puesto.cliente, signal });
         if (salida && salida.error) return { estado: 'falla', porque: salida.error, hallazgos: [] };
         return {
             estado: 'listo',
@@ -415,7 +426,7 @@ async function pagarLoAbstenido(tomas, params) {
         // La consulta que se pase del techo queda huérfana a propósito: cortarla
         // no la haría llegar antes, y lo que escriba después no lo va a mirar
         // nadie —el aviso se cae solo cuando la sesión ya no está—.
-        await conTecho(conModelo({ ...params, toma }), queda);
+        await conTecho(conModelo({ ...params, toma, tomas }), queda);
     }
 }
 

@@ -26,6 +26,7 @@
  */
 
 const { norm } = require('./texto');
+const empalme = require('./empalme');
 
 /**
  * Las dos fuentes que graba el Rodecaster, en el orden en que las numera.
@@ -732,6 +733,14 @@ function aplicar(toma, cambio) {
             return;
         case 'borrar-comentario':
             descomentar(toma, c.indice);
+            return;
+        case 'descartar-ajuste':
+            // "Descartar ajuste": el editor miró el empalme con la toma anterior
+            // y dijo que está bien así. Entra por el mismo camino que todo lo
+            // demás porque tiene que quedar ESCRITO —si no, la sugerencia vuelve
+            // en el próximo repintado y le pregunta lo mismo cada tres segundos,
+            // y al cerrarse otra vez la toma se pagaría de nuevo la consulta.
+            empalme.descartar(toma, c.contra);
             return;
         case 'borde':
             moverBordeGuardado(toma, c.borde, Number(c.paredMs));

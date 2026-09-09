@@ -34,6 +34,7 @@
 
 import { fmtDur, fmtHora, plural } from '../formato.js';
 import { pintarLeida } from './tomas.js';
+import { tramosPorToma } from './empalme.js';
 
 export const MODOS = ['carpetas', 'fecha'];
 
@@ -156,7 +157,12 @@ function tarjeta(clase, vista) {
             alBorde: donde => vista.alBorde(clase, donde)
         }
         : null;
-    const conVistas = { vistas: vista.vistas || [] };
+    // El empalme de una clase terminada se mira igual: `grabacion.listar` lo
+    // rehace al leer el archivo, y los bordes de una clase cerrada se mueven, así
+    // que el ajuste que se ofrece acá es tan aplicable como el de la que corre.
+    // Los tramos se arman con las tomas EN ORDEN, antes de darlas vuelta para
+    // dibujarlas: cuál es la anterior lo decide la clase, no la lista.
+    const conVistas = { vistas: vista.vistas || [], repetidos: tramosPorToma(tomas) };
     for (const toma of [...tomas].reverse()) lista.append(pintarLeida(toma, conVistas, acciones));
 
     caja.append(cabeza, lista);

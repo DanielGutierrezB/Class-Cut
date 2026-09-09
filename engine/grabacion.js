@@ -28,11 +28,13 @@ const captura = require('./captura');
 const golpe = require('./golpe');
 const oir = require('./oir');
 const vivo = require('./notas-vivo');
+const historial = require('./deshacer');
 const notasXml = require('./notas-xml');
 const nombreDeClase = require('./nombre-de-clase');
 const workspace = require('./workspace');
 const temario = require('./temario');
 const lengua = require('./lengua');
+const empalme = require('./empalme');
 const medirToma = require('./medir-toma');
 const gpu = require('./gpu');
 const ia = require('./ia');
@@ -41,6 +43,7 @@ const ia = require('./ia');
 // datos de una grabación, así que ninguna sesión puede arrancar con la mitad
 // enganchada (ver `engine/medir-toma.js`).
 medirToma.registrar(lengua.medidor);
+medirToma.registrar(empalme.medidor);
 
 /**
  * Cada cuánto se escucha buscando señales, y cuánto se escucha.
@@ -156,6 +159,11 @@ function iniciar(params) {
         // promesa de la pasada que las está atendiendo, si hay una.
         cola: [],
         rehaciendo: null,
+        // Lo que el editor le hizo a las tomas a mano, para poder volver
+        // (`engine/deshacer.js`). Nace con la sesión y muere con ella: las fotos
+        // son de las tomas de ESTA clase, y deshacer con el historial de la
+        // anterior metería una toma de otra grabación adentro de esta.
+        historia: historial.nueva(),
         // La promesa de la medición de cobertura en curso, si hay una: es lo que
         // impide dos consultas encimadas (`atenderTemario`).
         midiendoTemario: null,
@@ -378,7 +386,15 @@ async function rehacerToma(id) {
         // Lo que se mide de la toma con lo que ya está en memoria: sale acá
         // mismo, antes de escribir, así el panel tiene número en el mismo aviso
         // en que aparece el texto bueno (`engine/medir-toma.js`).
-        medirToma.medir(toma);
+        //
+        // Y va con las demás tomas al lado: cómo pega esta con la anterior no se
+        // puede mirar teniendo una sola (`engine/empalme.js`). Este es también el
+        // único momento en que tiene sentido mirarlo, y por eso la validación del
+        // empalme es un medidor y no un disparador propio: acá las DOS tomas del
+        // par ya están releídas con el modelo grande —la cola se atiende de a una
+        // y en orden—, así que se mide sobre el texto que va a quedar y no sobre
+        // el del ciclo liviano, que está declarado descartable.
+        medirToma.medir(toma, { tomas: sesion.estado.tomas });
 
         escribir();
         sesion.avisar({ tipo: 'estado', estado: resumen() });
@@ -388,7 +404,7 @@ async function rehacerToma(id) {
         // Del mismo latido cuelga lo que la toma le pregunta a un modelo. No se
         // espera: esta fila es la que decide dónde arrancan las tomas siguientes,
         // y una consulta metida acá adentro retrasaría la clase entera.
-        medirToma.conModelo({ toma, avisar: avisarMedida });
+        medirToma.conModelo({ toma, tomas: sesion.estado.tomas, avisar: avisarMedida });
     } catch (err) {
         if (sesion) sesion.avisar({ tipo: 'error', mensaje: err.message });
     }
@@ -711,9 +727,14 @@ function claqueta(paredMs) {
  *   reabrir           —                               "Pausa" cerró de más
  *   comentar          { desdeMs, hastaMs, texto, comentario }  sobre un pedazo del texto
  *   borrar-comentario { indice }
+ *   eliminar          —                               borrarla de la sesión
  *
  * Todo pasa por acá y todo escribe el XML: la pantalla no guarda nada por su
  * cuenta, así que lo que se ve y lo que está en el archivo son lo mismo siempre.
+ *
+ * Y todo queda anotado en el historial de la sesión, así que todo se puede
+ * deshacer (`deshacer` más abajo). Es por la misma razón que el cambio pasa por
+ * acá: el que puede volver atrás es el que escribió el archivo.
  */
 function editar(cambio) {
     if (!sesion) return null;
@@ -721,18 +742,35 @@ function editar(cambio) {
     const toma = sesion.estado.tomas.find(t => t.id === c.toma);
     if (!toma) return resumen();
 
+    const antes = historial.foto(toma);
+    let sigue = true;
+
     switch (c.tipo) {
-        case 'borde':
+        case 'borde': {
             // El texto de la toma ya no es el de este tramo: se relee. Mover un
             // borde es lo que se hace justamente cuando el conteo se comió una
             // palabra o cuando hay que cortar antes de algo, y en los dos casos
             // lo que hay que ver después es el texto nuevo.
-            if (c.paredMs != null && vivo.moverBorde(toma, c.borde, Number(c.paredMs))) {
+            //
+            // Un borde que cae donde ya estaba no es un cambio, y hay dos gestos
+            // que llegan así: un arrastre que volvió al hueco de donde salió y un
+            // clic derecho sobre la palabra que ya es la primera de la toma.
+            // Releerla por eso serían dos segundos de GPU para dejarla igual, y
+            // un paso en el historial que al deshacerse no se ve.
+            const estaba = c.borde === 'in' ? toma.inMs : toma.outMs;
+            if (c.paredMs != null && Number(c.paredMs) !== estaba &&
+                vivo.moverBorde(toma, c.borde, Number(c.paredMs))) {
                 encolarToma(toma.id);
+            } else {
+                sigue = false;
             }
             break;
+        }
         case 'reabrir':
             reabrir(toma);
+            break;
+        case 'eliminar':
+            sigue = eliminar(toma);
             break;
         // Los otros cinco se resuelven con lo que ya está escrito, así que son
         // los mismos que se hacen sobre una clase ya terminada (`editarGrabada`),
@@ -743,12 +781,124 @@ function editar(cambio) {
             vivo.aplicar(toma, c);
     }
 
+    // Un cambio que no cambió nada no va al historial: un arrastre que volvió al
+    // mismo hueco dejaría un paso que al deshacerse no se ve, y el editor
+    // apretaría de nuevo pensando que no funcionó.
+    if (sigue) {
+        historial.anotar(sesion.historia, {
+            que: comoSeLlama(c),
+            tipo: c.tipo,
+            id: toma.id,
+            antes,
+            despues: c.tipo === 'eliminar' ? null : historial.foto(toma)
+        });
+    }
+
     escribir();
     // Descartar una toma le saca a la clase lo que esa toma decía, así que un
     // objetivo que estaba cubierto por ella deja de estarlo. Es el otro momento
     // —además del cierre de una toma— en que la cobertura cambia de verdad.
     pedirTemario();
     return resumen();
+}
+
+/**
+ * Cómo se llama lo que se acaba de hacer, para poder decirlo al deshacerlo.
+ *
+ * Se dice QUÉ se deshizo y no solo que algo pasó, igual que en la revisión de
+ * cortes: con quince tomas en pantalla y el scroll donde lo dejó quien estaba
+ * leyendo, un cambio que se revierte lejos de la vista es invisible.
+ */
+function comoSeLlama(c) {
+    const cual = `la toma ${c.toma}`;
+    switch (c.tipo) {
+        case 'vista': return `poner ${cual} en ${c.vista}`;
+        case 'nota': return `la nota de ${cual}`;
+        case 'descartar': return `${c.descartada ? 'descartar' : 'recuperar'} ${cual}`;
+        case 'comentar': return `comentar «${vivo.limpio(String(c.texto || '')).slice(0, 30)}»`;
+        case 'borrar-comentario': return `quitar un comentario de ${cual}`;
+        case 'descartar-ajuste': return `descartar el ajuste de corte de ${cual}`;
+        case 'borde': return `mover el ${c.borde === 'in' ? 'IN' : 'OUT'} de ${cual}`;
+        case 'reabrir': return `reabrir ${cual}`;
+        case 'eliminar': return `eliminar ${cual}`;
+        case 'cerrar': return `cerrar ${cual}`;
+        default: return `el cambio en ${cual}`;
+    }
+}
+
+/**
+ * Eliminar una toma: sacarla de la sesión.
+ *
+ * No es lo mismo que descartarla y por eso son dos gestos. Descartar la deja
+ * fuera del XML pero la conserva —su texto sigue contando para las repeticiones
+ * y para la cobertura del temario, y se puede recuperar—; eliminar la borra, y
+ * entonces lo que la toma decía deja de existir para el resto de la clase.
+ *
+ * **Es la única acción destructiva de esta pantalla, y no pregunta.** No hace
+ * falta un cartel porque hay dos cosas puestas antes: solo se puede eliminar una
+ * toma que YA está descartada —o sea que alguien decidió dos veces, y el botón
+ * no aparece nunca al lado de una toma viva— y el gesto se deshace como todos los
+ * demás. Un cartel de confirmación en medio de una clase que se está grabando es
+ * un renglón que hay que leer con el profesor hablando: cuesta más que el error
+ * que evita, y el error ya está cubierto.
+ *
+ * @returns {boolean} si se eliminó
+ */
+function eliminar(toma) {
+    // Sin descartarla antes no se elimina. Se planta en silencio en vez de tirar
+    // porque el camino honesto —el botón, que solo existe en una descartada— no
+    // puede llegar acá: esto es la red de abajo, no un mensaje para nadie.
+    if (!toma.descartada) return false;
+    const tomas = sesion.estado.tomas;
+    tomas.splice(tomas.indexOf(toma), 1);
+    return true;
+}
+
+/* ─── Deshacer y rehacer ──────────────────────────────────────────────────
+ *
+ * El historial es del motor porque la verdad es del motor: cada cambio reescribe
+ * el XML y el sidecar en el mismo gesto, así que volver atrás también tiene que
+ * reescribirlos. El por qué está entero en `engine/deshacer.js`, junto con el
+ * motivo de que la foto sea de una toma y no de la sesión.
+ */
+
+/**
+ * @param {'atras'|'adelante'} hacia
+ * @returns {{ok:boolean, que?:string, error?:string, estado:object|null}}
+ */
+function volver(hacia) {
+    if (!sesion) return { ok: false, estado: null };
+    const paso = historial.proximo(sesion.historia, hacia);
+    if (!paso) return { ok: false, estado: resumen() };
+
+    const foto = hacia === 'adelante' ? paso.despues : paso.antes;
+    if (historial.dejariaDosAbiertas(sesion.estado.tomas, paso.id, foto)) {
+        return {
+            ok: false,
+            error: `No puedo ${hacia === 'adelante' ? 'rehacer' : 'deshacer'} «${paso.que}»: ` +
+                'mientras tanto se abrió otra toma, y dos tomas abiertas a la vez rompen ' +
+                'el ciclo de señales. Cerrá la de ahora y volvé a intentar.',
+            estado: resumen()
+        };
+    }
+
+    historial.sacar(sesion.historia, hacia);
+    historial.poner(sesion.estado.tomas, paso.id, foto);
+    // Un borde repuesto pide el mismo texto que pidió el gesto original: acá el
+    // reparto de palabras lo hace la relectura, no el borde (ver `editar`).
+    if (paso.tipo === 'borde' || paso.tipo === 'cerrar') encolarToma(paso.id);
+
+    escribir();
+    pedirTemario();
+    return { ok: true, que: paso.que, estado: resumen() };
+}
+
+function deshacer() {
+    return volver('atras');
+}
+
+function rehacer() {
+    return volver('adelante');
 }
 
 /**
@@ -769,13 +919,28 @@ function reabrir(toma) {
     toma.despues = [];
 }
 
-/** Cierra a mano la toma que esté abierta. Es el botón, no la señal. */
+/**
+ * Cierra a mano la toma que esté abierta. Es el botón, no la señal.
+ *
+ * Se aprieta apurado y en medio de una interrupción —alguien quiere decirle algo
+ * al profesor y hay que parar la toma para invitarlo a retomar—, así que va al
+ * historial como todo lo demás: apretarlo de más es el error más probable de esta
+ * pantalla, y tiene que costar una tecla arreglarlo.
+ */
 function cerrarToma() {
     if (!sesion) return null;
     const toma = vivo.tomaAbierta(sesion.estado);
     if (!toma) return resumen();
+    const antes = historial.foto(toma);
     toma.outMs = vivo.finDeToma(toma, grabadoHastaMs());
     encolarToma(toma.id);
+    historial.anotar(sesion.historia, {
+        que: comoSeLlama({ tipo: 'cerrar', toma: toma.id }),
+        tipo: 'cerrar',
+        id: toma.id,
+        antes,
+        despues: historial.foto(toma)
+    });
     escribir();
     return resumen();
 }
@@ -1139,6 +1304,13 @@ function sidecaresDe(donde, base) {
             clases.push({
                 ...leida,
                 carpeta: base,
+                // El empalme de cada toma se rehace al leer, por lo mismo que el
+                // agregado de abajo: lo que el archivo guarda es la respuesta del
+                // modelo y el descarte del editor, y la sugerencia depende de
+                // dónde están los bordes ahora — que se pueden mover sobre una
+                // clase ya terminada (`editarGrabada`).
+                tomas: (leida.tomas || []).map(t =>
+                    ({ ...t, empalme: empalme.paraLaPantalla(t, leida.tomas) })),
                 // El agregado se rehace al leer y no sale del archivo: lo que el
                 // archivo guarda es la medida de cada toma, y qué tomas cuentan
                 // depende de cuáles quedaron descartadas — que se puede cambiar
@@ -1196,6 +1368,14 @@ function resumen() {
         terminando: Boolean(sesion.terminando),
         segundos: sesion.captura ? sesion.captura.segundos : 0,
         abierta: abierta ? abierta.id : null,
+        // Qué hay para deshacer y para rehacer, con el nombre del paso que toca:
+        // es lo que deja que los dos botones se apaguen cuando no hay nada y
+        // digan en su título qué van a revertir antes de apretarlos.
+        historia: {
+            ...historial.pasos(sesion.historia),
+            queAtras: (historial.proximo(sesion.historia, 'atras') || {}).que || '',
+            queAdelante: (historial.proximo(sesion.historia, 'adelante') || {}).que || ''
+        },
         tomas: e.tomas.map(t => ({
             id: t.id,
             vista: t.vista,
@@ -1211,6 +1391,12 @@ function resumen() {
             // Lo medido de esta toma, tal cual: la tarjeta puede querer decir
             // cuál fue la toma que le movió el número al panel.
             lengua: t.lengua || null,
+            // Cómo pega con la anterior, y qué hacen los dos botones si no pega.
+            // Va rehecho y no tal como está guardado, igual que `repiteA`: la
+            // sugerencia habla de una palabra concreta de la toma anterior, y esa
+            // palabra se mueve cada vez que se relee una toma o se corre un borde
+            // (ver `paraLaPantalla` en `engine/empalme.js`).
+            empalme: empalme.paraLaPantalla(t, e.tomas),
             // Lo que se dijo pegado a cada borde, para poder moverlo mirando.
             antes: t.antes || [],
             despues: t.despues || [],
@@ -1228,6 +1414,8 @@ module.exports = {
     ponerTemario,
     editar,
     editarGrabada,
+    deshacer,
+    rehacer,
     cerrarToma,
     terminar,
     apagar,

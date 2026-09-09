@@ -18,6 +18,12 @@ import { spansSeleccionados } from '../seleccion.js';
 import { rev, cambio } from './estado.js';
 import { notas, guardar, anclaDeSeleccion } from './comentarios.js';
 import { COLORES_DE_CAMARA, comentariosEn } from './pista.js';
+// La cuenta del acomodo se fue a `src/js/margen.js` cuando las tomas en vivo
+// empezaron a comentar al margen también: es el mismo problema y no puede tener
+// dos soluciones que se separen. Se sigue exportando desde acá porque es desde
+// acá que se la conoce.
+import { acomodarMargen } from '../margen.js';
+export { acomodarMargen } from '../margen.js';
 
 const TIPO_LABEL = {
     idea_colgando: 'Idea colgando',
@@ -272,9 +278,6 @@ export function renderScript() {
 
 /* ─── Los comentarios, al margen ────────────────────────────────────────── */
 
-/** Cuánto se separan dos tarjetas que quieren el mismo alto. */
-const AIRE_ENTRE_TARJETAS = 8;
-
 function tarjetaDe(comentario) {
     const caja = document.createElement('div');
     caja.className = 'script-com';
@@ -298,25 +301,6 @@ function tarjetaDe(comentario) {
 
     caja.append(cita, cuerpo, acciones);
     return caja;
-}
-
-/**
- * Pone cada tarjeta a la altura de lo que comenta, y las que chocan más abajo.
- *
- * Sin el empujón, dos comentarios sobre frases vecinas se dibujan uno encima del
- * otro y el de arriba queda ilegible. Empujar hacia abajo y no repartir a los
- * dos lados mantiene el orden de lectura: la tarjeta nunca aparece antes que su
- * cita.
- */
-export function acomodarMargen(alturas, pedidos) {
-    const salida = [];
-    let piso = 0;
-    for (let i = 0; i < pedidos.length; i++) {
-        const arriba = Math.max(pedidos[i], piso);
-        salida.push(arriba);
-        piso = arriba + alturas[i] + AIRE_ENTRE_TARJETAS;
-    }
-    return salida;
 }
 
 function pintarMargen() {

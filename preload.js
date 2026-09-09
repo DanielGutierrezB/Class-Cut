@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('cc', {
     grabarEditar: cambio => ipcRenderer.invoke('grabar-editar', cambio),
     grabarEditarGrabada: (json, cambio) => ipcRenderer.invoke('grabar-editar-grabada', json, cambio),
     grabarCerrarToma: () => ipcRenderer.invoke('grabar-cerrar-toma'),
+    grabarDeshacer: () => ipcRenderer.invoke('grabar-deshacer'),
+    grabarRehacer: () => ipcRenderer.invoke('grabar-rehacer'),
     grabarEstado: () => ipcRenderer.invoke('grabar-estado'),
     grabarVistas: () => ipcRenderer.invoke('grabar-vistas'),
     grabarListar: dirs => ipcRenderer.invoke('grabar-listar', dirs),

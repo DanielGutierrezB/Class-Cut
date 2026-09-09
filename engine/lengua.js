@@ -31,6 +31,9 @@
  */
 
 const { HUECO_SEC } = require('./oir');
+// La misma aduana que usa `empalme.js` para lo que devuelve el modelo: quien
+// compara una cita contra lo que se dijo necesita las fronteras entre palabras.
+const { aplanar } = require('./texto');
 
 /** 1: primera versión. Va guardada en cada toma para poder releer lo viejo. */
 const VERSION = 1;
@@ -81,23 +84,6 @@ const PAREJAS = ['o sea', 'como que', 'digamos que', 'por asi decirlo'];
  * palabra: "no" y "sí" se dicen todo el tiempo, "¿no?" y "¿viste?" no.
  */
 const COLETILLAS = /^(no|si|viste|cierto|entendes)$/;
-
-/**
- * Texto comparable, pero con los espacios puestos.
- *
- * No se usa `texto.norm` —que es la de comparar arranques de tomas— porque esa
- * saca TODO lo que no sea letra o número, espacios incluidos: "o sea" quedaría
- * en "osea" y coincidiría dentro de "ósea", y una cita del modelo pegada en una
- * sola palabra coincidiría en cualquier parte. Acá hacen falta las fronteras.
- */
-function aplanar(texto) {
-    return String(texto == null ? '' : texto)
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9ñ]+/g, ' ')
-        .trim();
-}
 
 /** ¿La palabra viene con puntuación detrás? Es lo que la deja "suelta". */
 function quedaSuelta(texto) {

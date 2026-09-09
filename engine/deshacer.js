@@ -1,0 +1,174 @@
+'use strict';
+/**
+ * deshacer.js — El historial de lo que se le hizo a las tomas, para poder volver.
+ *
+ * Vive en el motor y no en la ventana, y eso NO es una elección de estilo: cada
+ * cambio de esta pantalla reescribe el XML y el sidecar en el mismo gesto
+ * (`escribir` en `grabacion.js`). Un deshacer que arreglara la pantalla dejaría
+ * el archivo con el cambio puesto, o sea que lo que se ve y lo que va a abrir
+ * Premiere dirían cosas distintas — que es exactamente lo que esta pantalla se
+ * propuso no permitir.
+ *
+ * Por eso tampoco se pudo reusar el de la revisión de cortes (`src/js/visor/
+ * estado.js`), aunque la forma sea la misma —dos pilas, un rótulo de qué se hizo
+ * y un tope—: allá la verdad ES la ventana hasta que alguien aprieta "Guardar",
+ * así que copiar `rev.segments` alcanza. Acá la verdad está en Node.
+ *
+ * Y hay una segunda diferencia que obliga a cambiar QUÉ se guarda. El visor
+ * guarda el estado ENTERO porque los bloques de una clase ya procesada no cambian
+ * solos. Acá llegan tomas nuevas cada tres segundos: una foto de la sesión entera,
+ * repuesta cinco minutos después, borraría las tres tomas que entraron mientras
+ * tanto. Así que la foto es de LA TOMA que el cambio tocó, y nada más. Deshacer
+ * algo viejo no puede tocar lo que pasó después porque no lo tiene en la mano.
+ */
+
+/**
+ * Cuántos pasos atrás se pueden dar.
+ *
+ * El mismo número que el visor de cortes, y por el mismo motivo: es más de lo que
+ * nadie deshace de a uno y el tope está para que una sesión de tres horas no
+ * junte memoria sin techo. Acá cada foto pesa lo que pesa una toma —unas cientos
+ * de palabras—, así que sesenta son unos pocos cientos de kilobytes.
+ */
+const TOPE = 60;
+
+function nueva() {
+    return { atras: [], adelante: [] };
+}
+
+/**
+ * La copia de una toma que se guarda en el historial.
+ *
+ * Las listas se copian y lo que hay dentro de ellas no: ni las palabras ni los
+ * comentarios se modifican nunca en su sitio —`repartir` arma listas nuevas,
+ * `comentar` concatena y `descomentar` filtra—, así que compartir esos objetos
+ * entre la foto y la toma no puede hacer que la foto cambie sola.
+ *
+ * @returns {object|null} null es "esta toma no existía", que es lo que deja que
+ *   eliminar y volver a meter usen el mismo camino que cambiar un campo
+ */
+function foto(toma) {
+    if (!toma) return null;
+    const copia = { ...toma };
+    for (const clave of ['antes', 'palabras', 'despues', 'comentarios']) {
+        if (Array.isArray(copia[clave])) copia[clave] = copia[clave].slice();
+    }
+    return copia;
+}
+
+/**
+ * Anota un paso ya hecho. `antes` y `despues` son fotos de la misma toma.
+ *
+ * @param {object} historia de `nueva()`
+ * @param {{que:string, id:number, antes:object|null, despues:object|null}} paso
+ */
+function anotar(historia, paso) {
+    historia.atras.push(paso);
+    if (historia.atras.length > TOPE) historia.atras.shift();
+    // Rehacer solo tiene sentido sobre lo que se deshizo: si después de deshacer
+    // se edita otra cosa, ese futuro dejó de existir. Igual que en el visor.
+    historia.adelante.length = 0;
+}
+
+/**
+ * Deja los campos de la foto encima de la toma que ya está en la lista, sin
+ * cambiar el objeto de sitio.
+ *
+ * Se copia ENCIMA y no se reemplaza el objeto porque hay dos cosas que se quedan
+ * con la referencia mientras esperan: la cola de relecturas y la consulta al
+ * modelo que mide la toma (`medirToma.conModelo`), que puede contestar medio
+ * minuto después. Reemplazando el objeto, esa respuesta caería en una toma que ya
+ * no está en la sesión y la medida se perdería sin que nada lo diga.
+ */
+function copiarEncima(destino, origen) {
+    for (const clave of Object.keys(destino)) delete destino[clave];
+    Object.assign(destino, origen);
+}
+
+/** Dónde entra una toma que se está devolviendo. Los ids van en orden creciente. */
+function dondeEntra(tomas, id) {
+    const despues = tomas.findIndex(t => t.id > id);
+    return despues === -1 ? tomas.length : despues;
+}
+
+/**
+ * Deja la toma `id` como dice la foto: le copia los campos, la saca de la lista
+ * (`foto` en null) o la devuelve a su sitio por número.
+ *
+ * Mutando la lista que le pasan y no armando otra, por lo mismo que
+ * `copiarEncima`: la sesión reparte esa lista por todas partes.
+ */
+function poner(tomas, id, cual) {
+    const donde = tomas.findIndex(t => t.id === id);
+    if (!cual) {
+        if (donde >= 0) tomas.splice(donde, 1);
+        return;
+    }
+    if (donde >= 0) copiarEncima(tomas[donde], cual);
+    else tomas.splice(dondeEntra(tomas, id), 0, { ...cual });
+}
+
+/**
+ * Si reponer esta foto dejaría dos tomas abiertas a la vez.
+ *
+ * Es el caso que aparece por grabar mientras se deshace, y no es raro: se cierra
+ * una toma a mano, el profesor sigue hablando, el ciclo de señales abre la toma
+ * siguiente, y entonces alguien se arrepiente del cierre. Devolver esa toma a
+ * "abierta" dejaría dos sin OUT, y de ahí en adelante el ciclo le mete las
+ * palabras a "la abierta" cuando ya no hay tal cosa: el conteo siguiente cerraría
+ * una de las dos y la otra se quedaría abierta para siempre, o sea fuera del XML
+ * (ver `reabrir` y `tomasQueQuedan`).
+ *
+ * Así que no se hace y se dice por qué, que es mejor que hacerlo y romper la
+ * sesión en silencio. Lo demás —descartar, comentar, la vista, un borde, incluso
+ * eliminar— no depende de nada que haya pasado después, y se deshace siempre.
+ */
+function dejariaDosAbiertas(tomas, id, cual) {
+    if (!cual || cual.outMs != null) return false;
+    return tomas.some(t => t.id !== id && t.outMs == null);
+}
+
+/**
+ * El paso que habría que deshacer, sin sacarlo del historial. Para poder mirar
+ * si se puede antes de comprometerse.
+ */
+function proximo(historia, hacia) {
+    const pila = hacia === 'adelante' ? historia.adelante : historia.atras;
+    return pila[pila.length - 1] || null;
+}
+
+/**
+ * Saca el paso de una pila y lo pone en la otra, ya dado vuelta.
+ *
+ * @param {'atras'|'adelante'} hacia de qué pila se saca
+ * @returns {{que:string, id:number, foto:object|null}|null} qué hay que reponer
+ */
+function sacar(historia, hacia) {
+    const desde = hacia === 'adelante' ? historia.adelante : historia.atras;
+    const a = hacia === 'adelante' ? historia.atras : historia.adelante;
+    const paso = desde.pop();
+    if (!paso) return null;
+    a.push(paso);
+    // Deshacer repone el "antes" y rehacer el "después": es el mismo paso leído
+    // en las dos direcciones, así que no hay dos listas de inversas que puedan
+    // separarse una de la otra.
+    return { que: paso.que, id: paso.id, foto: hacia === 'adelante' ? paso.despues : paso.antes };
+}
+
+/** Cuántos pasos hay para cada lado, sin tocar el historial. */
+function pasos(historia) {
+    return { atras: historia.atras.length, adelante: historia.adelante.length };
+}
+
+module.exports = {
+    TOPE,
+    nueva,
+    foto,
+    anotar,
+    poner,
+    dondeEntra,
+    dejariaDosAbiertas,
+    proximo,
+    sacar,
+    pasos
+};
