@@ -38,6 +38,22 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'el recuadro se cuenta como cero y el aviso junto no sale',
+        archivo: 'engine/prproj-curso.js',
+        de: '        conEfectos: clase.conEfectos || 0,',
+        a: '        conEfectos: 0,',
+        filtro: 'prproj-curso',
+        caen: ['lo del recuadro se dice una vez y con el total, no una vez por clase']
+    },
+    {
+        que: 'la cuenta de lo que entró vuelve a ser un aviso y tapa a los de verdad',
+        archivo: 'engine/prproj-curso.js',
+        de: "    cuenta.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`",
+        a: "    avisos.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`",
+        filtro: 'prproj-curso',
+        caen: ['un aviso de una sola clase no queda tapado por la narración']
+    },
+    {
         que: 'la búsqueda de plantilla toma la primera que encuentra, sin ordenar por fecha',
         archivo: 'ipc/prproj.js',
         de: '    return encontrados.sort((a, b) => b.cuando - a.cuando).map(c => c.ruta);',

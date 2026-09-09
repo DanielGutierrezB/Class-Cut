@@ -83,9 +83,23 @@ export function estaEscribiendo(donde) {
 }
 
 let toastTimer = null;
-export function toast(message) {
+
+/**
+ * Un mensaje de paso, que se lee de un vistazo o no se lee.
+ *
+ * Dura dos segundos y medio y se va solo: eso lo vuelve el lugar equivocado para
+ * cualquier cosa que haya que leer con atención. Cuando el proyecto del curso
+ * empezó a contar sus trece clases acá, la píldora creció hasta ocupar media
+ * pantalla y no se podía leer ninguna de las trece — el detalle se puso donde se
+ * puede volver a mirar, y acá quedó el titular.
+ *
+ * @param {string} message
+ * @param {'bien'} [tono] verde para lo que salió bien; sin tono, el gris de siempre
+ */
+export function toast(message, tono) {
     const el = $('toast');
     el.textContent = message;
+    el.className = tono ? `toast toast-${tono}` : 'toast';
     el.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.hidden = true; }, 2600);

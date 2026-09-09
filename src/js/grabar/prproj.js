@@ -24,7 +24,7 @@
  * asunto: la lista es de clases y sabe gestionarlas, y esto es del curso.
  */
 
-import { toast } from '../chrome.js';
+import { toast, openModal, alertsHtml } from '../chrome.js';
 import { esc, plural } from '../formato.js';
 
 /**
@@ -64,6 +64,16 @@ export function cablear(pintar) {
 
 function repintar() {
     for (const pintar of suyo.pintores) pintar();
+}
+
+/**
+ * Lo último que salió bien para esa carpeta, o `null`.
+ *
+ * La tabla de Clases se dibuja como texto y atiende los clics por delegación, así
+ * que en el botón solo puede llevar la ruta de la carpeta: lo demás lo busca acá.
+ */
+export function loHecho(ruta) {
+    return suyo.hechos.get(ruta) || null;
 }
 
 /** El avance que manda el motor mientras arma el proyecto. */
@@ -138,14 +148,58 @@ export async function pedir(ruta) {
     // proyecto de ese curso, y decir «mejor no» ahí no merece un cartel de error.
     if (!r.ok && !r.cancelado) toast(r.error || 'No se pudo armar el proyecto.');
     if (!r.ok) { repintar(); return; }
-    suyo.hechos.set(ruta, { ruta: r.ruta });
-    // Los avisos van con el resultado y no en un cartel aparte, por lo mismo que
-    // en el regenerado: un «listo» que se calla las tres clases que no entraron
-    // es una pérdida silenciosa.
-    const peros = (r.avisos || []).length ? ` · ${r.avisos.join(' · ')}` : '';
-    const deQue = molde ? ` · de molde usé «${molde}», un proyecto tuyo que ya estaba` : '';
-    toast(`Proyecto armado con ${plural(r.clases, 'clase', 'clases')}${peros}${deQue}`);
+
+    // El titular en el toast; lo demás, en «Detalle».
+    //
+    // Antes iba todo junto acá, y con trece clases la píldora ocupaba media
+    // pantalla y se leía peor que nada: el archivo que faltaba quedaba enterrado
+    // entre trece líneas iguales del recuadro. Callarlo del todo tampoco servía
+    // —una clase cuyo material no está en el disco es algo que hay que saber—,
+    // así que el resultado se dice en un renglón y el resto queda a un clic, en
+    // un sitio donde se puede volver a mirar sin generar de nuevo.
+    const avisos = r.avisos || [];
+    suyo.hechos.set(ruta, {
+        ruta: r.ruta,
+        avisos,
+        cuenta: r.cuenta || [],
+        molde
+    });
+    const hay = avisos.length ? ` · ${plural(avisos.length, 'aviso', 'avisos')}` : '';
+    toast(`Proyecto generado con ${plural(r.clases, 'clase', 'clases')}${hay}`, 'bien');
     repintar();
+}
+
+/**
+ * Todo lo que el motor contó de la última generación, para leerlo con calma.
+ *
+ * El toast dice el titular y se va en dos segundos y medio. Esto es lo otro: los
+ * avisos arriba, porque son lo único que quizás pida hacer algo, y la cuenta de
+ * lo que entró abajo, que no pide nada pero deja comprobar que están las trece
+ * clases. Se puede volver a abrir sin generar de nuevo — generar tarda, y releer
+ * un aviso no debería costar lo mismo que rehacer el trabajo.
+ *
+ * @param {{ruta:string, avisos:string[], cuenta:string[], molde:?string}} hecho
+ */
+export function verDetalle(hecho) {
+    if (!hecho) return;
+    const avisos = hecho.avisos || [];
+    const partes = [];
+
+    partes.push(avisos.length
+        ? alertsHtml(avisos.map(message => ({ level: 'warn', message })))
+        : alertsHtml([{ level: 'info', message: 'Entró todo: ningún aviso.' }]));
+
+    if ((hecho.cuenta || []).length) {
+        partes.push('<div class="detalle-cuenta">'
+            + hecho.cuenta.map(l => `<p>${esc(l)}</p>`).join('')
+            + '</div>');
+    }
+
+    partes.push(`<p class="detalle-pie">El proyecto quedó en <code>${esc(hecho.ruta)}</code>.`
+        + (hecho.molde ? ` De molde usé «${esc(hecho.molde.split('/').pop())}», un proyecto tuyo que ya estaba.` : '')
+        + '</p>');
+
+    openModal('El proyecto de Premiere', partes.join(''));
 }
 
 /**
@@ -222,6 +276,20 @@ export function boton(ruta, conXml) {
             window.cc.reveal(lee.hecho.ruta);
         };
         caja.append(ver);
+
+        const det = document.createElement('button');
+        det.className = 'btn btn-ghost btn-inline';
+        det.type = 'button';
+        det.textContent = (lee.hecho.avisos || []).length
+            ? `Detalle · ${lee.hecho.avisos.length}`
+            : 'Detalle';
+        det.title = 'Qué entró, y de qué avisó el motor';
+        det.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            verDetalle(lee.hecho);
+        };
+        caja.append(det);
     }
     return caja;
 }
@@ -243,9 +311,12 @@ export function boton(ruta, conXml) {
 export function botonHtml(ruta, conXml) {
     if (!conXml) return '';
     const lee = comoSeLee(ruta, conXml);
+    const cuantos = lee.hecho ? (lee.hecho.avisos || []).length : 0;
     const mostrar = lee.hecho
         ? `<button class="btn btn-ghost btn-inline" data-prproj-ver="${esc(lee.hecho.ruta)}"
-                   title="${esc(lee.hecho.ruta)}">Mostrar</button>`
+                   title="${esc(lee.hecho.ruta)}">Mostrar</button>
+           <button class="btn btn-ghost btn-inline" data-prproj-detalle="${esc(ruta)}"
+                   title="Qué entró, y de qué avisó el motor">Detalle${cuantos ? ` · ${cuantos}` : ''}</button>`
         : '';
     return `<span class="carpeta-prproj">
         <button class="btn btn-ghost btn-inline" data-prproj="${esc(ruta)}"

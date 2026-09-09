@@ -35,6 +35,25 @@ function xmlDe(nombre) {
     ].join('\n');
 }
 
+/**
+ * El mismo XML, pero con `cuantos` cortes de video con el recuadro puesto.
+ *
+ * El `<filter>` es lo que `clase-del-xml` mira para contarlos: es el encuadre del
+ * profesor, que viaja en el XML y que el proyecto todavía no aplica. El `<video>`
+ * de adentro del `<file>` es lo que le dice que el archivo trae imagen; sin eso
+ * el armado se corta al poner un corte de video sobre un medio que no la tiene.
+ */
+function xmlConRecuadro(nombre, cuantos, rutaMedio) {
+    const archivo = `<file id="f1"><name>a.mov</name><pathurl>file://${rutaMedio}</pathurl>`
+        + '<duration>300</duration><media><video></video></media></file>';
+    const clips = Array.from({ length: cuantos }, (_, i) =>
+        `<clipitem id="c${i}"><name>corte ${i}</name><start>${i * 30}</start>`
+        + `<end>${(i + 1) * 30}</end><in>0</in><out>30</out>`
+        + (i === 0 ? archivo : '<file id="f1"/>')
+        + '<filter><effect><name>Basic 3D</name></effect></filter></clipitem>').join('');
+    return xmlDe(nombre).replace('<video></video>', `<video><track>${clips}</track></video>`);
+}
+
 function carpeta(armar) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-curso-'));
     for (const [relativa, contenido] of Object.entries(armar || {})) {
@@ -223,7 +242,10 @@ module.exports = t => {
                 t.eq(r.ok, true, r.error || '');
                 t.eq(r.clases, 2);
                 t.eq(r.fuente, 'cortes');
-                t.ok(r.avisos.some(a => /material, los cortes/.test(a)), 'dice de qué fuente salió');
+                // Va en `cuenta` y no en `avisos`: que haya salido de la fuente
+                // buena es narración, no algo que haya que ir a mirar.
+                t.ok(r.cuenta.some(a => /material, los cortes/.test(a)), 'dice de qué fuente salió');
+                t.deep(r.avisos, [], 'con todo en orden no hay nada que avisar');
 
                 const p = prproj.Proyecto.leer(r.ruta);
                 t.ok(p.verificar().ok, 'el grafo cierra');
@@ -234,14 +256,62 @@ module.exports = t => {
             });
         });
 
+        t.test('lo del recuadro se dice una vez y con el total, no una vez por clase', () => {
+            // Este es el mensaje que ocupaba media pantalla. Casi toda clase con
+            // pantalla compartida trae recuadro, así que trece clases dejaban
+            // trece líneas iguales en el cartel y tapaban a las que sí eran de
+            // una clase y de ninguna otra. Sumadas ocupan un renglón y dicen lo
+            // mismo: cuántos cortes, de cuántas clases, y qué es lo que no viaja.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 5, medio));
+            fs.writeFileSync(path.join(dir, 'The Cutter', '02_clase.xml'), xmlConRecuadro('02_clase', 3, medio));
+            fs.writeFileSync(path.join(dir, 'The Cutter', '03_clase.xml'), xmlDe('03_clase'));
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const delRecuadro = r.avisos.filter(a => /recuadro/.test(a));
+                t.eq(delRecuadro.length, 1, 'una línea, no una por clase');
+                t.ok(/8 corte\(s\) de 2 clase\(s\)/.test(delRecuadro[0]),
+                    `suma los cortes y cuenta las clases, y dice: ${delRecuadro[0]}`);
+                t.ok(/sin el encuadre/.test(delRecuadro[0]),
+                    'y dice qué es lo que no viaja, que es el punto del aviso');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('un aviso de una sola clase no queda tapado por la narración', () => {
+            // El defecto que esto protege: el archivo que falta es lo único que
+            // pide hacer algo, y se perdía entre las líneas de «13 secuencias,
+            // 2106 cortes» y trece del recuadro. Ahora la narración vive aparte.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 4, medio));
+            fs.writeFileSync(path.join(dir, 'The Cutter', '02_clase.xml'), xmlConRecuadro('02_clase', 4, medio));
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                t.ok(r.avisos.every(a => !/secuencia\(s\)/.test(a)),
+                    'la cuenta de lo que entró no es un aviso');
+                t.ok(r.cuenta.some(a => /secuencia\(s\)/.test(a)),
+                    'pero sigue estando, para poder comprobar que entraron todas');
+                t.ok(r.avisos.length <= 2,
+                    `dos clases no pueden dejar ${r.avisos.length} avisos: ${r.avisos.join(' | ')}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
         t.test('la fuente de notas da secuencias con marcadores y sin material', () => {
             const dir = carpeta({ 'xml/01_notas.xml': xmlDe('01_notas') });
             return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 'salida.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
                 t.eq(r.fuente, 'notas');
+                // Este sí es un aviso, y no narración: hay algo que hacer al
+                // respecto —procesar las clases y volver a generar—, así que
+                // tiene que quedar donde se lo va a ir a mirar.
                 t.ok(r.avisos.some(a => /no el material ni los cortes/.test(a)),
                     'el aviso avisa de lo que NO trae, que es el punto');
-                t.ok(r.avisos.some(a => /0 corte\(s\)/.test(a)));
+                t.ok(r.cuenta.some(a => /0 corte\(s\)/.test(a)));
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });

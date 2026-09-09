@@ -237,12 +237,18 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
         avisos.push(`${clase.nombre}: la etiqueta «${etiqueta}» no está entre las medidas`
             + ` (${Object.keys(ETIQUETAS).join(', ')}), así que esos clips entran sin pintar`);
     }
-    if (clase.conEfectos) {
-        avisos.push(`${clase.nombre}: ${clase.conEfectos} corte(s) traían el recuadro puesto en el XML;`
-            + ' entran en su lugar y con su duración, pero sin el encuadre');
-    }
-
-    return { nombre: clase.nombre, cortes: colocados, marcadores: marcadores.length, pistasVideo, pistasAudio };
+    // El recuadro NO se avisa por clase: lo trae casi toda clase que tenga
+    // pantalla compartida, así que trece clases dejaban trece líneas iguales que
+    // tapaban a las que sí eran de esta clase y de ninguna otra. Se cuenta acá y
+    // se dice una vez, en `poblar`, con el total.
+    return {
+        nombre: clase.nombre,
+        cortes: colocados,
+        marcadores: marcadores.length,
+        conEfectos: clase.conEfectos || 0,
+        pistasVideo,
+        pistasAudio
+    };
 }
 
 
@@ -267,12 +273,21 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
  * @param {string} opciones.plantilla un `.prproj` del que copiar los moldes
  * @param {function} [opciones.avisar] recibe `{hecho, total, que}` mientras arma
  * @param {number} [opciones.semilla] para que dos corridas den el mismo archivo
- * @returns {Promise<{ok:boolean, ruta:string, clases:number, fuente:string, avisos:string[], error:string}>}
+ * @returns {Promise<{ok:boolean, ruta:string, clases:number, fuente:string,
+ *                    avisos:string[], cuenta:string[], error:string}>}
+ *          `avisos` es lo que quizás haya que ir a mirar; `cuenta`, la narración
+ *          de lo que pasó. Ver por qué están separadas arriba de `generar`.
  */
 async function generar(opciones) {
     const op = opciones || {};
+    // Dos listas y no una, porque no se leen en el mismo momento ni por la misma
+    // razón. `avisos` es lo que quizás haya que ir a mirar: un archivo que no
+    // está, marcadores que quedaron afuera, el encuadre que no viaja. `cuenta` es
+    // la narración de lo que pasó, que tranquiliza pero no pide nada. Mezcladas,
+    // trece líneas de narración tapaban al único archivo que faltaba.
     const avisos = [];
-    const vacio = { ok: false, ruta: null, clases: 0, fuente: null, avisos, error: null };
+    const cuenta = [];
+    const vacio = { ok: false, ruta: null, clases: 0, fuente: null, avisos, cuenta, error: null };
 
     if (!op.carpeta) return { ...vacio, error: 'No me dijeron de qué carpeta.' };
     if (!fs.existsSync(op.carpeta)) {
@@ -291,13 +306,16 @@ async function generar(opciones) {
     if (!fuente.ok) return { ...vacio, error: fuente.error };
 
     // Los dos casos no prometen lo mismo, y el editor tiene que saber cuál le
-    // tocó antes de abrir el archivo y extrañar los cortes.
-    avisos.push(fuente.tipo === 'cortes'
-        ? `Salió de ${fuente.xmls.length} clase(s) procesada(s) en «${workspace.OUTPUT_DIR}»:`
-            + ' trae el material, los cortes y los marcadores.'
-        : `No hay clases procesadas, así que salió de ${fuente.xmls.length} XML de notas tomadas en vivo:`
-            + ' trae los marcadores, pero no el material ni los cortes.'
+    // tocó antes de abrir el archivo y extrañar los cortes. El bueno es
+    // narración; el flaco es un aviso, porque hay algo que hacer al respecto.
+    if (fuente.tipo === 'cortes') {
+        cuenta.push(`Salió de ${fuente.xmls.length} clase(s) procesada(s) en «${workspace.OUTPUT_DIR}»:`
+            + ' trae el material, los cortes y los marcadores.');
+    } else {
+        avisos.push(`No hay clases procesadas, así que salió de ${fuente.xmls.length} XML de notas`
+            + ' tomadas en vivo: trae los marcadores, pero no el material ni los cortes.'
             + ' Procesá las clases en la pestaña Clases y volvé a generar para tener todo.');
+    }
 
     const avisar = typeof op.avisar === 'function' ? op.avisar : () => {};
     // La forma del aviso es la que espera la ventana: `hecho` de `total`, y `que`
@@ -380,6 +398,7 @@ async function generar(opciones) {
         clases: resumen.clases,
         fuente: fuente.tipo,
         avisos,
+        cuenta: [...cuenta, ...resumen.cuenta],
         error: null
     };
 }
@@ -446,17 +465,30 @@ function poblar(taller, clases, avisos, decir) {
     // Si algo de lo generado hubiera quedado apuntando a la plantilla, no se
     // rompe en silencio — `verificar` lo encuentra y `guardar` no escribe.
     const podados = taller.podarLaPlantilla();
-    if (descolgados) {
-        avisos.push(`Se quitaron ${descolgados} objeto(s) que traía la plantilla`
-            + ` (${podados} borrado(s)); el panel quedó solo con lo del curso.`);
-    }
 
     const cortes = armadas.reduce((n, c) => n + c.cortes, 0);
     const marcas = armadas.reduce((n, c) => n + c.marcadores, 0);
-    avisos.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`
+
+    // Lo del recuadro, una vez y con el total. Es una limitación conocida del
+    // XML de origen y no algo que haya salido mal hoy, así que dice qué falta y
+    // qué no: los cortes están donde tienen que estar, lo que no viaja es el
+    // encuadre. Alguien que lea esto tiene que poder decidir si le importa.
+    const conEfectos = armadas.filter(c => c.conEfectos);
+    if (conEfectos.length) {
+        const total = conEfectos.reduce((n, c) => n + c.conEfectos, 0);
+        avisos.push(`${total} corte(s) de ${conEfectos.length} clase(s) traían el recuadro`
+            + ' puesto en el XML: entran en su lugar y con su duración, pero sin el encuadre.');
+    }
+
+    const cuenta = [];
+    if (descolgados) {
+        cuenta.push(`Se quitaron ${descolgados} objeto(s) que traía la plantilla`
+            + ` (${podados} borrado(s)); el panel quedó solo con lo del curso.`);
+    }
+    cuenta.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`
         + ` y ${registro.size} archivo(s) de material.`);
 
-    return { clases: armadas.length, detalle: armadas, medios: registro.size, cortes, marcas };
+    return { clases: armadas.length, detalle: armadas, medios: registro.size, cortes, marcas, cuenta };
 }
 
 module.exports = {

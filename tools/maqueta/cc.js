@@ -2439,11 +2439,27 @@ window.cc = {
                 que: `Clase ${suyas[i].clase}`
             });
         }
+        // Con avisos y con cuenta, que es como vuelve del motor de verdad: sin
+        // ellos la maqueta mostraría un «Detalle» vacío y no se vería el caso
+        // que motivó separarlos, que es el de un aviso real enterrado entre la
+        // narración de trece clases.
+        const nombre = carpeta.split('/').filter(Boolean).pop();
+        const conRecuadro = suyas.filter(c => (c.vistas || []).length > 1);
         return {
             ok: true,
-            ruta: `${carpeta}/${carpeta.split('/').filter(Boolean).pop()}.prproj`,
+            ruta: `${carpeta}/Proyecto/${nombre}.prproj`,
             clases: suyas.length,
-            avisos: []
+            avisos: conRecuadro.length
+                ? [`${conRecuadro.length * 4} corte(s) de ${conRecuadro.length} clase(s) traían el`
+                    + ' recuadro puesto en el XML: entran en su lugar y con su duración, pero'
+                    + ' sin el encuadre.']
+                : [],
+            cuenta: [
+                `Salió de ${suyas.length} clase(s) procesada(s) en «The Cutter»:`
+                    + ' trae el material, los cortes y los marcadores.',
+                `${suyas.length} secuencia(s), ${suyas.length * 162} corte(s),`
+                    + ` ${suyas.length * 5} marcador(es) y ${suyas.length * 12} archivo(s) de material.`
+            ]
         };
     },
     onPrprojAviso: cb => { oyentes['prproj-aviso'] = cb; },

@@ -373,10 +373,13 @@ export function wireClases(callbacks) {
         const quitar = e.target.closest('[data-quitar]');
         if (quitar) { await alQuitar(quitar.dataset.quitar); return; }
 
-        // Los dos del proyecto de Premiere, antes de `data-plegar` por lo mismo
+        // Los tres del proyecto de Premiere, antes de `data-plegar` por lo mismo
         // que los de arriba: viven adentro del encabezado.
         const verProyecto = e.target.closest('[data-prproj-ver]');
         if (verProyecto) { window.cc.reveal(verProyecto.dataset.prprojVer); return; }
+
+        const detalle = e.target.closest('[data-prproj-detalle]');
+        if (detalle) { prproj.verDetalle(prproj.loHecho(detalle.dataset.prprojDetalle)); return; }
 
         const armar = e.target.closest('[data-prproj]');
         if (armar) { await prproj.pedir(armar.dataset.prproj); return; }

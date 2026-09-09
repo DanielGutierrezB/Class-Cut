@@ -763,6 +763,33 @@ input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
     font-size: 12.5px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
     z-index: 80;
+    /* Un techo, para que ningún mensaje largo vuelva a estirar la píldora hasta
+       ocupar la pantalla. Es una red y no un permiso: un texto que necesite tres
+       renglones no va acá, va donde se pueda volver a leer. */
+    max-width: min(560px, calc(100vw - 80px));
+    text-align: center;
+}
+
+/* El detalle del proyecto: los avisos ya vienen con su alerta, y esto es la
+   cuenta de lo que entró, que se lee como una nota al pie y no como un problema. */
+.detalle-cuenta {
+    margin-top: 12px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+}
+.detalle-cuenta p { margin: 4px 0; }
+.detalle-pie {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.toast-bien {
+    background: color-mix(in srgb, var(--ok) 16%, var(--surface-3));
+    border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+    color: var(--ok);
 }
 
 /* ── Barra de progreso fina ──────────────────────────────────── */
