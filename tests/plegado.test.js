@@ -121,11 +121,54 @@ module.exports = async t => {
         t.eq(plegado.sePuedePlegar(toma({ outMs: null })), false);
     });
 
-    t.test('una descartada tampoco, y ahí está la frontera con el otro botón', () => {
-        // Una descartada YA se dibuja plegada sobre su cabecera, así que un botón
-        // de plegar ahí sería un segundo gesto para el mismo resultado. Las
-        // descartadas se sacan con el interruptor de la barra, de una vez.
+    t.test('una descartada tampoco, y ahí está la frontera con el interruptor', () => {
+        // Una descartada YA se dibuja plegada sobre su cabecera, así que plegarla
+        // sería un gesto que no cambia nada de lo que se ve. Las descartadas se
+        // sacan con el interruptor de la barra, de una vez.
         t.eq(plegado.sePuedePlegar(toma({ descartada: true })), false);
+    });
+
+    t.group('plegar una toma · tocar el cabezal');
+
+    /** Un clic, dicho como lo dice `formaDelClic` en `grabar/index.js`. */
+    const clic = campos => ({ enCabezal: false, enControl: false, ...campos });
+
+    t.test('un clic en el cabezal de una toma cerrada la pliega', () => {
+        t.ok(plegado.elClicPliega(toma({}), clic({ enCabezal: true })));
+    });
+
+    t.test('un clic en un control del cabezal NO pliega', () => {
+        // La prueba que sostiene el cambio entero. En el cabezal hay hasta seis
+        // botones —las cinco vistas, "Descartar" o "Cerrar acá", "Reabrir",
+        // "Eliminar", "Recuperar"— y todos caen dentro del blanco de plegar. Si
+        // esto no se mirara, cambiarle la vista a una toma se llevaría de la
+        // pantalla el texto sobre el que se estaba decidiendo, en el mismo clic.
+        t.eq(plegado.elClicPliega(toma({}), clic({ enCabezal: true, enControl: true })), false);
+    });
+
+    t.test('un clic en el cuerpo de la tarjeta tampoco', () => {
+        // Ahí el clic sigue queriendo decir lo que quería decir antes —elegir esa
+        // toma para las teclas— y nada más: leer el texto no es plegarlo.
+        t.eq(plegado.elClicPliega(toma({}), clic({})), false);
+    });
+
+    t.test('el cabezal de la que está grabando no pliega', () => {
+        t.eq(plegado.elClicPliega(toma({ outMs: null }), clic({ enCabezal: true })), false);
+    });
+
+    t.test('el de una descartada tampoco: no le agrega un gesto que no significa nada', () => {
+        // Su tarjeta ya es la cabecera y nada más. El cabezal de una descartada no
+        // se dibuja como algo que se toca, y esto es la otra mitad de eso.
+        t.eq(plegado.elClicPliega(toma({ descartada: true }), clic({ enCabezal: true })), false);
+    });
+
+    t.test('sin toma en el estado no se pliega nada', () => {
+        // La tarjeta puede ser de un repintado que el estado ya dejó atrás.
+        t.eq(plegado.elClicPliega(null, clic({ enCabezal: true })), false);
+    });
+
+    t.test('sin saber dónde cayó, no pliega', () => {
+        t.eq(plegado.elClicPliega(toma({}), null), false);
     });
 
     t.group('plegar una toma · esconder las descartadas');

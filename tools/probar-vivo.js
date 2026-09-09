@@ -487,7 +487,11 @@ async function correr({ win, arg }) {
         cual = (e.tomas || []).filter(t => t.outMs != null).slice(-1)[0];
         if (!cual) return 'no hay ninguna toma cerrada sobre la que actuar';
         const suyaAntes = e.tomas.find(t => t.id === cual.id);
-        await clic(wc, `#grabar-tomas .toma[data-toma="${cual.id}"] .toma-n`);
+        // En una palabra del cuerpo y no en el cabezal, que es lo que este paso
+        // hacía: un clic en el cabezal PLIEGA la toma además de elegirla, y los
+        // dos pasos que vienen detrás necesitan su nota y sus palabras dibujadas.
+        // Elegir con un clic sigue valiendo en cualquier parte de la tarjeta.
+        await clic(wc, `#grabar-tomas .toma[data-toma="${cual.id}"] .toma-palabra:not(.es-orilla):not(.es-comentada)`);
         const donde = await soltarElFoco();
         // En minúscula: `queHace` compara contra `e.key`, y mandar 'S' es mandar
         // Shift+S, que no es ninguna vista.

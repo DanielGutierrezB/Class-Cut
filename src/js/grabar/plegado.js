@@ -99,12 +99,52 @@ export function resumenDe(toma) {
  * La abierta no: es lo que la persona está mirando, y un pliegue ahí escondería
  * lo que está pasando ahora mismo. Una descartada tampoco, y ese es el punto
  * donde plegar y "ocultar descartadas" podrían haber quedado compitiendo por lo
- * mismo: una descartada YA se dibuja plegada sobre su cabecera, así que un botón
- * de plegar ahí sería un segundo gesto para el mismo resultado. Se esconden con
- * el interruptor de la barra, que las saca de la vista de una vez.
+ * mismo: una descartada YA se dibuja plegada sobre su cabecera, así que plegarla
+ * sería un gesto que no cambia nada de lo que se ve. Se esconden con el
+ * interruptor de la barra, que las saca de la vista de una vez.
+ *
+ * Esto lo contesta dos veces y las dos tienen que ser la misma: si el cabezal se
+ * dibuja como algo que se toca (`cabezalQueSePliega`) y si tocarlo pliega
+ * (`elClicPliega`). Separadas, el cabezal de una descartada cambiaría de cursor
+ * para después no hacer nada.
  */
 export function sePuedePlegar(toma) {
     return toma.outMs != null && !toma.descartada;
+}
+
+/**
+ * Si un clic sobre una tarjeta quiere decir "plegá esta toma".
+ *
+ * Plegar se pide tocando el cabezal y no apretando un botón, así que la decisión
+ * es de un clic y no de un `onclick` colgado de algo: hay que mirar DÓNDE cayó.
+ * Está separada del cableado por lo mismo que `queHace` en `teclas.js` —es lo
+ * único que se puede comprobar sin una pantalla— y sobre todo porque los dos
+ * casos que la hacen delicada son casos, no dibujos: un clic en un botón del
+ * cabezal, y un cabezal que no se pliega.
+ *
+ * **Adentro del cabezal hay otros controles y ninguno puede plegar de rebote.**
+ * Son las cinco vistas y "Descartar" en una toma anterior, y en la abierta
+ * "Cerrar acá" —más "Reabrir" en la última, y "Eliminar" y "Recuperar" en una
+ * descartada—. Apretar cualquiera de ellos es pedir eso y nada más: que la
+ * tarjeta se plegara encima convertiría un cambio de vista en dos cosas, y la
+ * segunda se llevaría de la pantalla el texto sobre el que se estaba decidiendo.
+ * Por eso `enControl` no es una excepción de borde: es la mitad de la regla.
+ *
+ * Y no se pliega lo que no se puede plegar: la abierta —es lo que se está
+ * mirando— y una descartada, que ya se dibuja plegada sobre su cabecera. Sin
+ * esto, tocar el cabezal de una descartada sería un gesto que no hace nada, que
+ * es peor que no tener gesto: se prueba, no pasa nada, y no se sabe si el gesto
+ * no existe o si la app se colgó.
+ *
+ * @param {object} toma la del estado
+ * @param {{enCabezal:boolean, enControl:boolean}} donde cómo fue el clic
+ */
+export function elClicPliega(toma, donde) {
+    const d = donde || {};
+    if (!d.enCabezal || d.enControl) return false;
+    // Sin toma no se pliega nada: la tarjeta puede ser de un repintado que el
+    // estado ya dejó atrás, y ahí el clic no tiene sobre qué contestar.
+    return Boolean(toma) && sePuedePlegar(toma);
 }
 
 /**

@@ -308,22 +308,31 @@ function pintarHistoria() {
     adelante.title = h.adelante ? `Rehacer: ${h.queAdelante} (Cmd-Shift-Z)` : 'No hay nada que rehacer';
 }
 
+/**
+ * Plegar o desplegar una toma.
+ *
+ * En una función con nombre y no dentro de `mirada` porque se pide desde dos
+ * sitios: el triangulito de su cabezal (`tomas.js`) y el clic en el cabezal
+ * (`wireGrabar`). Es el mismo pliegue, así que tiene que ser el mismo camino.
+ */
+function plegar(id, plegada) {
+    if (plegada) {
+        // Un comentario abierto al margen de una toma que se pliega se iría con
+        // ella y quedaría marcado como abierto para siempre.
+        margen.cerrarTodos($('grabar-tomas'));
+        vista.plegadas.add(id);
+    } else {
+        vista.plegadas.delete(id);
+    }
+    pintar();
+}
+
 /** Cómo se está mirando la lista, que es lo único que la lista guarda de su lado. */
 function mirada() {
     return {
         plegadas: vista.plegadas,
         sinDescartadas: vista.sinDescartadas,
-        alPlegar: (id, plegada) => {
-            if (plegada) {
-                // Un comentario abierto al margen de una toma que se pliega se
-                // iría con ella y quedaría marcado como abierto para siempre.
-                margen.cerrarTodos($('grabar-tomas'));
-                vista.plegadas.add(id);
-            } else {
-                vista.plegadas.delete(id);
-            }
-            pintar();
-        }
+        alPlegar: plegar
     };
 }
 
@@ -363,6 +372,66 @@ function mirada() {
 function elegir(id) {
     vista.elegida = puedeElegirse(vista.estado, id) ? id : null;
     marcarElegida();
+}
+
+/**
+ * La toma del estado, para preguntarle si se puede plegar. Null si el clic cayó
+ * sobre una tarjeta de un repintado que el estado ya dejó atrás.
+ */
+function laToma(id) {
+    return ((vista.estado && vista.estado.tomas) || []).find(t => t.id === id) || null;
+}
+
+/* ─── El mismo clic dice dos cosas ───────────────────────────────────────
+ *
+ * Un clic en una tarjeta ya elegía su toma; ahora, en el cabezal, además la
+ * pliega. O sea que el gesto quiere decir dos cosas a la vez, y **no se
+ * reparten: las dos pasan.** El argumento es que no son dos intenciones sino una
+ * dicha una vez. Elegir contesta "sobre esta toma", y plegarla es justamente
+ * trabajar sobre esa toma: quien la pliega la acaba de mirar y decidir que ya no
+ * necesita verla abierta. Repartir el clic —que el cabezal plegara y NO eligiera—
+ * sería peor de las dos maneras posibles: dejaría el cabezal como el único sitio
+ * de la ficha donde el clic no dice "esta", y le daría al mismo gesto dos
+ * significados según en qué píxel cayó, que es lo que nadie puede aprender.
+ *
+ * Dónde molesta, porque hay un caso. Plegar sirve para ir limpiando la vista, y
+ * limpiar son cinco pliegues seguidos: al terminar, las teclas quedan apuntando a
+ * la última toma vieja que se plegó y no a la que está grabando. Apretar R ahí
+ * cambia la vista de una toma de hace veinte minutos.
+ *
+ * Se aguanta, y no por descuido: es el mismo caso que ya existía —hacer clic en
+ * cinco tarjetas para leerlas también dejaba la elección en la última—, se VE
+ * —la ficha elegida lleva el anillo y el "· teclas", plegada incluida— y se
+ * deshace con un clic en la que se quiera. Lo que no se puede hacer es lo
+ * contrario: que plegar SUELTE la elección y la devuelva a la abierta. Sonaba
+ * razonable —"plegar es decir 'con esta ya terminé'"— y convierte un gesto en dos
+ * según el estado de la ficha: el mismo clic elegiría al desplegar y deselegiría
+ * al plegar, y la marca se movería sola en una de las dos direcciones sin que
+ * nadie la haya movido.
+ *
+ * Y la marca sobrevive al pliegue, que es la condición para todo lo anterior:
+ * `es-elegida` cuelga de la ficha y el "· teclas" del número, los dos en el
+ * cabezal, que es lo único que queda de una ficha plegada (`grabar-teclas.css`).
+ * Una toma elegida y plegada sigue diciendo que ahí caen P, R, S, M y X — y tiene
+ * que decirlo, porque sus cinco botones de vista siguen puestos en el cabezal:
+ * plegada se le puede seguir cambiando la vista, con la tecla y con el botón.
+ */
+
+/**
+ * Dónde cayó el clic, en lo que `elClicPliega` necesita saber.
+ *
+ * Los controles se preguntan por lo que SON y no por una lista de clases: en el
+ * cabezal hay hasta seis botones —las cinco vistas, "Descartar" o "Cerrar acá",
+ * "Reabrir", "Eliminar", "Recuperar"— y el que se agregue mañana tiene que quedar
+ * cubierto sin que nadie se acuerde de venir a anotarlo acá. El grupo de vistas
+ * va aparte de sus botones porque es un `<div>` con `role="radiogroup"`: un clic
+ * en el filo entre dos celdas cae en el grupo y no en ninguna de las dos.
+ */
+function formaDelClic(e) {
+    return {
+        enCabezal: Boolean(e.target.closest('.toma-cabeza')),
+        enControl: Boolean(e.target.closest('button, input, select, textarea, label, a, .toma-vistas'))
+    };
 }
 
 /**
@@ -813,13 +882,19 @@ export function wireGrabar() {
     // tomas mientras nadie suba a leer.
     vista.fondo = pegado.cablear($('grabar-izq'), $('grabar-tomas'));
 
-    // Un clic en una tarjeta elige su toma (`elegir`). El oyente va en la lista y
-    // no en cada tarjeta porque las tarjetas se rehacen en cada repintado: atarlo
-    // a las de ahora sería cablearlo de nuevo cada tres segundos. Y no estorba a
-    // nadie: los botones de la tarjeta hacen lo suyo y el clic sigue subiendo.
+    // Un clic en una tarjeta elige su toma (`elegir`), y si cayó en su cabezal
+    // también la pliega (`elClicPliega`). El oyente va en la lista y no en cada
+    // tarjeta porque las tarjetas se rehacen en cada repintado: atarlo a las de
+    // ahora sería cablearlo de nuevo cada tres segundos. Y no estorba a nadie:
+    // los botones de la tarjeta hacen lo suyo y el clic sigue subiendo.
     $('grabar-tomas').addEventListener('click', e => {
         const tarjeta = e.target.closest('.toma');
-        if (tarjeta) elegir(Number(tarjeta.dataset.toma));
+        if (!tarjeta) return;
+        const id = Number(tarjeta.dataset.toma);
+        // Elegir primero y plegar después: plegar repinta la lista, y elegir sobre
+        // la tarjeta nueva es lo que deja la marca puesta donde el pliegue la dejó.
+        elegir(id);
+        if (plegado.elClicPliega(laToma(id), formaDelClic(e))) plegar(id, !vista.plegadas.has(id));
     });
 
     $('grabar-entrada').onchange = e => abrirEntrada(e.target.value);

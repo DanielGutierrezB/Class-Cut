@@ -268,7 +268,25 @@ async function esperarSesion(wc) {
 }
 
 const boton = (toma, vista) => `#grabar-tomas .toma[data-toma="${toma}"] .toma-vista-btn[data-vista="${vista}"]`;
-const cabeza = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-cuando`;
+
+/**
+ * Un clic que solo quiere decir "esta toma": una palabra suelta de su cuerpo.
+ *
+ * Antes esto era el cabezal —`.toma-cuando`, la hora— y ya no vale: tocar el
+ * cabezal PLIEGA la tarjeta además de elegirla, así que un paso que solo quería
+ * elegir se llevaba por delante el texto de la toma y el paso siguiente no
+ * encontraba ni la nota ni las palabras. Es la misma trampa que el "primer botón
+ * de la cabecera" que pasó de recuperar una toma a eliminarla: un selector
+ * escrito por dónde estaba la cosa y no por lo que el gesto significa.
+ *
+ * Sin las orillas —ahí empieza el arrastre del borde— y sin las subrayadas, que
+ * abren su comentario al margen.
+ */
+const enLaTarjeta = toma =>
+    `#grabar-tomas .toma[data-toma="${toma}"] .toma-palabra:not(.es-orilla):not(.es-comentada)`;
+
+/** El cabezal, donde el clic pliega y despliega. La hora: no es ningún control. */
+const cabezal = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-cuando`;
 const nota = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-nota`;
 /** La primera palabra subrayada de una toma: el clic ahí abre su comentario. */
 const comentada = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-palabra.es-comentada`;
@@ -285,6 +303,33 @@ const comoEstaElMargen = toma => `(() => {
         cuantos: t.querySelectorAll('.toma-margen .toma-com').length,
         resaltadas: t.querySelectorAll('.toma-palabra.es-abierta').length,
         escrito: (t.querySelector('.toma-com-campo') || {}).value
+    };
+})()`;
+
+/**
+ * Cómo está el pliegue de una toma, y si sigue diciendo dónde caen las teclas.
+ *
+ * Las dos cosas en la misma lectura y no en dos: el pliegue y la marca de elegida
+ * viven los dos en el cabezal, que es lo único que queda de una tarjeta plegada,
+ * y lo que hay que poder ver es justamente que no se pisan.
+ *
+ * El "· teclas" es un `::after` de CSS, así que no está en el texto del nodo: se
+ * pregunta al estilo calculado, que es el único sitio donde existe.
+ */
+const comoEstaElPliegue = toma => `(() => {
+    const t = document.querySelector('#grabar-tomas .toma[data-toma="${toma}"]');
+    if (!t) return null;
+    const marca = t.querySelector('.toma-pliegue');
+    const n = t.querySelector('.toma-n');
+    return {
+        plegada: t.classList.contains('es-plegada'),
+        resumen: Boolean(t.querySelector('.toma-resumen')),
+        palabras: t.querySelectorAll('.toma-palabra').length,
+        plegable: Boolean(t.querySelector(':scope > .toma-cabeza.es-plegable')),
+        triangulo: marca ? marca.textContent : null,
+        expandido: marca ? marca.getAttribute('aria-expanded') : null,
+        elegida: t.classList.contains('es-elegida'),
+        dicePorQue: /teclas/.test(getComputedStyle(n, '::after').content || '')
     };
 })()`;
 
@@ -311,6 +356,38 @@ function casos(wc) {
         {
             que: 'al abrir, la pantalla y el motor ya dicen lo mismo',
             hacer: async () => {}
+        },
+        {
+            que: 'el gesto de plegar lo ofrecen las cerradas, y la abierta y la descartada no',
+            // Acá y no al final: es el único momento de la ronda en que hay una
+            // toma abierta y una descartada a la vez (la 4 y la 3), que son
+            // justamente las dos que no se pliegan. Y se les toca el cabezal de
+            // verdad: la promesa es que ahí no pasa nada, no que no haya cursor.
+            hacer: async () => {
+                await clic(wc, cabezal(4));
+                await clic(wc, cabezal(3));
+            },
+            ademas: async () => {
+                const como = await mirar(wc, `(() => {
+                    const ids = sel => [...document.querySelectorAll(sel)].map(c => c.dataset.toma);
+                    return {
+                        plegables: ids('#grabar-tomas .toma:has(> .toma-cabeza.es-plegable)'),
+                        abiertaPlegable: document.querySelectorAll('#grabar-tomas .toma.es-abierta .toma-cabeza.es-plegable').length,
+                        descartadaPlegable: document.querySelectorAll('#grabar-tomas .toma.es-descartada .toma-cabeza.es-plegable').length,
+                        triangulos: document.querySelectorAll('#grabar-tomas .toma-pliegue').length,
+                        plegadas: ids('#grabar-tomas .toma.es-plegada'),
+                        marcadas: ids('#grabar-tomas .toma.es-elegida')
+                    };
+                })()`);
+                if (como.plegadas.length) return `algo se plegó: «${como.plegadas.join(' ')}»`;
+                if (como.abiertaPlegable) return 'la toma abierta se dibuja como plegable';
+                if (como.descartadaPlegable) return 'una descartada se dibuja como plegable';
+                if (como.plegables.join(' ') !== '1 2') return `las plegables son «${como.plegables.join(' ')}»`;
+                if (como.triangulos !== 2) return `hay ${como.triangulos} triangulitos y tendrían que ser 2`;
+                // El clic en la descartada no la elige —no va al XML— así que la
+                // marca vuelve a la abierta, que es lo de siempre.
+                return como.marcadas.join(' ') === '4' ? null : `la marca quedó en «${como.marcadas.join(' ')}»`;
+            }
         },
         {
             que: 'el botón de vista de una toma vieja repinta SU tarjeta',
@@ -346,7 +423,7 @@ function casos(wc) {
         {
             que: 'con la toma 1 elegida, la tecla cae en la toma 1 y no en la abierta',
             hacer: async () => {
-                await clic(wc, cabeza(1));
+                await clic(wc, enLaTarjeta(1));
                 await tecla(wc, 'x');
             },
             ademas: async () => {
@@ -367,7 +444,7 @@ function casos(wc) {
             // pliega sin botones, así que la tecla no puede seguir apuntándole. Y
             // la marca tiene que mudarse en el mismo repintado, no después.
             hacer: async () => {
-                await clic(wc, cabeza(1));
+                await clic(wc, enLaTarjeta(1));
                 await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-descartar`);
                 await tecla(wc, 'p');
             },
@@ -385,7 +462,7 @@ function casos(wc) {
             que: 'recuperar la deja como estaba y se la puede volver a elegir',
             hacer: async () => {
                 await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-descartar`);
-                await clic(wc, cabeza(1));
+                await clic(wc, enLaTarjeta(1));
             },
             ademas: async () => {
                 const marcadas = await mirar(wc, `[...document.querySelectorAll('#grabar-tomas .toma.es-elegida')]
@@ -466,7 +543,7 @@ function casos(wc) {
             hacer: async () => {
                 await clic(wc, nota(2));
                 await escribir(wc, ' hola');
-                await clic(wc, cabeza(1));
+                await clic(wc, enLaTarjeta(1));
                 await dormir(400);
             },
             ademas: async () => {
@@ -562,7 +639,7 @@ function casos(wc) {
             // no cambió de idea porque "Pausa" haya cerrado la toma que corría, y
             // la marca sigue diciendo dónde va a caer la tecla.
             hacer: async () => {
-                await clic(wc, cabeza(1));
+                await clic(wc, enLaTarjeta(1));
                 await clic(wc, '#grabar-cerrar-toma');
                 await dormir(400);
                 await tecla(wc, 's');
@@ -696,6 +773,97 @@ function casos(wc) {
                 const como = await mirar(wc, comoEstaElMargen(4));
                 if (como.abierto) return 'la caja del comentario quedó abierta';
                 return como.puesta === 'X2' ? null : `la toma 4 quedó mostrando ${como.puesta}`;
+            }
+        },
+        {
+            que: 'un clic en el cabezal pliega la toma, y de paso la elige',
+            // El gesto entero, que antes era un botón que decía "Plegar". Las dos
+            // cosas a la vez son a propósito: el clic en una tarjeta ya quería
+            // decir "esta toma" y plegarla es trabajar sobre esa toma.
+            hacer: () => clic(wc, cabezal(1)),
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElPliegue(1));
+                if (!como.plegada) return 'el cabezal no plegó la toma';
+                if (!como.resumen) return 'plegada pero sin resumen: se escondió el texto y nada más';
+                if (como.palabras) return `plegada y con ${como.palabras} palabras a la vista`;
+                if (como.triangulo !== '▸') return `el triangulito quedó en «${como.triangulo}»`;
+                if (como.expandido !== 'false') return `aria-expanded quedó en «${como.expandido}»`;
+                return como.elegida ? null : 'plegar no la dejó elegida';
+            }
+        },
+        {
+            que: 'plegada sigue diciendo que las teclas caen ahí, y caen',
+            // La condición de que plegar y elegir puedan compartir el clic: una
+            // toma elegida y plegada tiene que seguir mostrando el anillo y el
+            // "· teclas", porque sus cinco botones de vista siguen en el cabezal y
+            // la tecla los sigue apretando. Si la marca se fuera con el texto, el
+            // atajo quedaría apuntando a algo invisible, que es el defecto que la
+            // marca existe para evitar.
+            hacer: () => tecla(wc, 'p'),
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElPliegue(1));
+                if (!como.plegada) return 'la tecla desplegó la toma';
+                if (!como.elegida) return 'la marca de elegida se fue con el pliegue';
+                if (!como.dicePorQue) return 'plegada y elegida, pero sin el "· teclas" en el cabezal';
+                const puesta = await mirar(wc, enPantalla(1));
+                return puesta === 'PV' ? null : `la tecla no cayó en la plegada, que muestra ${puesta}`;
+            }
+        },
+        {
+            que: 'los botones del cabezal de una plegada no la despliegan de rebote',
+            hacer: () => clic(wc, boton(1, 'MG')),
+            ademas: async () => {
+                const [como, puesta] = await Promise.all([
+                    mirar(wc, comoEstaElPliegue(1)),
+                    mirar(wc, enPantalla(1))
+                ]);
+                if (!como.plegada) return 'el botón de vista desplegó la toma';
+                return puesta === 'MG' ? null : `la toma 1 quedó mostrando ${puesta}`;
+            }
+        },
+        {
+            que: 'y el mismo clic en el cabezal la vuelve a desplegar, con su texto',
+            hacer: () => clic(wc, cabezal(1)),
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElPliegue(1));
+                if (como.plegada) return 'el cabezal no la desplegó';
+                if (!como.palabras) return 'desplegada y sin texto';
+                if (como.resumen) return 'desplegada y con el resumen del pliegue puesto';
+                if (como.triangulo !== '▾') return `el triangulito quedó en «${como.triangulo}»`;
+                return como.expandido === 'true' ? null : `aria-expanded quedó en «${como.expandido}»`;
+            }
+        },
+        {
+            que: 'y desplegada, sus botones tampoco la pliegan',
+            // La otra mitad, y es la que importa más: si esto se rompiera, cambiar
+            // la vista de una toma se llevaría de la pantalla el texto sobre el que
+            // se está decidiendo, en el mismo clic. Se prueban los dos vecinos del
+            // cabezal —el grupo de vistas y "Descartar"— y se recupera al final
+            // para dejar la lista como estaba.
+            hacer: async () => {
+                await clic(wc, boton(1, 'S'));
+                await clic(wc, '#grabar-tomas .toma[data-toma="1"] .toma-descartar');
+                await clic(wc, '#grabar-tomas .toma[data-toma="1"] .toma-descartar');
+            },
+            ademas: async () => {
+                const [como, puesta] = await Promise.all([
+                    mirar(wc, comoEstaElPliegue(1)),
+                    mirar(wc, enPantalla(1))
+                ]);
+                if (como.plegada) return 'un botón del cabezal plegó la tarjeta';
+                if (!como.palabras) return 'la tarjeta quedó sin texto sin estar plegada';
+                return puesta === 'S' ? null : `la toma 1 quedó mostrando ${puesta}`;
+            }
+        },
+        {
+            que: 'y el triangulito del cabezal pliega igual que el cabezal',
+            // Es el mando accesible del pliegue —lo que lo deja alcanzable sin
+            // mouse— así que tiene que hacer lo mismo y no algo parecido.
+            hacer: () => clic(wc, '#grabar-tomas .toma[data-toma="1"] .toma-pliegue'),
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElPliegue(1));
+                if (!como.plegada) return 'el triangulito no plegó la toma';
+                return como.palabras ? `plegada y con ${como.palabras} palabras a la vista` : null;
             }
         }
     ];

@@ -136,6 +136,37 @@ const REVERSIONES = [
         caen: ['la degradada avisa sin ámbar']
     },
     {
+        que: 'el cabezal pliega también cuando el clic cayó en uno de sus botones',
+        archivo: 'src/js/grabar/plegado.js',
+        de: '    if (!d.enCabezal || d.enControl) return false;',
+        a: '    if (!d.enCabezal) return false;',
+        filtro: 'plegado',
+        caen: ['un clic en un control del cabezal NO pliega']
+    },
+    {
+        que: 'pliega cualquier clic en la tarjeta y no solo el del cabezal',
+        archivo: 'src/js/grabar/plegado.js',
+        de: '    if (!d.enCabezal || d.enControl) return false;',
+        a: '    if (d.enControl) return false;',
+        filtro: 'plegado',
+        caen: [
+            'un clic en el cuerpo de la tarjeta tampoco',
+            'sin saber dónde cayó, no pliega'
+        ]
+    },
+    {
+        que: 'el cabezal pliega sin preguntar si esa toma se puede plegar',
+        archivo: 'src/js/grabar/plegado.js',
+        de: '    return Boolean(toma) && sePuedePlegar(toma);',
+        a: '    return true;',
+        filtro: 'plegado',
+        caen: [
+            'el cabezal de la que está grabando no pliega',
+            'el de una descartada tampoco',
+            'sin toma en el estado no se pliega nada'
+        ]
+    },
+    {
         que: 'regenerar no limpia la marca de la toma que arregla',
         archivo: 'engine/clases-grabadas.js',
         de: '            if (leido) Object.assign(toma, leido);',

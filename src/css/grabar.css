@@ -450,6 +450,59 @@
     border-radius: inherit;
 }
 
+/* ── El cabezal se toca, y hay que verlo ──────────────────────────────────
+ *
+ * Plegar una toma anterior se pide tocando su cabezal, no apretando un botón
+ * (`cabezalQueSePliega` en `grabar/tomas.js`). Con el botón, que plegar existía
+ * lo decía la palabra "Plegar"; sin él hay que decirlo con el dibujo, y las tres
+ * señales de acá son las que la pantalla ya usaba y no un estilo nuevo: la mano,
+ * el aclarado de los botones de esta misma banda, y el triangulito de los
+ * desplegables de la app.
+ *
+ * Solo en las que se pliegan. La abierta y las descartadas no llevan la clase
+ * —una descartada ya es su cabecera y nada más—, así que no cambian de cursor ni
+ * se aclaran: un cabezal que invita y después no hace nada es peor que uno que no
+ * invita, porque deja sin saber si el gesto no existe o si la app se colgó. */
+.toma-cabeza.es-plegable {
+    cursor: pointer;
+    /* Un cabezal que se aprieta no puede ir pintando de azul su propio texto al
+       segundo clic: la selección es del texto de la toma, que está abajo. */
+    user-select: none;
+}
+
+/* El aclarado es el que ya tienen los botones de esta banda —la tinta de la ficha
+   al 12%— y va como imagen y no como `background`, que en esta cabecera es el
+   color de la vista y no se puede pisar.
+
+   Y no cuando el puntero está sobre un control de adentro: ahí el clic NO pliega
+   (ver `elClicPliega`), así que el cabezal no puede estar prometiendo que sí. */
+.toma-cabeza.es-plegable:hover:not(:has(button:hover, .toma-vistas:hover)) {
+    background-image: linear-gradient(
+        color-mix(in srgb, var(--tinta) 12%, transparent),
+        color-mix(in srgb, var(--tinta) 12%, transparent));
+}
+
+/* El triangulito: dice en qué estado está el pliegue y es el mando con el que se
+   lo alcanza sin mouse. Mismo glifo y mismo tamaño que los otros tres
+   desplegables (`.clase.es-hecha > summary::before`, `.temario-summary::before`),
+   con la tinta de la ficha en vez del gris del tema, que sobre la banda de color
+   desaparece — es la misma corrección que ya se le hizo a `.btn-ghost` de acá. */
+.toma-pliegue {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: color-mix(in srgb, var(--tinta) 70%, transparent);
+    font: inherit;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    /* Contra los 10px de la fila: el triangulito es del número, no un tercer
+       dato al lado del número y la hora. */
+    margin-right: -4px;
+}
+
+.toma-pliegue:hover { color: var(--tinta); }
+
 .toma-n {
     font-weight: 600;
     font-size: 13px;

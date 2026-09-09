@@ -209,27 +209,55 @@ function resumenPlegado(toma) {
 }
 
 /**
- * "Plegar" es uno más de la fila de botones de la cabecera, sin estilo propio.
+ * El cabezal de una toma que se puede plegar: tocarlo la pliega.
  *
- * Se probó con el triangulito que gira de la lista de clases
- * (`.clase.es-hecha > summary::before`), que era el gesto ya conocido, y en esta
- * cabecera no se lee: al lado de "Descartar" y del grupo de vistas, una punta de
- * diez píxeles parece un adorno del borde y no algo que se aprieta.
+ * Antes había un botón que decía "Plegar", uno más de la fila de la cabecera. El
+ * gesto es ahora el cabezal entero, que es lo que ya venía queriendo decir "esta
+ * toma": la fila de botones de la cabecera es para lo que se le HACE a la toma
+ * —su vista, descartarla, cerrarla— y plegar no se le hace a la toma, se le hace
+ * a la pantalla. Un botón ahí ponía las dos cosas en la misma fila y a la misma
+ * altura, así que "Plegar" se leía como un hermano de "Descartar", que va al XML.
  *
- * Y es un botón y no un `<details>` como allá porque el estado no vive en el DOM:
+ * Quién decide si un clic pliega está en `plegado.elClicPliega`, y quién lo
+ * escucha en `index.js`: el oyente es uno para la lista entera, porque las
+ * tarjetas se rehacen cada tres segundos. Acá queda solo lo que se ve.
+ *
+ * **Y se ve, que es la mitad del cambio.** Al irse el botón se iba la única señal
+ * de que plegar existe, así que el cabezal lo dice de tres maneras, ninguna
+ * nueva: el cursor de mano, el aclarado al pasar por encima —el mismo que ya
+ * tienen los botones de esta banda— y el triangulito `▸`/`▾`, que es como esta app
+ * dibuja "esto se despliega" en la lista de clases grabadas, en el temario y en
+ * Ajustes (ver `grabar-lista.css` y `grabar-analisis.css`).
+ *
+ * El triangulito es un botón de verdad y no un adorno de CSS, y no es el botón
+ * que se fue: no tiene rótulo ni sitio en la fila. Es el mando accesible del
+ * pliegue —lo que le da su `aria-expanded` y lo deja alcanzable con el teclado,
+ * como el `<summary>` de los otros tres desplegables— mientras el cabezal es el
+ * blanco cómodo para el mouse. Sin él, plegar existiría solo para quien usa el
+ * mouse y un lector de pantalla no tendría nada que anunciar: el `<header>` no
+ * puede decir que es un botón teniendo seis botones adentro.
+ *
+ * Y no es un `<details>` como los otros tres porque el estado no vive en el DOM:
  * la ficha se redibuja cada tres segundos y el `[open]` se perdería en cada
  * repintado. Lo de adentro tampoco se esconde con CSS —se pinta o no se pinta—,
  * así que `<details>` no tendría nada que abrir.
  */
-function botonDePliegue(toma, plegada, mirada) {
-    const boton = botonChico(plegada ? 'Desplegar' : 'Plegar',
-        plegada
-            ? 'Volver a ver el texto de esta toma'
-            : 'Dejar solo un resumen, para ir limpiando la vista',
-        () => mirada.alPlegar(toma.id, !plegada));
-    boton.classList.add('toma-pliegue');
-    boton.setAttribute('aria-expanded', String(!plegada));
-    return boton;
+function cabezalQueSePliega(cabeza, toma, plegada, mirada) {
+    cabeza.classList.add('es-plegable');
+    cabeza.title = plegada
+        ? 'Clic en el cabezal para volver a ver el texto de esta toma'
+        : 'Clic en el cabezal para dejar solo un resumen, e ir limpiando la vista';
+
+    const marca = document.createElement('button');
+    marca.type = 'button';
+    marca.className = 'toma-pliegue';
+    marca.textContent = plegada ? '▸' : '▾';
+    marca.setAttribute('aria-expanded', String(!plegada));
+    marca.setAttribute('aria-label', plegada ? `Desplegar la toma ${toma.id}` : `Plegar la toma ${toma.id}`);
+    marca.onclick = () => mirada.alPlegar(toma.id, !plegada);
+    // Primero de la cabecera, a la izquierda del número, que es donde los otros
+    // tres desplegables de la app ponen el suyo.
+    cabeza.prepend(marca);
 }
 
 /**
@@ -371,7 +399,7 @@ function dibujar(toma, estado, acciones, enVivo, mirada) {
     // La abierta no se pliega: es lo que la persona está mirando.
     const plegada = Boolean(mirada && mirada.plegadas.has(toma.id));
     if (mirada && plegado.sePuedePlegar(toma)) {
-        cabeza.append(botonDePliegue(toma, plegada, mirada));
+        cabezalQueSePliega(cabeza, toma, plegada, mirada);
     }
 
     caja.append(cabeza, ...avisosDe(toma));
@@ -487,10 +515,10 @@ function comentarSeleccion(tarjeta, texto, acciones, tomaId) {
  * **Un botón con el foco no ocupa la tarjeta**, y esa distinción no es cosmética:
  * antes se miraba si la tarjeta contenía a `document.activeElement`, y Chromium le
  * da el foco al botón que se acaba de apretar. O sea que apretar "Descartar", una
- * vista o "Plegar" dejaba a su propia tarjeta marcada como ocupada, y la tarjeta
- * no se rehacía nunca: el cambio se escribía en el XML y en la pantalla no pasaba
- * nada hasta que alguien hiciera clic en otra parte. Perder el foco de un botón
- * que ya se apretó, en cambio, no se ve.
+ * vista o el triangulito del pliegue dejaba a su propia tarjeta marcada como
+ * ocupada, y la tarjeta no se rehacía nunca: el cambio se escribía en el XML y en
+ * la pantalla no pasaba nada hasta que alguien hiciera clic en otra parte. Perder
+ * el foco de un botón que ya se apretó, en cambio, no se ve.
  *
  * **Y mirar un comentario viejo tampoco la ocupa**, que es el mismo defecto en
  * versión angosta: se miraba la clase `es-comentando`, y esa clase cubre las dos
