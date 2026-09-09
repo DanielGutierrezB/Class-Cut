@@ -2,7 +2,7 @@
 
 Los XML que genera Class Cut se importan en Resolve igual que en Premiere: los
 clips caen en su lugar, los marcadores conservan su posición y su comentario, y
-el audio entra con los diez canales.
+el audio entra entero.
 
 Hay una sola cosa que no viaja: **el color de los clips**.
 
@@ -45,3 +45,16 @@ que una cámara tiene su color en el curso entero.
 
 Los marcadores sí llegan por XML, con el color que el director de contenido les
 puso. Resolve los mapea al nombre más cercano de su propia paleta.
+
+## Cuántas pistas de audio vas a ver
+
+Más que grabaciones, y está bien. En este formato una pista de audio lleva **un
+canal**, así que una fuente estéreo son dos pistas que el NLE vuelve a juntar al
+importar. De las diez grabaciones del Rodecaster hay ocho estéreo y dos mono
+(los COMBO, que son micrófonos), o sea dieciocho pistas en el archivo.
+
+Premiere las junta y muestra diez. Resolve no las junta: muestra las dieciocho,
+que es lo mismo que hace con cualquier XML exportado desde Premiere. Antes veías
+diez porque el XML declaraba una sola pista por grabación —y por eso llegaba
+solo el canal izquierdo de cada estéreo, el Live-Mix incluido—. Se ve más
+cargado y suena entero, que es el cambio que importa.

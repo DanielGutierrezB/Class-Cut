@@ -585,7 +585,8 @@ module.exports = function (t) {
     t.test('la cámara que no toca entra deshabilitada, no se borra', () => {
         const xml = build();
         t.ok(/<enabled>FALSE<\/enabled>/.test(xml), 'tiene que haber un clip apagado');
-        t.eq((xml.match(/<clipitem id="clipitem-/g) || []).length, 3, 'los tres clips van igual');
+        // Dos cámaras y un audio estéreo, que son dos clipitem: uno por canal.
+        t.eq((xml.match(/<clipitem id="clipitem-/g) || []).length, 4, 'no se cae ninguno');
     });
 
     t.test('el corte usa el tramo pedido del origen', () => {
@@ -612,20 +613,89 @@ module.exports = function (t) {
         t.ok(marker.includes('<out>600</out>'), marker);
     });
 
-    t.test('cada pista de audio sale por su par de canales', () => {
-        const source = { path: '/a.wav', name: 'a.wav', durationSec: 10, audioOnly: true };
-        const other = { path: '/b.wav', name: 'b.wav', durationSec: 10, audioOnly: true };
-        const xml = fcp.sequenceXml({
-            name: 'x', fps: 30, durationSec: 10,
-            videoTracks: [],
-            audioTracks: [
-                [{ source, startSec: 0, endSec: 10, sourceInSec: 0, enabled: true }],
-                [{ source: other, startSec: 0, endSec: 10, sourceInSec: 0, enabled: false }]
-            ],
-            markers: []
-        });
-        const channels = (xml.match(/<outputchannelindex>(\d+)<\/outputchannelindex>/g) || [])
+    // ── El audio, canal por canal ─────────────────────────────────────────
+    //
+    // Todo lo de acá abajo está medido contra el XML que exportó el Premiere del
+    // editor con el material de la clase 11 (dos cámaras estéreo, ocho WAV
+    // estéreo y dos WAV mono). Mientras el XML decía un solo canal por clip,
+    // Premiere hacía lo que se le pedía: partía cada clip en canales sueltos.
+
+    const wav = (name, channels) => ({
+        path: `/curso/Audio/${name}`, name, durationSec: 10, audioOnly: true, channels
+    });
+    const conAudios = fuentes => fcp.sequenceXml({
+        name: 'x', fps: 30, durationSec: 10, videoTracks: [], markers: [],
+        audioTracks: fuentes.map(source =>
+            [{ source, startSec: 0, endSec: 10, sourceInSec: 0, enabled: true }])
+    });
+    const pistas = xml => xml.match(/<track TL\.SQTrackAudio[\s\S]*?<\/track>/g) || [];
+
+    t.test('una fuente estéreo son dos pistas explotadas y no una', () => {
+        const xml = conAudios([wav('Live-Mix.wav', 2)]);
+        const p = pistas(xml);
+        t.eq(p.length, 2, 'un canal por pista: el estéreo ocupa dos');
+        t.ok(p[0].includes('currentExplodedTrackIndex="0" totalExplodedTrackCount="2"'), p[0].slice(0, 200));
+        t.ok(p[1].includes('currentExplodedTrackIndex="1" totalExplodedTrackCount="2"'), p[1].slice(0, 200));
+        t.ok(p[0].includes('<trackindex>1</trackindex>'), 'la izquierda pide el canal 1');
+        t.ok(p[1].includes('<trackindex>2</trackindex>'), 'la derecha pide el canal 2');
+        t.eq((xml.match(/premiereChannelType="stereo"/g) || []).length, 2);
+    });
+
+    t.test('los dos canales de un estéreo se nombran entre sí', () => {
+        // Sin esto son dos objetos sueltos: se mueven por separado y una
+        // selección de puro audio no se deja anidar.
+        const xml = conAudios([wav('Live-Mix.wav', 2)]);
+        const enlaces = xml.match(/<link>[\s\S]*?<\/link>/g) || [];
+        t.eq(enlaces.length, 4, 'los dos clipitem llevan la lista entera');
+        t.ok(enlaces[0].includes('<linkclipref>clipitem-1</linkclipref>'), enlaces[0]);
+        t.ok(enlaces[1].includes('<linkclipref>clipitem-2</linkclipref>'), enlaces[1]);
+        t.ok(enlaces.every(e => e.includes('<groupindex>1</groupindex>')), 'son un grupo de canales');
+        t.eq(enlaces[0], enlaces[2], 'los dos hermanos dicen lo mismo');
+    });
+
+    t.test('un WAV mono del Rodecaster va en una sola pista, y mono', () => {
+        // La regla no es la misma para todos: de los diez WAV que graba el
+        // Rodecaster, los dos COMBO son mono de verdad. Partirlos en dos pediría
+        // un canal 2 que no existe y dejaría medio clip en silencio.
+        const xml = conAudios([wav('1_COMBO-1.wav', 1)]);
+        const p = pistas(xml);
+        t.eq(p.length, 1, 'un canal, una pista');
+        t.ok(p[0].includes('totalExplodedTrackCount="1"'), p[0].slice(0, 200));
+        t.ok(p[0].includes('premiereChannelType="mono"'), 'el clip se declara mono');
+        t.ok(!xml.includes('<link>'), 'un mono no tiene hermano al que nombrar');
+        t.ok(xml.includes('<channelcount>1</channelcount><audiochannel><sourcechannel>1</sourcechannel></audiochannel>'),
+            'el archivo nombra su único canal');
+    });
+
+    t.test('mono y estéreo conviven, cada uno con su forma', () => {
+        const xml = conAudios([wav('1_COMBO-1.wav', 1), wav('3_HDMI-2.wav', 2)]);
+        const p = pistas(xml);
+        t.eq(p.length, 3, 'una del mono y dos del estéreo');
+        t.deep(p.map(t2 => /totalExplodedTrackCount="(\d)"/.exec(t2)[1]), ['1', '2', '2']);
+    });
+
+    t.test('las pistas salen por los dos canales del máster y no por veinte', () => {
+        // El defecto viejo sumaba de a dos —1, 3, 5… hasta 19— contra un máster
+        // declarado de dos canales. Pedir salidas que no existen es lo que le
+        // hace armar a Premiere un máster multicanal en vez de uno estéreo.
+        const xml = conAudios([wav('a.wav', 1), wav('b.wav', 1), wav('c.wav', 2)]);
+        const canales = (xml.match(/<outputchannelindex>(\d+)<\/outputchannelindex>/g) || [])
             .map(m => Number(m.replace(/\D/g, '')));
-        t.deep(channels, [1, 3], 'estéreo: cada pista ocupa dos canales');
+        t.deep(canales, [1, 2, 1, 2], 'los mono alternan; el par explotado es izquierda y derecha');
+    });
+
+    t.test('la secuencia se declara explotada y con máster estéreo', () => {
+        const xml = conAudios([wav('a.wav', 2)]);
+        t.ok(xml.includes('<sequence id="sequence-1" explodedTracks="true">'), 'sin esto no se vuelven a juntar');
+        t.ok(xml.includes('<numOutputChannels>2</numOutputChannels>'));
+        t.ok(xml.includes('<outputs><group><index>1</index>'), 'el máster va canal por canal');
+        t.eq((xml.match(/<group>/g) || []).length, 2, 'estéreo: dos salidas y nada más');
+    });
+
+    t.test('el clip maestro del bin también sabe cuántos canales tiene', () => {
+        const xml = conAudios([wav('a.wav', 2)]);
+        const bin = xml.slice(xml.indexOf('<bin>'), xml.indexOf('</bin>'));
+        t.eq((bin.match(/<clipitem id="bin-a/g) || []).length, 2, 'uno por canal');
+        t.ok(bin.includes('bin-a1-') && bin.includes('bin-a2-'), bin);
     });
 };

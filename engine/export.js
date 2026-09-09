@@ -52,6 +52,10 @@ function videoSource(file, index) {
         durationSec: file.durationSec || 0,
         width: file.width,
         height: file.height,
+        // Las cámaras del Rodecaster graban estéreo, pero el número sale de
+        // medir el archivo igual que en los audios: es lo que decide cómo se
+        // describe el clip maestro, y suponerlo es lo que rompía el estéreo.
+        channels: file.channels || 2,
         audioOnly: false,
         // Cada cámara con su color, y el mismo en todas las clases: el orden del
         // archivo es estable porque el Rodecaster numera igual siempre.

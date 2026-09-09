@@ -15,6 +15,14 @@
  *
  * La estructura sigue la del generador de Sync, que ya está probado importando en
  * los dos editores.
+ *
+ * El audio va **canal por canal**, que es la regla del formato y no una manía:
+ * una pista de audio lleva UN canal, así que un clip estéreo son dos `clipitem`
+ * en dos pistas "explotadas" que el editor vuelve a juntar al importar. Mientras
+ * se escribió una sola pista pidiendo el canal 1, Premiere hacía exactamente eso
+ * y cada clip llegaba partido en canales sueltos. Cuántos canales tiene cada
+ * archivo se mide, no se supone: de los diez WAV del Rodecaster hay dos mono y
+ * ocho estéreo (ver `canalesDe`).
  */
 
 // Etiquetas de color de clip. Son los nombres nativos de Premiere; el orden es
@@ -107,6 +115,23 @@ function videoCharacteristics(fps, width, height) {
 }
 
 /**
+ * Cuántos canales tiene DE VERDAD una fuente. Es el número que decide todo lo
+ * que sigue, así que sale de medir el archivo (`media-probe` lo saca de ffprobe)
+ * y nunca de suponer por la extensión: de los diez WAV que graba el Rodecaster
+ * hay dos mono —los COMBO, que son micrófonos— y ocho estéreo, y las cámaras
+ * traen estéreo. Una sola regla para todos deja mal a la mitad del material.
+ *
+ * Se topa en 2 porque es hasta donde llega lo verificado: el par explotado que
+ * escribe Premiere son dos pistas, y una fuente de seis canales pediría una
+ * forma que no está en ninguna referencia. Nada de este curso pasa de dos.
+ */
+function canalesDe(source) {
+    const n = Math.round(Number(source && source.channels));
+    if (!isFinite(n) || n < 1) return 2;
+    return Math.min(2, n);
+}
+
+/**
  * Registro de archivos: cada media se define UNA vez —en el bin, que va antes que
  * la secuencia— y todo lo demás la referencia por id. Repetir la definición hace
  * que Premiere importe el mismo archivo varias veces y el proyecto termine con
@@ -149,13 +174,19 @@ class FileRegistry {
 
         const isAudio = Boolean(source.audioOnly);
         const name = xmlSafe(source.name || source.path.split('/').pop());
+        const canales = canalesDe(source);
+        // Una fuente mono nombra su único canal; una estéreo no lleva
+        // `audiochannel` ninguno. Así lo escribe Premiere al exportar este mismo
+        // material (`1_COMBO-1.wav` contra `3_HDMI-2.wav`).
+        const canalUnico = canales === 1
+            ? '<audiochannel><sourcechannel>1</sourcechannel></audiochannel>' : '';
         const media = isAudio
             ? `<audio><samplecharacteristics><depth>${source.bits || 16}</depth>` +
               `<samplerate>${source.sampleRate || 48000}</samplerate></samplecharacteristics>` +
-              `<channelcount>${source.channels || 2}</channelcount></audio>`
+              `<channelcount>${canales}</channelcount>${canalUnico}</audio>`
             : `<video>${videoCharacteristics(this.fps, source.width, source.height)}</video>` +
               '<audio><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate>' +
-              '</samplecharacteristics><channelcount>2</channelcount></audio>';
+              `</samplecharacteristics><channelcount>${canales}</channelcount>${canalUnico}</audio>`;
 
         return `<file id="${entry.id}"><name>${name}</name>` +
             `<pathurl>${pathUrl(source.path)}</pathurl>` +
@@ -175,11 +206,20 @@ class FileRegistry {
         const videoTrack = source.audioOnly ? '' :
             `<video><track><clipitem id="bin-v-${entry.id}"><name>${name}</name>` +
             `<file id="${entry.id}"/></clipitem></track></video>`;
-        const audioTrack =
-            `<audio><track><clipitem id="bin-a-${entry.id}"><name>${name}</name>` +
-            `<file id="${entry.id}"/>` +
-            '<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>' +
-            '</clipitem></track></audio>';
+        // Una pista por canal, igual que en la secuencia: en este formato una
+        // pista de audio lleva UN canal, y eso vale también para el clip maestro
+        // del bin. Con una sola pista, el maestro que el editor arrastra al
+        // timeline sabe de un canal nada más.
+        const canales = canalesDe(source);
+        const pistasDeAudio = [];
+        for (let canal = 1; canal <= canales; canal++) {
+            pistasDeAudio.push(
+                `<track><clipitem id="bin-a${canal}-${entry.id}"><name>${name}</name>` +
+                `<file id="${entry.id}"/>` +
+                `<sourcetrack><mediatype>audio</mediatype><trackindex>${canal}</trackindex></sourcetrack>` +
+                '</clipitem></track>');
+        }
+        const audioTrack = `<audio>${pistasDeAudio.join('')}</audio>`;
 
         return `        <clip id="masterclip-bin-${entry.id}">` +
             `<masterclipid>${entry.masterclip}</masterclipid>` +
@@ -417,13 +457,38 @@ function encuadreXml(encuadre) {
         '</effect></filter>';
 }
 
+/**
+ * Los hermanos de un clip: los `clipitem` que son el MISMO clip repartido en
+ * canales. Sin esto, los dos canales de un estéreo son dos objetos sueltos que
+ * se mueven y se recortan por separado, y una selección de puro audio no se
+ * puede anidar.
+ *
+ * El `trackindex` es el número de pista de la secuencia (contando las
+ * explotadas) y el `clipindex` el lugar del clip dentro de su pista; los dos
+ * empiezan en 1. El `groupindex` es lo que dice que forman un grupo de canales.
+ */
+function enlacesXml(enlaces) {
+    return (enlaces || []).map(enlace =>
+        `<link><linkclipref>${enlace.ref}</linkclipref><mediatype>audio</mediatype>` +
+        `<trackindex>${enlace.pista}</trackindex><clipindex>${enlace.clip}</clipindex>` +
+        '<groupindex>1</groupindex></link>').join('');
+}
+
 function clipItemXml(params) {
     const { id, registry, source, startFrame, endFrame, inFrame, outFrame, enabled, fps, kind } = params;
     const entry = registry.register(source);
     const sourceDuration = toFrames(source.durationSec, fps);
     const fileXml = registry.fileXml(source);
+    // Qué canal del archivo trae este clipitem. Uno por canal: el `trackindex`
+    // acá no es la pista de la secuencia sino el canal del origen.
     const sourceTrack = kind === 'audio'
-        ? '<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>'
+        ? '<sourcetrack><mediatype>audio</mediatype>' +
+          `<trackindex>${params.canalDeOrigen || 1}</trackindex></sourcetrack>`
+        : '';
+    // Mono o estéreo, dicho en el clip y no solo en la pista. Es el atributo con
+    // el que Premiere decide si el clip es una cosa o son canales sueltos.
+    const tipoDeCanal = kind === 'audio' && params.tipoDeCanal
+        ? ` premiereChannelType="${params.tipoDeCanal}"`
         : '';
     // La etiqueta de color, para distinguir de un vistazo qué fuente es cada clip
     // en una secuencia con los dieciséis trozos de la clase.
@@ -433,14 +498,15 @@ function clipItemXml(params) {
 
     // El filtro va después del `<file>`, que es donde lo pone Premiere en el
     // archivo que exporta él mismo.
-    return `        <clipitem id="${id}" frameBlend="FALSE">` +
+    return `        <clipitem id="${id}"${tipoDeCanal} frameBlend="FALSE">` +
         `<masterclipid>${entry.masterclip}</masterclipid>` +
         `<name>${xmlSafe(source.name || '')}</name>` +
         `<enabled>${enabled === false ? 'FALSE' : 'TRUE'}</enabled>` +
         `<duration>${sourceDuration}</duration>${rateXml(fps)}` +
         `<start>${startFrame}</start><end>${endFrame}</end>` +
         `<in>${inFrame}</in><out>${outFrame}</out>` +
-        `${label}${fileXml}${encuadreXml(params.encuadre)}${sourceTrack}</clipitem>\n`;
+        `${label}${fileXml}${encuadreXml(params.encuadre)}${sourceTrack}` +
+        `${enlacesXml(params.enlaces)}</clipitem>\n`;
 }
 
 /**
@@ -521,6 +587,22 @@ function markerXml(marker, fps) {
 }
 
 /**
+ * El máster de la secuencia, dicho canal por canal.
+ *
+ * Declarar `numOutputChannels` no alcanza: sin esta lista Premiere arma el
+ * máster deduciéndolo del `outputchannelindex` de cada pista, y una pista que
+ * pide una salida que no existe lo convierte en un máster multicanal. Con las
+ * dos salidas escritas, la secuencia entra como estéreo y nada más.
+ */
+const MASTER_ESTEREO =
+    '<outputs>' +
+    '<group><index>1</index><numchannels>1</numchannels><downmix>0</downmix>' +
+    '<channel><index>1</index></channel></group>' +
+    '<group><index>2</index><numchannels>1</numchannels><downmix>0</downmix>' +
+    '<channel><index>2</index></channel></group>' +
+    '</outputs>';
+
+/**
  * Arma el proyecto completo: un bin con los clips maestros y la secuencia.
  *
  * El orden importa y no es estético: el bin va PRIMERO porque es quien define
@@ -558,38 +640,89 @@ function sequenceXml(params) {
     }
     const binXml = binOrder.map(source => registry.binClipXml(source)).join('');
 
-    const buildTrack = (clips, kind) => clips.map(clip => clipItemXml({
-        id: nextId(),
-        registry,
-        source: clip.source,
-        startFrame: toFrames(clip.startSec, fps),
-        endFrame: toFrames(clip.endSec, fps),
-        inFrame: toFrames(clip.sourceInSec || 0, fps),
-        outFrame: toFrames((clip.sourceInSec || 0) + (clip.endSec - clip.startSec), fps),
-        enabled: clip.enabled,
-        encuadre: clip.encuadre,
-        fps,
-        kind
-    })).join('');
-
     const videoXml = videoTracks.map(clips =>
         '      <track TL.SQTrackShy="0" TL.SQTrackExpandedHeight="25">\n' +
-        buildTrack(clips, 'video') +
+        clips.map(clip => clipItemXml({
+            id: nextId(),
+            registry,
+            source: clip.source,
+            startFrame: toFrames(clip.startSec, fps),
+            endFrame: toFrames(clip.endSec, fps),
+            inFrame: toFrames(clip.sourceInSec || 0, fps),
+            outFrame: toFrames((clip.sourceInSec || 0) + (clip.endSec - clip.startSec), fps),
+            enabled: clip.enabled,
+            encuadre: clip.encuadre,
+            fps,
+            kind: 'video'
+        })).join('') +
         '        <enabled>TRUE</enabled><locked>FALSE</locked></track>\n'
     ).join('');
 
-    let outputChannel = 1;
-    const audioXml = audioTracks.map(clips => {
-        const items = buildTrack(clips, 'audio');
-        const track = '      <track TL.SQTrackAudioKeyframeStyle="0" TL.SQTrackShy="0" ' +
-            'TL.SQTrackExpandedHeight="25" currentExplodedTrackIndex="0" ' +
-            'totalExplodedTrackCount="1" premiereTrackType="Stereo">\n' +
+    // ── El audio, una pista de XML por CANAL ──────────────────────────────
+    //
+    // Acá estaba el defecto que hacía que Premiere partiera cada clip en canales
+    // sueltos. En este formato una pista de audio lleva UN canal: un clip
+    // estéreo son DOS `clipitem` —uno por canal— en dos pistas "explotadas" que
+    // el editor vuelve a juntar al importar. Se escribía una sola pista pidiendo
+    // el canal 1, así que Premiere hacía exactamente lo que se le pedía.
+    //
+    // Que sean dos pistas y no una se dice en tres sitios a la vez, y los tres
+    // hacen falta: `totalExplodedTrackCount` en la pista, `premiereChannelType`
+    // en el clip y los `<link>` entre hermanos. Está copiado del XML que exportó
+    // el Premiere del editor con este mismo material.
+    const pistasDeAudio = [];
+    let numeroDePista = 1;
+    for (const clips of audioTracks) {
+        // Los clips de una pista salen todos del mismo archivo, pero se toma el
+        // máximo por si alguna vez no fuera así: quedarse corto perdería un canal.
+        const canales = clips.length
+            ? Math.max(...clips.map(clip => canalesDe(clip.source)))
+            : 1;
+        const numeros = [];
+        const ids = [];
+        for (let canal = 0; canal < canales; canal++) {
+            numeros.push(numeroDePista++);
+            ids.push(clips.map(() => nextId()));
+        }
+        pistasDeAudio.push({ clips, canales, numeros, ids });
+    }
+
+    // Las pistas mono van alternando los dos canales del máster, que es como los
+    // reparte Premiere. Las de un par explotado no eligen: la izquierda es la 1
+    // y la derecha la 2. Antes se sumaba de a dos —1, 3, 5… hasta 19— contra un
+    // máster declarado de dos canales, que es pedirle salidas que no existen.
+    let canalMono = 0;
+    const audioXml = pistasDeAudio.map(pista => pista.numeros.map((_, canal) => {
+        const esEstereo = pista.canales > 1;
+        const items = pista.clips.map((clip, i) => clipItemXml({
+            id: pista.ids[canal][i],
+            registry,
+            source: clip.source,
+            startFrame: toFrames(clip.startSec, fps),
+            endFrame: toFrames(clip.endSec, fps),
+            inFrame: toFrames(clip.sourceInSec || 0, fps),
+            outFrame: toFrames((clip.sourceInSec || 0) + (clip.endSec - clip.startSec), fps),
+            enabled: clip.enabled,
+            fps,
+            kind: 'audio',
+            canalDeOrigen: canal + 1,
+            tipoDeCanal: esEstereo ? 'stereo' : 'mono',
+            // Los dos canales se nombran entre sí, y los dos llevan la misma
+            // lista: así lo escribe Premiere. Un mono no tiene a quién nombrar.
+            enlaces: esEstereo
+                ? pista.numeros.map((otra, otroCanal) => ({
+                    ref: pista.ids[otroCanal][i], pista: otra, clip: i + 1
+                }))
+                : null
+        })).join('');
+        const canalDeSalida = esEstereo ? canal + 1 : (canalMono++ % 2) + 1;
+        return '      <track TL.SQTrackAudioKeyframeStyle="0" TL.SQTrackShy="0" ' +
+            `TL.SQTrackExpandedHeight="25" currentExplodedTrackIndex="${canal}" ` +
+            `totalExplodedTrackCount="${pista.canales}" premiereTrackType="Stereo">\n` +
             items +
             '        <enabled>TRUE</enabled><locked>FALSE</locked>' +
-            `<outputchannelindex>${outputChannel}</outputchannelindex></track>\n`;
-        outputChannel += 2;
-        return track;
-    }).join('');
+            `<outputchannelindex>${canalDeSalida}</outputchannelindex></track>\n`;
+    }).join('')).join('');
 
     const markersXml = markers.map(marker => markerXml(marker, fps)).join('');
 
@@ -604,7 +737,7 @@ function sequenceXml(params) {
         <children>
 ${binXml}        </children>
       </bin>
-      <sequence id="sequence-1">
+      <sequence id="sequence-1" explodedTracks="true">
         <name>${xmlSafe(name)}</name>
         <duration>${toFrames(durationSec, fps)}</duration>
         ${rateXml(fps)}
@@ -616,6 +749,7 @@ ${videoXml}          </video>
           <audio>
             <numOutputChannels>2</numOutputChannels>
             <format><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics></format>
+            ${MASTER_ESTEREO}
 ${audioXml}          </audio>
         </media>
 ${markersXml}      </sequence>
