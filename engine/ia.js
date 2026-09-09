@@ -22,6 +22,58 @@ const claves = require('./claves');
 const ollamaServer = require('./ollama-server');
 const cursor = require('./ai-cursor');
 const anthropic = require('./ai-anthropic');
+const registro = require('./registro');
+
+/**
+ * El mismo cliente, pero anotando cada consulta en el diario.
+ *
+ * Las llamadas al criterio son de lejos lo que más se rompe: el modelo local se
+ * queda sin memoria, la API contesta 429, el Cursor CLI se cuelga esperando. Y
+ * hasta acá no dejaban ningún rastro — el diario contaba que la clase falló, sin
+ * decir en cuál de las veinte consultas ni por qué.
+ *
+ * Se envuelve acá y no en cada proveedor porque los tres exponen el mismo `ask`:
+ * un solo lugar, y ninguno se puede olvidar de anotar.
+ *
+ * **No se anota ni el prompt ni la respuesta.** El prompt lleva el transcript de
+ * la clase, que es lo que se dijo en un aula; ese archivo se manda por mail para
+ * pedir ayuda. Los tamaños y los tiempos alcanzan para diagnosticar: una consulta
+ * de 900k caracteres que tarda 90 segundos y vuelve con 429 se entiende sin leer
+ * una palabra de lo que decía.
+ */
+function conDiario(cliente, proveedor) {
+    if (!cliente || typeof cliente.ask !== 'function') return cliente;
+    const original = cliente.ask.bind(cliente);
+    let cuantas = 0;
+    return {
+        ...cliente,
+        ask: async params => {
+            const numero = ++cuantas;
+            const arranco = Date.now();
+            const pedido = {
+                n: numero,
+                proveedor,
+                model: cliente.model,
+                prompt: (params && params.prompt ? params.prompt.length : 0),
+                system: (params && params.system ? params.system.length : 0)
+            };
+            try {
+                const r = await original(params);
+                const tardo = Date.now() - arranco;
+                // Un `error` adentro de la respuesta es la manera normal en que
+                // estos clientes cuentan que no pudieron: no tiran.
+                if (r && r.error) registro.anotar('main', 'ia.falla', { ...pedido, ms: tardo, error: r.error });
+                else registro.anotar('main', 'ia.consulta', { ...pedido, ms: tardo });
+                return r;
+            } catch (err) {
+                registro.anotar('main', 'ia.falla', {
+                    ...pedido, ms: Date.now() - arranco, error: err && err.message
+                });
+                throw err;
+            }
+        }
+    };
+}
 
 /** Cómo se lee el proveedor en el cabezal y en los avisos. */
 function nombreDe(proveedor, model) {
@@ -48,6 +100,14 @@ function nombreDe(proveedor, model) {
  * @returns {Promise<{cliente:object|null, model?:string, source?:string, reason:string, proveedor:string}>}
  */
 async function armar(opciones, config) {
+    const armado = await elegirProveedor(opciones, config);
+    // Envolver acá y no en cada rama: las tres devuelven por su lado y una rama
+    // nueva se olvidaría de anotar sin que nada lo delate.
+    return { ...armado, cliente: conDiario(armado.cliente, armado.proveedor) };
+}
+
+/** Las tres ramas, sin el diario. Lo de afuera usa `armar`. */
+async function elegirProveedor(opciones, config) {
     const ia = config || ajustes.leer().ia;
     const pedido = (opciones && opciones.model) || null;
 

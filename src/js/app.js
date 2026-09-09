@@ -20,7 +20,7 @@ import { openReview, wireReview } from './visor/index.js';
 import { audioDelReproductor, cerrarReproductor } from './visor/reproductor.js';
 import { rev } from './visor/estado.js';
 import { marcarPaso, refrescarPasos, wirePasos, PASOS } from './pasos.js';
-import { showDoctor } from './diagnostico.js';
+import { showDoctor, descargarLog } from './diagnostico.js';
 import { showAjustes } from './ajustes.js';
 import { init as initActualizar, buscar as buscarUpdate } from './actualizar.js';
 import { refrescar as refrescarModelo } from './modelo.js';
@@ -177,6 +177,7 @@ async function init() {
     $('drawer-close').onclick = closeDrawer;
     $('btn-doctor').onclick = showDoctor;
     $('btn-ajustes').onclick = showAjustes;
+    $('btn-log').onclick = () => descargarLog($('btn-log'));
     initActualizar(info.version);
     $('modal-close').onclick = () => { $('modal').hidden = true; };
     $('modal').onclick = e => { if (e.target.id === 'modal') $('modal').hidden = true; };
@@ -275,6 +276,25 @@ window.dev = {
     // para poder colgarles un analizador desde afuera y medir qué suena.
     audio: () => audioDelReproductor()
 };
+
+// Lo que se rompe DESPUÉS de arrancar, que es casi todo.
+//
+// El `catch` de abajo solo atrapa una caída durante el arranque. Un error dentro
+// de un `onclick`, o una promesa que nadie esperó, no llegan a ningún lado: la
+// app queda viva y muda, y lo único que aparece es una pantalla que no responde
+// y un reporte que dice "no me anduvo". Del lado del proceso principal esto ya
+// estaba (`uncaughtException` y `unhandledRejection` en `main.js`); del lado de
+// la ventana faltaba, y la ventana es donde el editor pasa el día.
+window.addEventListener('error', e => {
+    anotar('ventana.error', {
+        mensaje: e.message,
+        donde: e.filename ? `${e.filename.split('/').pop()}:${e.lineno}` : null
+    });
+});
+window.addEventListener('unhandledrejection', e => {
+    const r = e.reason;
+    anotar('ventana.promesa', { mensaje: r && r.message ? r.message : String(r) });
+});
 
 init().catch(err => {
     // Antes de dibujar nada: si la ventana se cayó al arrancar, esta línea es

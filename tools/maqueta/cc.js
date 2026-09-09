@@ -2468,7 +2468,13 @@ window.cc = {
     openPath: async t => { window.alert(`Abriría:\n${t}`); return { ok: true }; },
 
     anotar: async () => ({ ok: true }),
-    registroDescargar: async () => ({ ok: true, path: '/tmp/class-cut-registro.json' }),
+    // La forma es la que devuelve `registro.escribir`: el botón muestra
+    // `lineas`, y con `path` en vez de `archivo` decía "undefined líneas".
+    registroDescargar: async () => ({
+        ok: true,
+        archivo: '/Users/vos/Downloads/class-cut-log-20260909-163000.md',
+        lineas: 1847
+    }),
     pathForFile: file => `${CURSO}/${file && file.name ? file.name : 'arrastrada'}`,
 
     onScanFound: cb => { oyentes['scan-found'] = cb; },

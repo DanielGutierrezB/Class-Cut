@@ -123,6 +123,166 @@ module.exports = t => {
         const a = registro.nombreDeArchivo(new Date('2026-08-25T15:04:05'));
         const b = registro.nombreDeArchivo(new Date('2026-08-25T15:04:06'));
         t.ok(a !== b, `${a} vs ${b}`);
-        t.ok(a.endsWith('.txt'));
+        t.ok(a.endsWith('.md'), 'markdown, que es lo que se pega en un issue o en un chat');
+    });
+
+    t.group('el registro · sobrevivir al cierre');
+
+    // Esto es lo que lo vuelve útil. Antes vivía solo en memoria y se perdía
+    // justo en el caso que más importa: si la app se cae, el diario de lo que la
+    // hizo caer se cae con ella, y quien la reabre para pedir ayuda descarga un
+    // archivo que empieza DESPUÉS del problema.
+
+    function carpeta() {
+        return fs.mkdtempSync(path.join(os.tmpdir(), 'cc-diario-'));
+    }
+
+    t.test('lo anotado queda en disco y se puede volver a leer', () => {
+        registro.limpiar();
+        const dir = carpeta();
+        t.ok(registro.abrirDiario(dir).ok);
+
+        registro.anotar('main', 'app.arranca', { version: '1.0.0' });
+        registro.anotar('main', 'corrida.empieza', { clases: 13 });
+        registro.volcar();
+
+        const enDisco = registro.leerDelDisco();
+        t.eq(enDisco.length, 2);
+        t.eq(enDisco[1].evento, 'corrida.empieza');
+        t.eq(enDisco[1].datos.clases, 13);
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('un error se vuelca en el acto, sin esperar al temporizador', () => {
+        // El caso: el proceso se está cayendo. El segundo que faltaba para el
+        // volcado no llega nunca, y la línea que explica la caída es la única
+        // que hacía falta.
+        registro.limpiar();
+        const dir = carpeta();
+        registro.abrirDiario(dir);
+
+        registro.anotar('main', 'corrida.empieza', { clases: 1 });
+        t.eq(registro.leerDelDisco().length, 0, 'lo normal espera y se junta');
+
+        registro.anotar('main', 'error.no-atrapado', { mensaje: 'se rompió' });
+        const enDisco = registro.leerDelDisco();
+        t.eq(enDisco.length, 2, 'y el error arrastra lo pendiente con él');
+        t.eq(enDisco[1].evento, 'error.no-atrapado');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('la descarga junta las corridas de antes, no solo la de ahora', () => {
+        // «Descargar el log de todas las ejecuciones» quiere decir esto: que la
+        // corrida de ayer siga estando cuando el problema aparece hoy.
+        registro.limpiar();
+        const dir = carpeta();
+        registro.abrirDiario(dir);
+        registro.anotar('main', 'app.arranca', { version: '1.0.0' });
+        registro.anotar('main', 'corrida.termina', { clases: 3 });
+        registro.volcar();
+
+        // Otra sesión: memoria nueva, mismo disco.
+        registro.limpiar();
+        registro.abrirDiario(dir);
+        registro.anotar('main', 'app.arranca', { version: '1.0.0' });
+        registro.anotar('main', 'corrida.empieza', { clases: 5 });
+
+        const bajada = carpeta();
+        const res = registro.escribir(bajada, { version: '1.0.0' });
+        t.ok(res.ok, res.error);
+        t.eq(res.lineas, 4, 'las dos de antes y las dos de ahora');
+
+        const md = fs.readFileSync(res.archivo, 'utf8');
+        t.ok(md.includes('corrida.termina'), 'sigue estando lo de la sesión anterior');
+        t.ok(md.includes('corrida.empieza'), 'y lo de esta');
+        t.ok(md.includes('| Corridas | 2 |'), 'y dice cuántas veces se abrió la app');
+
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.rmSync(bajada, { recursive: true, force: true });
+    });
+
+    t.test('el disco tiene su propio tope, más alto que el de memoria', () => {
+        // En memoria el tope existe porque el array compite con el modelo. En
+        // disco no compite con nada, y perder la corrida de ayer sí duele.
+        t.ok(registro.TOPE_EN_DISCO > registro.TOPE);
+
+        registro.limpiar();
+        const dir = carpeta();
+        registro.abrirDiario(dir);
+        for (let i = 0; i < registro.TOPE + 100; i++) registro.anotar('main', 'prueba', { i });
+        registro.volcar();
+
+        t.eq(registro.estado().lineas, registro.TOPE, 'la memoria se recortó');
+        t.eq(registro.leerDelDisco().length, registro.TOPE + 100, 'el disco las tiene todas');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('una línea cortada por la mitad no se lleva puesto el resto', () => {
+        // Pasa de verdad: un cierre justo en medio de un append. Perder una línea
+        // es aceptable; perder las otras veinte mil por una línea rota, no.
+        registro.limpiar();
+        const dir = carpeta();
+        registro.abrirDiario(dir);
+        registro.anotar('main', 'antes', {});
+        registro.volcar();
+        fs.appendFileSync(path.join(dir, 'diario.ndjson'), '{"ts":1,"evento":"cor\n');
+        registro.anotar('main', 'despues', {});
+        registro.volcar();
+
+        const enDisco = registro.leerDelDisco();
+        t.eq(enDisco.length, 2, 'la rota se saltea y las sanas quedan');
+        t.deep(enDisco.map(l => l.evento), ['antes', 'despues']);
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    t.test('sin carpeta donde guardar, se sigue anotando en memoria', () => {
+        // Que no se pueda escribir la historia no puede impedir que la app abra.
+        registro.limpiar();
+        const res = registro.abrirDiario('/no/se/puede/crear/esto');
+        t.ok(!res.ok, 'avisa que no pudo');
+        registro.anotar('main', 'algo', {});
+        t.eq(registro.estado().lineas, 1, 'y la app sigue andando igual');
+    });
+
+    t.group('el registro · el .md');
+
+    t.test('los problemas van arriba, antes del relato', () => {
+        // Quien abre esto busca por qué algo no anduvo. Con el relato primero,
+        // diagnosticar empieza por leer dos mil líneas para encontrar la que
+        // importa.
+        registro.limpiar();
+        registro.anotar('main', 'app.arranca', {});
+        for (let i = 0; i < 20; i++) registro.anotar('main', 'corrida.etapa', { i });
+        registro.anotar('main', 'corrida.se-cayo', { mensaje: 'whisper no contestó' });
+
+        const md = registro.texto({ version: '1.0.0' });
+        t.ok(md.indexOf('## Lo que salió mal') < md.indexOf('## Qué pasó'));
+        t.ok(md.includes('## Lo que salió mal (1)'), 'y dice cuántos son');
+        t.ok(md.indexOf('whisper no contestó') < md.indexOf('## Qué pasó'),
+            'el error está arriba, no solo enterrado en el relato');
+    });
+
+    t.test('una línea con error adentro también cuenta como problema', () => {
+        // No alcanza con mirar el nombre del evento: media app contesta
+        // `{ok: false, error}` sin ponerle "falla" al nombre.
+        registro.limpiar();
+        registro.anotar('main', 'visor.guarda', { ok: false, error: 'no se pudo escribir' });
+        t.ok(registro.texto({}).includes('## Lo que salió mal (1)'));
+    });
+
+    t.test('sin problemas lo dice, en vez de dejar la sección vacía', () => {
+        registro.limpiar();
+        registro.anotar('main', 'app.arranca', {});
+        const md = registro.texto({});
+        t.ok(md.includes('## Lo que salió mal (0)'));
+        t.ok(/Ninguna línea quedó marcada como error/.test(md));
+    });
+
+    t.test('el relato va en un bloque de código, para que markdown no lo coma', () => {
+        registro.limpiar();
+        registro.anotar('main', 'algo', { ruta: '…/Day_1/Clase 03' });
+        const md = registro.texto({});
+        const relato = md.slice(md.indexOf('## Qué pasó'));
+        t.ok(relato.includes('```'), 'abre y cierra el bloque');
     });
 };

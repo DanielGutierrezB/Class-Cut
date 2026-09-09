@@ -37,7 +37,7 @@ export async function showDoctor() {
     // A mano se contesta siempre, aunque la respuesta sea que no hay nada:
     // apretar un botón y que no pase nada se lee como que está roto.
     $('doctor-update').onclick = () => buscar(true);
-    $('doctor-log').onclick = descargarLog;
+    $('doctor-log').onclick = () => descargarLog($('doctor-log'));
 }
 
 /**
@@ -46,17 +46,24 @@ export async function showDoctor() {
  * El botón se apaga mientras escribe y dice qué pasó al volver: escribir es
  * instantáneo, pero si falla —disco lleno, permisos— hay que enterarse, y un
  * botón que no contesta se aprieta tres veces.
+ *
+ * Recibe cuál botón porque hay dos: el de la cabecera, que es el que se usa, y
+ * el de adentro de Diagnóstico, que quedó porque ahí está la explicación de qué
+ * es el diario y qué no lleva.
+ *
+ * @param {HTMLElement} boton
  */
-async function descargarLog() {
-    const boton = $('doctor-log');
+export async function descargarLog(boton) {
+    const dice = boton.textContent;
     boton.disabled = true;
     boton.textContent = 'Escribiendo…';
     const res = await window.cc.registroDescargar();
     boton.disabled = false;
-    boton.textContent = 'Descargar Log';
+    boton.textContent = dice;
     toast(res.ok
-        ? `Registro en Descargas · ${res.lineas} líneas`
-        : `No se pudo escribir el registro: ${res.error}`);
+        ? `Log en Descargas · ${res.lineas} líneas de todas las corridas`
+        : `No se pudo escribir el log: ${res.error}`,
+        res.ok ? 'bien' : undefined);
 }
 
 /** El renglón dice por dónde va el criterio, que ahora se elige en Ajustes. */

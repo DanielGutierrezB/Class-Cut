@@ -141,7 +141,16 @@ process.on('unhandledRejection', reason => {
 });
 
 app.whenReady().then(() => {
-    anotar('app.arranca', { version: appVersion(), electron: process.versions.electron, arch: process.arch });
+    // Lo primero de todo, antes de anotar nada: el diario en disco. Si se abriera
+    // después, las líneas del arranque —que son las que explican una app que no
+    // llega ni a mostrar la ventana— quedarían solo en memoria.
+    const diario = registro.abrirDiario(app.getPath('userData'));
+    anotar('app.arranca', {
+        version: appVersion(),
+        electron: process.versions.electron,
+        arch: process.arch,
+        diario: diario.ok ? `guardando (${diario.teniamos} línea(s) de antes)` : `sin guardar: ${diario.error}`
+    });
     servirMedia();
     createWindow();
     app.on('activate', () => {
@@ -156,7 +165,13 @@ app.on('window-all-closed', () => {
 // El modelo es un proceso aparte y no se entera de que la app cerró: sin esto
 // queda cargado ocupando memoria hasta que alguien lo mate a mano. (La grabación
 // en curso, si hay, la cierra su propio puente: `ipc/grabar.js`.)
-app.on('before-quit', () => { ia.parar(); });
+app.on('before-quit', () => {
+    ia.parar();
+    // Y el último segundo del diario, que si no se pierde. Es el segundo más
+    // interesante cuando alguien cierra la app porque se le quedó colgada.
+    anotar('app.cierra', {});
+    registro.volcar();
+});
 
 // ─── Puente con la ventana ────────────────────────────────────────────
 
@@ -196,9 +211,9 @@ ipcMain.handle('registro-descargar', () => {
         plataforma: process.platform,
         arquitectura: process.arch
     });
-    // Se revela y no se abre: abrir un .txt lanza el editor de texto del
-    // sistema encima de la app, y lo que hace falta es tenerlo a mano para
-    // arrastrarlo a un mail.
+    // Se revela y no se abre: abrirlo lanza el editor de texto del sistema
+    // encima de la app, y lo que hace falta es tenerlo a mano para arrastrarlo
+    // a un mail o a un chat.
     if (res.ok) shell.showItemInFolder(res.archivo);
     return res;
 });
