@@ -7,8 +7,8 @@
  * Carga la carpeta, espera a que la tabla termine de medir, corre el JS que se
  * le pase, guarda el PNG y sale. Para atajos de teclado hay `--key=Space` (una
  * tecla de verdad, con su acción por defecto), `--click=x,y[,cuántos]` para
- * clics de verdad (con su tercer número, un doble clic) y `--js-despues=` para
- * mirar cómo quedó todo.
+ * clics de verdad (con su tercer número, un doble clic), `--drag=x1,y1,x2,y2`
+ * para arrastres, y `--js-despues=` para mirar cómo quedó todo.
  *
  * `--responder=N` contesta los diálogos de varias salidas con esa opción, sin
  * abrirlos: es la única forma de probar desde afuera qué hace la ventana con
@@ -105,6 +105,31 @@ async function pase(win, shot, medida) {
             win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: n });
         }
         await new Promise(r => setTimeout(r, 300));
+    }
+
+    // `--drag=x1,y1,x2,y2` arrastra de un punto al otro, con pasos intermedios.
+    //
+    // Por lo mismo que `--click`, y más todavía: un arrastre fabricado con
+    // `new PointerEvent` no tiene un puntero activo detrás, así que
+    // `setPointerCapture` tira y el gesto no arranca nunca. Es la única forma de
+    // probar desde afuera las líneas de IN y OUT del texto, que se mueven con el
+    // mouse apretado y no con un clic.
+    const drag = argValue('drag');
+    if (drag) {
+        const [x1, y1, x2, y2] = drag.split(',').map(Number);
+        const pasos = 12;
+        win.webContents.sendInputEvent({ type: 'mouseDown', x: x1, y: y1, button: 'left', clickCount: 1 });
+        for (let i = 1; i <= pasos; i++) {
+            const t = i / pasos;
+            win.webContents.sendInputEvent({
+                type: 'mouseMove',
+                x: Math.round(x1 + (x2 - x1) * t),
+                y: Math.round(y1 + (y2 - y1) * t)
+            });
+            await new Promise(r => setTimeout(r, 16));
+        }
+        win.webContents.sendInputEvent({ type: 'mouseUp', x: x2, y: y2, button: 'left', clickCount: 1 });
+        await new Promise(r => setTimeout(r, 400));
     }
 
     // Un atajo de teclado no se puede probar con `new KeyboardEvent`: un evento
