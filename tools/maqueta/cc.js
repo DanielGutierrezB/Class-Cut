@@ -588,6 +588,122 @@ function comentarSobre(toma, desdeSec, hastaSec, comentario) {
     return toma;
 }
 
+/* ─── El empalme con la toma anterior ────────────────────────────────────────
+ *
+ * Lo que sirve `engine/empalme.js` cuando una toma cierra: el profesor volvió a
+ * decir al retomar lo que ya había dicho, y hay un ajuste de un clic para
+ * sacarlo. La pantalla tiene que dibujar el tramo subrayado como aviso y los dos
+ * botones, «Ajustar corte» y «Descartar ajuste».
+ *
+ * **La forma es la del motor y los tiempos son de verdad.** El tramo va en horas
+ * de palabra —así lo ubica el resto de la pantalla, igual que los comentarios y
+ * los marcadores— y sale de las palabras que la toma dice acá, no escrito a mano:
+ * un subrayado que señala otra frase es justo el error que hay que poder ver.
+ *
+ * Lo que la maqueta no puede tener es que las dos tomas se repitan de verdad: el
+ * guion de arriba es genérico y las tomas se llenan encadenando renglones. O sea
+ * que el «porque» está escrito y el tramo es real. Alcanza para dibujar, que es
+ * para lo que está esto.
+ *
+ * Y se rehace al servir, como allá (`paraLaPantalla` se recalcula en cada
+ * lectura): si el corte que la sugerencia señala ya no está en la toma anterior
+ * —porque se aceptó el ajuste, o porque alguien arrastró el borde— la sugerencia
+ * desaparece sola. Eso es lo que hay que poder mirar después de apretar el botón.
+ */
+
+const EMPALME_MINIMO_RECORTE_MS = 1500;
+const EMPALME_MINIMO_QUEDA_MS = 3000;
+
+/** Un tramo para subrayar, en horas de palabra: la forma de `empalme.tramo`. */
+function tramoDe(id, palabras) {
+    if (!palabras || !palabras.length) return null;
+    return {
+        toma: id,
+        desdeMs: palabras[0].t,
+        hastaMs: palabras[palabras.length - 1].t,
+        texto: palabras.map(w => w.texto).join(' ')
+    };
+}
+
+/**
+ * Dónde abre la última frase que se puede recortar de una toma.
+ *
+ * Se busca un arranque de frase y no una palabra cualquiera porque es lo que hace
+ * el motor: cortar a mitad de frase dejaría la toma anterior colgando, y ahí la
+ * sugerencia no sale. Con los mismos dos mínimos, para que el ajuste que la
+ * maqueta ofrece sea uno de los que la app ofrecería.
+ */
+function abreLaUltimaFrase(toma) {
+    const dichas = toma.palabras || [];
+    for (let i = dichas.length - 1; i > 0; i--) {
+        if (!/[.!?…]$/.test(dichas[i - 1].texto)) continue;
+        if (toma.outMs - dichas[i].t < EMPALME_MINIMO_RECORTE_MS) continue;
+        if (dichas[i].t - toma.inMs < EMPALME_MINIMO_QUEDA_MS) break;
+        return dichas[i];
+    }
+    return null;
+}
+
+/**
+ * El empalme de `actual` con `previa`, tal como lo sirve el motor.
+ *
+ * @param {object} pagado lo que contestó el modelo y quedó guardado en la toma:
+ *   contra quién y desde qué palabra. Es lo único que allá se guarda, porque es
+ *   lo único que se pagó.
+ */
+function empalmeDe(previa, actual, pagado) {
+    if (!previa || !actual || !pagado) return null;
+    if (actual.outMs == null || actual.descartada || previa.descartada) return null;
+
+    const vista = {
+        contra: previa.id,
+        parecido: pagado.parecido,
+        estado: 'listo',
+        porque: '',
+        sugerencia: null
+    };
+
+    if (actual.empalmeDescartado === previa.id) {
+        vista.estado = 'descartado';
+        vista.porque = 'Descartaste el ajuste de este empalme.';
+        return vista;
+    }
+
+    const dichas = previa.palabras || [];
+    const corte = dichas.find(w => w.t === pagado.paredMs);
+    // La palabra del corte ya no está en la toma: el borde se movió y lo que
+    // decía la sugerencia dejó de ser cierto.
+    if (!corte) return vista;
+
+    const repetido = dichas.filter(w => w.t >= corte.t);
+    vista.sugerencia = {
+        origen: 'modelo',
+        porque: pagado.porque,
+        enLaAnterior: tramoDe(previa.id, repetido),
+        enEsta: tramoDe(actual.id, (actual.palabras || []).slice(0, repetido.length)),
+        ajuste: {
+            tipo: 'borde',
+            toma: previa.id,
+            borde: 'out',
+            paredMs: corte.t,
+            quitaSec: Math.round((previa.outMs - corte.t) / 100) / 10,
+            palabras: repetido.length
+        },
+        descartar: { tipo: 'descartar-ajuste', toma: actual.id, contra: previa.id }
+    };
+    return vista;
+}
+
+/** El empalme de todas las tomas de la sesión, rehecho contra el estado de ahora. */
+function empalmesEnVivo(tomas) {
+    for (const toma of tomas) toma.empalme = null;
+    const pagado = enMemoria.empalmePagado;
+    if (!pagado) return;
+    const actual = tomas.find(t => t.id === pagado.toma);
+    const previa = tomas.find(t => t.id === pagado.contra);
+    if (actual) actual.empalme = empalmeDe(previa, actual, pagado);
+}
+
 // Cuánto lleva grabando la sesión, y en qué segundo abre la toma que sigue en
 // curso. Van juntos acá arriba porque el cero en vivo se calcula restando el
 // primero a la hora de ahora: si se separan, los relojes y las palabras de la
@@ -598,9 +714,38 @@ const ABRE_LA_ULTIMA = 250;
 /**
  * La sesión grabando. Sin argumento cuelga de `ceroDeLaSesion`, que es lo que
  * decide si los relojes de arriba están quietos o corriendo.
+ *
+ * Se arma UNA vez por cero y queda guardada (`enMemoria.sesion`). Antes se
+ * rearmaba en cada llamada, y eso hacía que la maqueta mintiera en lo peor:
+ * descartar una toma, comentar o mover un borde se dibujaba un instante y
+ * desaparecía en el repintado siguiente, porque el estado que contestaba el
+ * puente era otra vez el de fábrica. Del lado de la app el motor guarda la
+ * sesión, así que acá también.
  */
 function sesionEnVivo(ceroMs) {
-    const cero = ceroMs == null ? ceroDeLaSesion : ceroMs;
+    if (ceroMs != null) return armarSesion(ceroMs);
+    if (!enMemoria.sesion || enMemoria.sesion.ceroMs !== ceroDeLaSesion) {
+        enMemoria.sesion = armarSesion(ceroDeLaSesion);
+    }
+    // El temario se pega aparte y la lengua depende de qué tomas quedan, así que
+    // los dos se rehacen al servir: es lo que hace el motor en cada `resumen`.
+    enMemoria.sesion.temario = enMemoria.temario;
+    enMemoria.sesion.lengua = agregadoDeLengua(enMemoria.sesion.tomas);
+    empalmesEnVivo(enMemoria.sesion.tomas);
+    const abierta = enMemoria.sesion.tomas.find(t => t.outMs == null);
+    enMemoria.sesion.abierta = abierta ? abierta.id : null;
+    enMemoria.sesion.historia = {
+        atras: enMemoria.historia.atras.length,
+        adelante: enMemoria.historia.adelante.length,
+        queAtras: ultimo(enMemoria.historia.atras),
+        queAdelante: ultimo(enMemoria.historia.adelante)
+    };
+    return enMemoria.sesion;
+}
+
+const ultimo = pila => (pila.length ? pila[pila.length - 1].que : '');
+
+function armarSesion(cero) {
     const tomas = [
         // Dos comentarios en la misma toma, y no uno: con uno solo el
         // subrayado se explica solo, y lo que hay que poder mirar es cómo se
@@ -654,6 +799,21 @@ function sesionEnVivo(ceroMs) {
         // sesión" le seguía sumando segundos, o sea un ritmo cayéndose sola.
         tomaDe(3, ABRE_LA_ULTIMA, CORRIDOS - ABRE_LA_ULTIMA, { outMs: null, lengua: null }, cero)
     ];
+
+    // El empalme de la 2 con la 1, que es lo que el modelo contestó cuando la 2
+    // cerró. Se guarda acá y no en la toma porque es lo único que allá queda
+    // guardado —lo que se pagó—: la sugerencia se rehace al servir contra las
+    // palabras de ese momento. La 2 ya venía con la nota "Repite el arranque",
+    // así que es la que corresponde.
+    const corte = abreLaUltimaFrase(tomas[0]);
+    enMemoria.empalmePagado = corte ? {
+        toma: tomas[1].id,
+        contra: tomas[0].id,
+        parecido: 0.62,
+        paredMs: corte.t,
+        porque: 'Las dos tomas explican que hay que darle contexto de todo el proyecto y no un pedido puntual.'
+    } : null;
+
     return {
         secuencia: '05_curso-de-prueba_2026-09-08_15-20-00',
         clase: 5, parte: 1, curso: '2609_curso-de-prueba',
@@ -676,8 +836,137 @@ function sesionEnVivo(ceroMs) {
         // Cómo viene hablando, agregado sobre las tomas que quedan. Va calculado
         // y no escrito a mano porque del otro lado también lo calcula el motor.
         lengua: agregadoDeLengua(tomas),
+        historia: { atras: 0, adelante: 0, queAtras: '', queAdelante: '' },
         tomas
     };
+}
+
+/* ─── Cambiar la clase en curso, y volver atrás ──────────────────────────
+ *
+ * Lo mismo que `editarEnMemoria` hace con una clase ya grabada, pero sobre la
+ * sesión viva: los cambios se aplican de verdad y se pueden deshacer, porque si
+ * no la mitad de lo que hay para mirar en esta pantalla no se puede mirar. Es
+ * una copia de la forma del motor (`editar`, `eliminar` y `engine/deshacer.js`)
+ * y no de sus reglas: acá alcanza con que el estado cambie donde la app lo
+ * cambia, y quién puede hacer qué lo decide allá.
+ */
+
+function tomaEnVivo(id) {
+    return sesionEnVivo().tomas.find(t => t.id === id) || null;
+}
+
+const fotoDeToma = t => (t ? JSON.parse(JSON.stringify(t)) : null);
+
+/**
+ * Lo que contesta el puente es una COPIA, como del otro lado.
+ *
+ * El `contextBridge` de Electron manda todo por un canal, así que lo que llega a
+ * la ventana es una foto del estado en el momento de contestar y no el objeto
+ * que el motor sigue tocando. Acá se devolvía el objeto vivo, y eso escondía una
+ * familia entera de defectos: cualquier respuesta atrasada traía igual los
+ * cambios de después —eran el mismo objeto—, así que dos gestos rápidos que en
+ * la app pueden dejar la pantalla un momento sin el segundo cambio, en la
+ * maqueta no fallaban nunca. Una maqueta que no puede mostrar el bug no sirve
+ * para probar el arreglo.
+ */
+const porElPuente = x => (x == null ? x : JSON.parse(JSON.stringify(x)));
+
+function manoEnVivo(cambio) {
+    const c = cambio || {};
+    const sesion = sesionEnVivo();
+    const toma = tomaEnVivo(c.toma);
+    if (!toma) return sesion;
+
+    const antes = fotoDeToma(toma);
+    if (c.tipo === 'vista') toma.vista = c.vista;
+    else if (c.tipo === 'nota') toma.comentario = String(c.texto || '');
+    else if (c.tipo === 'descartar') toma.descartada = Boolean(c.descartada);
+    else if (c.tipo === 'comentar') {
+        toma.comentarios = (toma.comentarios || []).concat([{
+            desdeMs: Number(c.desdeMs), hastaMs: Number(c.hastaMs),
+            texto: String(c.texto || ''), comentario: String(c.comentario || '')
+        }]);
+    } else if (c.tipo === 'borrar-comentario') {
+        toma.comentarios = (toma.comentarios || []).filter((_x, i) => i !== c.indice);
+    } else if (c.tipo === 'descartar-ajuste') {
+        // Contra quién se descartó, y no un simple sí: si la toma pasa a empalmar
+        // con otra, la pregunta es otra y esta marca no tiene que valer.
+        //
+        // Y en la TOMA, no en un campo suelto de `enMemoria`, porque es donde lo
+        // guarda el motor (`empalme.descartar`, que escribe `empalme.descartado`).
+        // Lo que cuelga de la toma entra en la foto de `fotoDeToma`, así que
+        // descartar se deshace con Cmd-Z como todo lo demás; en un campo aparte
+        // la maqueta mentía justo en eso.
+        toma.empalmeDescartado = Number(c.contra);
+    } else if (c.tipo === 'borde') {
+        repartirEnMemoria(toma, c.borde, Number(c.paredMs));
+    } else if (c.tipo === 'reabrir') {
+        toma.outMs = null;
+        toma.despues = [];
+    } else if (c.tipo === 'eliminar') {
+        if (!toma.descartada) return sesion;
+        sesion.tomas.splice(sesion.tomas.indexOf(toma), 1);
+    }
+
+    anotarEnMemoria({
+        que: comoSeLlamaEnMemoria(c),
+        id: toma.id,
+        antes,
+        despues: c.tipo === 'eliminar' ? null : fotoDeToma(toma)
+    });
+    return sesionEnVivo();
+}
+
+function comoSeLlamaEnMemoria(c) {
+    const cual = `la toma ${c.toma}`;
+    if (c.tipo === 'vista') return `poner ${cual} en ${c.vista}`;
+    if (c.tipo === 'nota') return `la nota de ${cual}`;
+    if (c.tipo === 'descartar') return `${c.descartada ? 'descartar' : 'recuperar'} ${cual}`;
+    if (c.tipo === 'comentar') return `comentar «${String(c.texto || '').slice(0, 30)}»`;
+    if (c.tipo === 'borrar-comentario') return `quitar un comentario de ${cual}`;
+    if (c.tipo === 'descartar-ajuste') return `descartar el ajuste de ${cual}`;
+    if (c.tipo === 'borde') return `mover el ${c.borde === 'in' ? 'IN' : 'OUT'} de ${cual}`;
+    if (c.tipo === 'eliminar') return `eliminar ${cual}`;
+    if (c.tipo === 'cerrar') return `cerrar ${cual}`;
+    return `el cambio en ${cual}`;
+}
+
+function anotarEnMemoria(paso) {
+    enMemoria.historia.atras.push(paso);
+    enMemoria.historia.adelante.length = 0;
+}
+
+function volverEnMemoria(hacia) {
+    const desde = hacia === 'adelante' ? enMemoria.historia.adelante : enMemoria.historia.atras;
+    const a = hacia === 'adelante' ? enMemoria.historia.atras : enMemoria.historia.adelante;
+    const paso = desde[desde.length - 1];
+    if (!paso) return { ok: false, estado: sesionEnVivo() };
+
+    const foto = hacia === 'adelante' ? paso.despues : paso.antes;
+    const tomas = sesionEnVivo().tomas;
+    if (foto && foto.outMs == null && tomas.some(t => t.id !== paso.id && t.outMs == null)) {
+        return {
+            ok: false,
+            error: `No puedo ${hacia === 'adelante' ? 'rehacer' : 'deshacer'} «${paso.que}»: ` +
+                'mientras tanto se abrió otra toma, y dos tomas abiertas a la vez rompen ' +
+                'el ciclo de señales. Cerrá la de ahora y volvé a intentar.',
+            estado: sesionEnVivo()
+        };
+    }
+
+    desde.pop();
+    a.push(paso);
+    const donde = tomas.findIndex(t => t.id === paso.id);
+    if (!foto) {
+        if (donde >= 0) tomas.splice(donde, 1);
+    } else if (donde >= 0) {
+        for (const clave of Object.keys(tomas[donde])) delete tomas[donde][clave];
+        Object.assign(tomas[donde], foto);
+    } else {
+        const detras = tomas.findIndex(t => t.id > paso.id);
+        tomas.splice(detras === -1 ? tomas.length : detras, 0, foto);
+    }
+    return { ok: true, que: paso.que, estado: sesionEnVivo() };
 }
 
 function grabadas() {
@@ -736,7 +1025,13 @@ function muestrarioDeVistas(hecha) {
 
 /* ─── Guardar sin guardar ────────────────────────────────────────────────── */
 
-const enMemoria = { notas: {}, planes: {}, temario: null };
+const enMemoria = {
+    notas: {}, planes: {}, temario: null,
+    // La sesión que se está grabando, para que lo que se le hace quede hecho, y
+    // lo que se le hizo, para poder volver (ver `sesionEnVivo`).
+    sesion: null,
+    historia: { atras: [], adelante: [] }
+};
 
 /**
  * El temario pegado y su cobertura, de mentira.
@@ -815,6 +1110,24 @@ const listaGrabadas = () => (yaGrabadas || (yaGrabadas = grabadas()));
  * de la toma están acá, así que es repartir de nuevo lo mismo— y reabrir sobre
  * una clase cerrada tiene que fallar acá también, porque en la app falla.
  */
+/**
+ * Las tres listas juntas, el borde corrido, y a repartir de nuevo: es lo que hace
+ * `moverBordeGuardado` allá, en cuatro líneas y sin sus reglas. Acá alcanza con
+ * que la maqueta muestre el texto repartido; lo que decide qué borde es legal se
+ * prueba con el motor de verdad.
+ *
+ * Lo usan las dos: la clase en curso y una ya grabada. Es lo mismo que del otro
+ * lado, donde el reparto vive en un solo sitio por el mismo motivo.
+ */
+function repartirEnMemoria(toma, borde, paredMs) {
+    const guardadas = (toma.antes || []).concat(toma.palabras || [], toma.despues || []);
+    if (borde === 'in') toma.inMs = paredMs;
+    else toma.outMs = paredMs;
+    toma.antes = guardadas.filter(w => w.t < toma.inMs);
+    toma.palabras = guardadas.filter(w => w.t >= toma.inMs && (toma.outMs == null || w.t < toma.outMs));
+    toma.despues = toma.outMs == null ? [] : guardadas.filter(w => w.t >= toma.outMs);
+}
+
 function editarEnMemoria(json, cambio) {
     const c = cambio || {};
     const clase = listaGrabadas().find(x => x.archivos.json === json);
@@ -833,16 +1146,7 @@ function editarEnMemoria(json, cambio) {
     } else if (c.tipo === 'borrar-comentario') {
         toma.comentarios = (toma.comentarios || []).filter((_x, i) => i !== c.indice);
     } else if (c.tipo === 'borde') {
-        // Las tres listas juntas, el borde corrido, y a repartir de nuevo: es lo
-        // que hace `moverBordeGuardado` allá, en cuatro líneas y sin sus reglas.
-        // Acá alcanza con que la maqueta muestre el texto repartido; lo que decide
-        // qué borde es legal se prueba con el motor de verdad.
-        const guardadas = toma.antes.concat(toma.palabras, toma.despues);
-        if (c.borde === 'in') toma.inMs = Number(c.paredMs);
-        else toma.outMs = Number(c.paredMs);
-        toma.antes = guardadas.filter(w => w.t < toma.inMs);
-        toma.palabras = guardadas.filter(w => w.t >= toma.inMs && w.t < toma.outMs);
-        toma.despues = guardadas.filter(w => w.t >= toma.outMs);
+        repartirEnMemoria(toma, c.borde, Number(c.paredMs));
     } else {
         return {
             ok: false,
@@ -1011,30 +1315,48 @@ window.cc = {
         return { peaks: picos(fromSec, toSec, payload.buckets || 900), durationSec: DURACION_SEC, fromSec, toSec };
     },
 
-    grabarIniciar: async () => ({ ok: true, estado: sesionEnVivo() }),
+    grabarIniciar: async () => ({ ok: true, estado: porElPuente(sesionEnVivo()) }),
     grabarPcm: () => {},
-    grabarClaqueta: async () => ({ ok: true, estado: sesionEnVivo() }),
+    // El estado pelado, como el canal de verdad: la pantalla se lo guarda tal
+    // cual (`vista.estado = await …`), así que envuelto en `{ok, estado}` dejaba
+    // la vista con un objeto que no era un estado y la pantalla se vaciaba.
+    grabarClaqueta: async () => porElPuente(sesionEnVivo()),
     // Tarda: en la app el motor guarda la lista y le pregunta al modelo, y lo que
     // hay que poder mirar es que el panel no se rompa mientras eso pasa.
     grabarTemario: async texto => {
         enMemoria.temario = temarioDe(texto);
         await espera(400);
-        return sesionEnVivo();
+        return porElPuente(sesionEnVivo());
     },
-    grabarEditar: async () => ({ ok: true, estado: sesionEnVivo() }),
+    grabarEditar: async cambio => porElPuente(manoEnVivo(cambio)),
     grabarEditarGrabada: async (json, cambio) => { await espera(120); return editarEnMemoria(json, cambio); },
-    grabarCerrarToma: async () => ({ ok: true, estado: sesionEnVivo() }),
+    grabarCerrarToma: async () => {
+        const abierta = sesionEnVivo().tomas.find(t => t.outMs == null);
+        if (!abierta) return porElPuente(sesionEnVivo());
+        const antes = fotoDeToma(abierta);
+        // En su última palabra, como `finDeToma` del otro lado.
+        const ultima = (abierta.palabras || [])[(abierta.palabras || []).length - 1];
+        abierta.outMs = ultima ? ultima.t + 400 : abierta.inMs + 1000;
+        abierta.despues = [];
+        anotarEnMemoria({
+            que: comoSeLlamaEnMemoria({ tipo: 'cerrar', toma: abierta.id }),
+            id: abierta.id, antes, despues: fotoDeToma(abierta)
+        });
+        return porElPuente(sesionEnVivo());
+    },
+    grabarDeshacer: async () => porElPuente(volverEnMemoria('atras')),
+    grabarRehacer: async () => porElPuente(volverEnMemoria('adelante')),
     // Sin `?grabando` contesta null, que es como abre la app: sin nada en curso.
     // Con `?grabando` contesta la sesión, así la pantalla la encuentra sola por
     // el mismo camino que del otro lado y no hay que empujarle un estado a mano.
-    grabarEstado: async () => (abreGrabando() ? sesionEnVivo() : null),
+    grabarEstado: async () => (abreGrabando() ? porElPuente(sesionEnVivo()) : null),
     grabarVistas: async () => VISTAS,
     grabarListar: async () => listaGrabadas(),
     grabarRegenerar: async () => ({ ok: true }),
-    grabarTerminar: async () => Object.assign(sesionEnVivo(), {
+    grabarTerminar: async () => porElPuente(Object.assign(sesionEnVivo(), {
         grabando: false,
         archivos: archivosDeNotas(CURSO, sesionEnVivo().secuencia)
-    }),
+    })),
     onGrabarAviso: cb => { oyentes['grabar-aviso'] = cb; },
 
     reveal: async t => { window.alert(`Mostraría en el Finder:\n${t}`); return { ok: true }; },

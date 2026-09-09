@@ -1,0 +1,73 @@
+/* Class Cut — la toma elegida, o sea dónde caen P, R, S, M y X.
+   Va detrás de `grabar.css`, que es de donde salen `.toma` y su cabecera.
+
+   En su propia hoja y no dentro de `grabar.css` por lo mismo que
+   `grabar-analisis.css`: es una pieza que se agregó entera y de una vez, y así
+   se lee como lo que es —el dibujo de UNA idea, con su explicación al lado— en
+   vez de quedar repartida entre las reglas de la ficha.
+
+   ── Por qué hay algo que dibujar ────────────────────────────────────────────
+   Las teclas de vista actuaban siempre sobre la toma abierta, así que hacer clic
+   en la toma 1 y apretar M cambiaba la 4. Ahora la toma se elige con un clic
+   (`elegir` en `src/js/grabar/index.js`) y eso obliga a esto: un atajo que actúa
+   sobre algo que no se ve es la misma sorpresa de antes con otra ropa. Lo que se
+   dibuja acá no es un adorno, es la mitad de la función.
+
+   La marca está SIEMPRE sobre la toma que las teclas van a tocar —la elegida a
+   mano, o la abierta mientras nadie elija nada—, así que dice lo mismo en los dos
+   casos: "acá cae lo próximo que aprietes". Es lo que la hace aprendible sin
+   explicarla: se ve mudarse al hacer clic en otra ficha.
+
+   ── Por qué un anillo neutro y no un color ──────────────────────────────────
+   En esta pantalla los colores ya están todos hablando, y ninguno estaba libre:
+
+     · los cinco de las vistas tiñen la ficha entera —es así como se encuentran
+       las tomas del screen recorder sin leer la lista—, así que la marca no puede
+       ser un color de ficha: sobre `MG` diría "esta es MG";
+     · el azul es "esto está pasando ahora", que es el latido de la toma abierta
+       (`.toma.es-abierta`), y la elegida puede no ser la abierta: justo el caso en
+       que las dos marcas tienen que poder distinguirse de un vistazo, y también
+       el caso en que se superponen —la abierta elegida lleva las dos—, así que la
+       de acá no puede ser otro azul;
+     · el amarillo es de los comentarios, del subrayado y de la tarjeta al margen,
+       y ese contraste ya se peleó y se aprobó contra los cinco fondos
+       (`--subrayado` en `grabar.css`): pedirle prestado el amarillo haría que
+       "elegida" y "comentada" se lean como parientes, y no lo son.
+
+   Queda la tinta del texto, que es lo único neutro que hay, y alcanza: sobre los
+   cinco cuerpos teñidos —el más claro es el de `MG`, #1a2f33— un anillo casi
+   blanco es lo más visible de la lista sin competir con nada de lo anterior.
+
+   ── Por qué `outline` y no `border` ─────────────────────────────────────────
+   El borde de la ficha ya es del color de su vista, y engordarlo o cambiárselo
+   sería pisar ese código. `outline` se dibuja aparte, no ocupa lugar en la caja
+   —la ficha no se mueve ni un píxel al elegirla, que con veinte tomas en una
+   lista que crece sola importa— y con el `offset` queda por fuera del canto, sin
+   tocar la banda de color de la cabecera. */
+
+.toma.es-elegida {
+    outline: 2px solid color-mix(in srgb, var(--text) 65%, transparent);
+    /* Hacia afuera, en el hueco de 12px que la lista deja entre fichas: por
+       dentro se comería el borde teñido y por encima de la cabecera se leería
+       como un recuadro de dos colores. */
+    outline-offset: 2px;
+}
+
+/* Y lo dice con una palabra, porque un anillo solo no explica QUÉ le pasa a esta
+   ficha y no a las otras. Va pegado al número —"Toma 3 · teclas"— y no en un
+   rincón: es de esa toma, no de la lista.
+
+   La forma es la de "descartada", que es la otra etiqueta de esta cabecera
+   (`.toma-descartada` en `grabar.css`): mismo tamaño, misma caja alta y mismo
+   espaciado, para que las dos se lean como lo que son —el estado de la ficha— y
+   no como dos inventos distintos. La tinta va un poco más entera que allá: esa
+   está apagada a propósito porque una descartada no va al XML, y esto es lo
+   contrario, es dónde va a caer lo próximo que se apriete. */
+.toma.es-elegida .toma-n::after {
+    content: ' · teclas';
+    font-weight: 400;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: color-mix(in srgb, var(--tinta) 78%, transparent);
+}

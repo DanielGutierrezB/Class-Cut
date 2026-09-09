@@ -11,6 +11,12 @@
     <!-- Detrás de grabar.css y no antes: sus reglas salieron de ahí tal cual, y
          moverlas de orden cambiaría la cascada que ya está aprobada. -->
     <link rel="stylesheet" href="css/grabar-analisis.css">
+    <!-- La marca de la toma elegida, también detrás de grabar.css: se apoya en
+         `.toma` y en su cabecera, y lo único que hace es agregarles algo. -->
+    <link rel="stylesheet" href="css/grabar-teclas.css">
+    <!-- El aviso de que una toma repite lo que la anterior ya decía, con su
+         ajuste. Detrás por lo mismo: le agrega una marca al texto de la toma. -->
+    <link rel="stylesheet" href="css/grabar-empalme.css">
 </head>
 <body>
 <div class="app">
@@ -71,11 +77,27 @@
                     <span class="grabar-curso" id="grabar-curso" title="El nombre de la carpeta elegida: una carpeta es un curso">—</span>
                 </div>
                 <div class="grabar-acciones">
-                    <button class="btn btn-ghost" id="grabar-transcript" type="button" aria-pressed="true"
-                        title="El texto de cada toma: lo que se dijo, en gris lo de justo antes y justo después, y las líneas de IN y OUT. Apagado, de cada toma quedan la cabecera, la vista, la nota y los comentarios.">Ver Transcript</button>
+                    <!-- Deshacer y rehacer con los mismos rótulos y el mismo orden
+                         que en Revisar cortes. El historial vive en el motor, que
+                         es quien escribe el XML (ver `engine/deshacer.js`). -->
+                    <span class="grabar-historia">
+                        <button class="btn btn-ghost btn-inline" id="grabar-deshacer" type="button" disabled>↶</button>
+                        <button class="btn btn-ghost btn-inline" id="grabar-rehacer" type="button" disabled>↷</button>
+                    </span>
+                    <button class="btn btn-ghost" id="grabar-descartadas" type="button" aria-pressed="false" hidden
+                        title="Las descartadas siguen en la sesión y se pueden recuperar: esto solo las saca de la vista.">Ocultar descartadas</button>
+                    <button class="btn btn-ghost" id="grabar-compact" type="button" aria-pressed="false"
+                        title="Esconde las palabras de orilla: el gris de justo antes del IN y justo después del OUT. El guion de la toma se queda entero.">Compact</button>
                     <button class="btn btn-ghost" id="grabar-carpeta">Elegir carpeta…</button>
                     <button class="btn btn-ghost grabar-claqueta-btn" id="grabar-claqueta-ahora" disabled
                         title="Marcar la claqueta ahora, a mano. En post se ajusta sola contra el audio.">Claqueta</button>
+                    <!-- Al lado de "Claqueta" y por el mismo motivo: es el otro
+                         botón que se aprieta en medio de la clase, apurado y sin
+                         mirar, así que tiene que estar siempre en el mismo pixel.
+                         El "Cerrar acá" de la tarjeta sigue estando: ese dice en
+                         qué toma cae, pero la tarjeta se mueve con el scroll. -->
+                    <button class="btn btn-ghost" id="grabar-cerrar-toma" type="button" hidden
+                        title="Cierra la toma abierta en su última palabra, sin esperar el «Pausa». Se deshace con Cmd-Z.">Cerrar toma</button>
                     <button class="btn btn-primary" id="grabar-iniciar" disabled>Iniciar grabación</button>
                     <button class="btn btn-ghost" id="grabar-terminar" hidden>Terminar</button>
                 </div>
@@ -90,7 +112,9 @@
             </div>
 
             <div class="grabar-cols">
-                <div class="grabar-izq">
+                <!-- Con `id` porque es el que scrollea, y `pegado.js` lo tiene que
+                     poder agarrar para pegarlo al final de la lista de tomas. -->
+                <div class="grabar-izq" id="grabar-izq">
                     <section class="clase es-en-curso" id="grabar-en-curso" aria-label="La clase que se está grabando">
                         <header class="clase-cabeza" id="grabar-en-curso-cabeza" hidden></header>
                         <div class="grabar-tomas" id="grabar-tomas"></div>

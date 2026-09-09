@@ -13,7 +13,7 @@
  * único que la ventana puede saber.
  */
 
-import { $, showView, toast, anotar, estaEscribiendo, recordar, recordado } from '../chrome.js';
+import { $, showView, toast, anotar, estaEscribiendo, recordar, recordado, olvidar } from '../chrome.js';
 import { fmtHora, plural } from '../formato.js';
 import { marcarPaso, PASOS } from '../pasos.js';
 import * as oido from './oido.js';
@@ -21,6 +21,11 @@ import * as ojo from './ojo.js';
 import * as tomas from './tomas.js';
 import * as grabadas from './grabadas.js';
 import * as analisis from './analisis.js';
+import * as pegado from './pegado.js';
+import * as plegado from './plegado.js';
+import * as margen from './margen.js';
+import { queHace, tomaDeLasTeclas, puedeElegirse } from './teclas.js';
+import { mostrador } from './turnos.js';
 
 /**
  * Lo que la ventana recuerda por su cuenta: la última entrada de audio elegida
@@ -30,10 +35,35 @@ import * as analisis from './analisis.js';
  */
 const ENTRADA_RECORDADA = 'cc.grabar.entrada';
 const MODO_RECORDADO = 'cc.grabar.modo';
-// Clave nueva y no la de antes (`cc.grabar.orillas`): ese interruptor escondía
-// solo el gris de alrededor, y quien lo dejó apagado no pidió quedarse sin el
-// texto entero. Lo guardado con el significado viejo se ignora y vale el default.
-const TRANSCRIPT_RECORDADO = 'cc.grabar.transcript';
+/**
+ * La clave de siempre, y se hereda.
+ *
+ * Hubo un momento en que este interruptor escondía el TEXTO ENTERO de cada toma,
+ * y ahí se le puso una clave nueva (`cc.grabar.transcript`) con el argumento de
+ * que quien dejó apagado el viejo no había pedido quedarse sin el guion. El
+ * argumento era bueno y ya no aplica: el interruptor volvió a ser el que era
+ * —esconde el gris de las orillas y nada más—, así que lo que alguien guardó
+ * significa hoy exactamente lo que significaba cuando lo guardó, y no heredarlo
+ * sería tirar su elección sin motivo.
+ *
+ * Se sigue llamando por lo que guarda y no por cómo se llama el botón: "Compact"
+ * es la etiqueta de ahora, las orillas son la preferencia. Si mañana el botón se
+ * llama de otro modo, la clave no se muda.
+ */
+const ORILLAS_RECORDADAS = 'cc.grabar.orillas';
+/**
+ * Y la clave de en medio se tira.
+ *
+ * Su "no" quería decir "sin transcript", que es otra pregunta: heredarla dejaría
+ * sin guion a quien solo había pedido quedarse sin el gris. Se borra en vez de
+ * ignorarse para que no quede dando vueltas.
+ */
+const TRANSCRIPT_VIEJO = 'cc.grabar.transcript';
+// Si las tomas descartadas se ven. Esto SÍ se guarda entre sesiones, al contrario
+// que el pliegue de una toma: es una forma de trabajar —"a mí las descartadas no
+// me interesan"— y vale para todas las clases, mientras que plegar la toma 3 es
+// una decisión sobre la toma 3 de esta clase (ver `plegado.js`).
+const DESCARTADAS_RECORDADAS = 'cc.grabar.descartadas';
 
 const vista = {
     // La carpeta en uso y todas las que se usaron, la activa primera (ajustes).
@@ -51,10 +81,22 @@ const vista = {
     // última vez que se miró: la lista se pliega sola al empezar (`plegarSegunGrabe`).
     grabadasAbiertas: true,
     grababa: false,
-    // Si se ve el texto de cada toma. Encendido por defecto: es sobre el texto que
-    // se comenta un pedazo y se arrastra un borde, así que apagado la pantalla se
-    // lee pero no se trabaja.
-    transcript: recordado(TRANSCRIPT_RECORDADO) !== 'no',
+    // Si el texto se ve compacto: sin las palabras de orilla, o sea sin el gris de
+    // antes del IN y después del OUT. Apagado por defecto —las orillas se ven—
+    // porque es contra ese gris que se arrastra un borde: sin él, correr el IN es
+    // adivinar qué frase entra.
+    compacto: recordado(ORILLAS_RECORDADAS) === 'no',
+    // Cómo se está mirando la lista de la clase en curso. No va al motor: no es
+    // algo que se le hizo a la clase (ver `tomas.js`).
+    plegadas: new Set(),
+    // La toma que se eligió con un clic, sobre la que caen P, R, S, M y X. `null`
+    // es "ninguna", y entonces manda la abierta (ver `tomaDeLasTeclas`). Como el
+    // pliegue, es cómo se está mirando la lista y no algo que se le hizo a la
+    // clase: no va al motor ni se guarda entre sesiones.
+    elegida: null,
+    sinDescartadas: recordado(DESCARTADAS_RECORDADAS) === 'si',
+    // El scroll pegado al fondo, cableado al entrar (`pegado.js`).
+    fondo: null,
     // Las clases que se están regenerando: json → {hechas, total}.
     regenerando: new Map(),
     // El golpe que se oyó y todavía no se leyó.
@@ -119,6 +161,9 @@ function pintarParte() {
 /** Se puede arrancar cuando hay entrada abierta y carpeta elegida. */
 function refrescarBotones() {
     const grabando = Boolean(vista.estado && vista.estado.grabando);
+    // Cerrar la toma a mano: solo si hay una abierta que cerrar.
+    $('grabar-cerrar-toma').hidden = !grabando;
+    $('grabar-cerrar-toma').disabled = !(vista.estado && vista.estado.abierta) || vista.terminando;
     $('grabar-iniciar').disabled = grabando || !oido.escuchando() || !vista.carpeta;
     $('grabar-iniciar').hidden = grabando;
     $('grabar-terminar').hidden = !grabando;
@@ -256,34 +301,169 @@ function pintarGrabadas() {
 }
 
 /**
- * Ver o no el texto de las tomas, para toda la pantalla de una vez.
+ * "Compact": apagar las palabras de orilla, para toda la pantalla de una vez.
+ *
+ * Apaga SOLO el pre y el post —el gris de antes del IN y después del OUT— y deja
+ * el guion de la toma entero. Estuvo un rato escondiendo el texto completo y era
+ * un error: de la toma quedaban la cabecera y la nota, o sea que la pantalla se
+ * leía pero no se trabajaba, porque es sobre el texto que se comenta un pedazo y
+ * se arrastra un borde. Compacto quiere decir "sin lo que no es de esta toma".
  *
  * Es una clase en la vista entera y no un cambio en lo que se dibuja: son las
  * mismas palabras dibujadas siempre, así que apagarlas es CSS y encenderlas de
- * nuevo no cuesta nada ni pide releer nada. Que la caja siga en el documento es
- * lo que deja que la selección y el arrastre de bordes sigan cableados: al
- * encender otra vez, el texto está donde estaba.
+ * nuevo no cuesta nada ni pide releer nada. Que las palabras sigan en el
+ * documento es lo que deja que un tramo subrayado que cae en una orilla siga
+ * existiendo mientras está escondido, y que al volver a encender esté donde
+ * estaba.
  *
- * Vale igual para la clase en curso y para las ya grabadas: el interruptor dice
- * "transcript", no "transcript de esta clase".
+ * Vale igual para la clase en curso y para las ya grabadas: el interruptor habla
+ * de las orillas, no de las orillas de esta clase.
  */
-function pintarTranscript() {
-    $('view-grabar').classList.toggle('es-sin-transcript', !vista.transcript);
-    const boton = $('grabar-transcript');
-    boton.setAttribute('aria-pressed', String(vista.transcript));
-    boton.classList.toggle('is-elegido', vista.transcript);
+function pintarCompacto() {
+    $('view-grabar').classList.toggle('es-compacto', vista.compacto);
+    const boton = $('grabar-compact');
+    boton.setAttribute('aria-pressed', String(vista.compacto));
+    boton.classList.toggle('is-elegido', vista.compacto);
+}
+
+/**
+ * El interruptor de las descartadas, con la cuenta puesta.
+ *
+ * Escondidas dice cuántas son, por lo mismo que la lista de clases grabadas dice
+ * cuántas tiene al plegarse: un botón que las saca sin decir cuántas sacó se lee
+ * como que se perdieron.
+ */
+function pintarDescartadas() {
+    const cuantas = vista.estado ? plegado.cuantasDescartadas(vista.estado.tomas) : 0;
+    const boton = $('grabar-descartadas');
+    boton.hidden = !cuantas && !vista.sinDescartadas;
+    boton.setAttribute('aria-pressed', String(vista.sinDescartadas));
+    boton.classList.toggle('is-elegido', vista.sinDescartadas);
+    boton.textContent = vista.sinDescartadas
+        ? `Descartadas escondidas (${cuantas})`
+        : 'Ocultar descartadas';
+}
+
+/** Los dos botones de la barra que dicen qué van a revertir antes de apretarlos. */
+function pintarHistoria() {
+    const h = (vista.estado && vista.estado.historia) || { atras: 0, adelante: 0 };
+    const atras = $('grabar-deshacer');
+    const adelante = $('grabar-rehacer');
+    atras.disabled = !h.atras;
+    adelante.disabled = !h.adelante;
+    atras.title = h.atras ? `Deshacer: ${h.queAtras} (Cmd-Z)` : 'No hay nada que deshacer';
+    adelante.title = h.adelante ? `Rehacer: ${h.queAdelante} (Cmd-Shift-Z)` : 'No hay nada que rehacer';
+}
+
+/** Cómo se está mirando la lista, que es lo único que la lista guarda de su lado. */
+function mirada() {
+    return {
+        plegadas: vista.plegadas,
+        sinDescartadas: vista.sinDescartadas,
+        alPlegar: (id, plegada) => {
+            if (plegada) {
+                // Un comentario abierto al margen de una toma que se pliega se
+                // iría con ella y quedaría marcado como abierto para siempre.
+                margen.cerrarTodos($('grabar-tomas'));
+                vista.plegadas.add(id);
+            } else {
+                vista.plegadas.delete(id);
+            }
+            pintar();
+        }
+    };
+}
+
+/* ─── La toma elegida ────────────────────────────────────────────────────
+ *
+ * Las teclas de vista actuaban siempre sobre la toma abierta, y "la toma activa"
+ * quería decir dos cosas: la que está grabando y la que estoy mirando. Con
+ * cuatro tomas en pantalla, hacer clic en la cabecera de la 1 y apretar M
+ * cambiaba la 4, que es la sorpresa que esta pantalla no puede tener.
+ *
+ * Así que hay una elegida de verdad, y se elige como se elige cualquier cosa: con
+ * un clic. Por defecto no hay ninguna y manda la abierta, o sea que quien no se
+ * enteró de que esto existe sigue trabajando igual.
+ *
+ * **Y se ve cuál es.** Un atajo que actúa sobre algo invisible es el mismo
+ * defecto de antes con otra ropa, así que la marca no es opcional: la tarjeta
+ * sobre la que caen las teclas lleva un anillo y la palabra "teclas"
+ * (`.toma.es-elegida` en `grabar-teclas.css`), la haya elegido alguien o sea la
+ * abierta por defecto. Y cuando la tecla cae sobre una elegida a mano, un aviso
+ * dice en qué toma cayó: la abierta la tiene a la vista el scroll pegado al
+ * fondo, y una elegida hace veinte minutos puede estar arriba, fuera de la
+ * pantalla.
+ */
+
+/**
+ * Un clic en cualquier parte de una tarjeta elige su toma.
+ *
+ * En cualquier parte y no solo en la cabecera: lo que el gesto quiere decir es
+ * "esta", y pedir un sitio exacto dentro de la ficha sería un atajo con
+ * instrucciones. Vale también el clic que termina de seleccionar un pedazo de
+ * texto para comentarlo: la toma que se está leyendo es justamente la toma sobre
+ * la que se está trabajando, así que seleccionar no le quita el sentido al gesto.
+ *
+ * Un id que no puede elegirse —una descartada, una que ya no está— no se guarda:
+ * deja de haber elegida y las teclas vuelven a la abierta.
+ */
+function elegir(id) {
+    vista.elegida = puedeElegirse(vista.estado, id) ? id : null;
+    marcarElegida();
+}
+
+/**
+ * Marca la toma sobre la que caen las teclas, y suelta la elección que se quedó
+ * sin toma.
+ *
+ * **La marca va sobre la toma que las teclas van a tocar de verdad, elegida a
+ * mano o no.** Puesta solo cuando alguien hizo clic, la pantalla no diría nada
+ * hasta que se descubriera que esto existe, y el caso más común —nadie eligió
+ * nada, manda la abierta— seguiría siendo un atajo sin destino visible. Así, la
+ * marca se lee siempre igual: "acá cae lo próximo que aprietes", y se aprende
+ * sola al ver que se muda con el clic.
+ *
+ * Y solo mientras se graba, porque es cuando las teclas de vista hacen algo (ver
+ * `queHace`): marcar una toma de una clase terminada prometería un atajo que no
+ * va a contestar.
+ *
+ * Soltar la elección vieja va acá, junto con la marca, y no es de paso: la
+ * elegida se puede haber descartado, eliminado o ido con la sesión que terminó, y
+ * lo que la tecla toca y lo que la pantalla muestra tienen que dejar de apuntarle
+ * en el mismo momento.
+ *
+ * La marca se pone desde acá y no en `tomas.js` porque es de la ventana y no de
+ * la toma: la tarjeta se dibuja igual, y lo que se le agrega es una clase encima
+ * de las que ya tiene.
+ */
+function marcarElegida() {
+    if (!puedeElegirse(vista.estado, vista.elegida)) vista.elegida = null;
+    const grabando = Boolean(vista.estado && vista.estado.grabando);
+    const cual = grabando ? tomaDeLasTeclas(vista.estado, vista.elegida) : null;
+    for (const tarjeta of $('grabar-tomas').querySelectorAll('.toma')) {
+        const suya = cual != null && Number(tarjeta.dataset.toma) === cual;
+        tarjeta.classList.toggle('es-elegida', suya);
+        if (suya) tarjeta.setAttribute('aria-current', 'true');
+        else tarjeta.removeAttribute('aria-current');
+    }
 }
 
 function pintar() {
     plegarSegunGrabe();
     pintarEnCurso();
-    tomas.pintar($('grabar-tomas'), vista.estado, acciones);
+    tomas.pintar($('grabar-tomas'), vista.estado, acciones, mirada());
+    marcarElegida();
     pintarGrabadas();
-    pintarTranscript();
+    pintarCompacto();
+    pintarDescartadas();
+    pintarHistoria();
     analisis.pintar($('grabar-analisis'), vista.estado);
     pintarClaqueta();
     decirDonde();
     refrescarBotones();
+    // Lo último de todo: el salto al fondo se mide sobre la lista ya dibujada, y
+    // esta pantalla repinta varias cosas que le cambian el alto.
+    if (vista.fondo) vista.fondo.alPintar();
 }
 
 /** Relee de los ajustes las carpetas, y del disco las clases que hay en ellas. */
@@ -333,24 +513,36 @@ const DICHO = {
     descartar: 'el descarte',
     comentar: 'el comentario',
     'borrar-comentario': 'el comentario quitado',
+    'descartar-ajuste': 'el ajuste de empalme descartado',
     borde: 'el borde movido'
 };
 
 /**
  * Clic derecho sobre una palabra: cuál de los dos bordes va ahí.
  *
- * Se pregunta porque los dos gestos cuestan lo mismo y el de abrir sirve cuando
- * el conteo se comió la primera palabra de la clase. Está aparte de quien lo usa
- * porque lo usan dos: la clase en curso y una ya grabada, y la pregunta tiene que
- * ser la misma —lo que cambia es a qué archivo va el cambio, no el gesto—.
+ * **Pregunta, no adivina**, y eso es lo que tiene que seguir siendo cierto: los
+ * dos gestos cuestan lo mismo, y el de abrir sirve justo cuando el conteo se comió
+ * la primera palabra de la clase. Adivinar por la distancia al borde más cercano
+ * fallaría exactamente ahí, que es el caso por el que esto existe.
  *
+ * Está aparte de quien lo usa porque lo usan dos —la clase en curso y una ya
+ * grabada— y la pregunta tiene que ser la misma: lo que cambia es a qué archivo va
+ * el cambio, no el gesto. Y vale igual en la toma abierta y en las anteriores, con
+ * una diferencia que sí hay que decir: la abierta todavía no tiene OUT, así que
+ * poner uno ahí es cerrarla en esa palabra. Se lo dice el rótulo, porque "Cortar
+ * el OUT acá" no deja ver que la toma se termina.
+ *
+ * @param {boolean} abierta si la toma todavía no tiene OUT
  * @returns {'in'|'out'|null} null si se canceló
  */
-async function preguntarBorde(toma, paredMs) {
+async function preguntarBorde(toma, paredMs, abierta) {
     const cual = await window.cc.preguntar({
         titulo: `Mover un borde de la toma ${toma}`,
         mensaje: `A las ${fmtHora(paredMs)}, que es donde está esa palabra.`,
-        opciones: ['Cortar el OUT acá', 'Abrir el IN acá']
+        opciones: [
+            abierta ? 'Cerrar la toma acá (el OUT)' : 'Cortar el OUT acá',
+            'Abrir el IN acá'
+        ]
     });
     if (cual < 0) return null;
     return cual === 0 ? 'out' : 'in';
@@ -369,8 +561,8 @@ async function editarGrabada(clase, cambio) {
 }
 
 /** El clic derecho sobre una palabra de una clase ya grabada. */
-async function bordeDeGrabada(clase, { toma, paredMs }) {
-    const borde = await preguntarBorde(toma, paredMs);
+async function bordeDeGrabada(clase, { toma, paredMs, abierta }) {
+    const borde = await preguntarBorde(toma, paredMs, abierta);
     if (!borde) return;
     await editarGrabada(clase, { tipo: 'borde', toma, borde, paredMs });
 }
@@ -382,25 +574,92 @@ async function quitarCarpeta(ruta) {
     await cargarGrabadas();
 }
 
+/**
+ * El mostrador de turnos de esta pantalla.
+ *
+ * Todo lo que le pide un cambio al motor saca turno antes de salir y, al volver,
+ * pregunta si mientras tanto ya se guardó una respuesta más nueva. La de por qué
+ * hace falta está en `turnos.js`; el resumen es que dos pedidos en vuelo pueden
+ * contestar al revés y la respuesta vieja no trae el cambio de la nueva.
+ */
+const respuestas = mostrador();
+
 /** Todo cambio pasa por el motor y se repinta con lo que conteste. */
 const acciones = {
     alCambiar: async cambio => {
-        vista.estado = await window.cc.grabarEditar(cambio);
+        const turno = respuestas.tomar();
+        const estado = await window.cc.grabarEditar(cambio);
+        // Eliminar es la única que saca algo de la pantalla, así que es la única
+        // que necesita decir que se puede volver: el resto se ve. Se avisa antes
+        // de mirar el turno porque el cambio se hizo igual: lo que puede estar
+        // viejo es la foto que volvió, no lo que pasó.
+        if (cambio.tipo === 'eliminar') toast(`Toma ${cambio.toma} eliminada. Cmd-Z la devuelve.`);
+        if (respuestas.atrasada(turno)) return;
+        vista.estado = estado;
         pintar();
     },
     alCerrar: async () => {
-        vista.estado = await window.cc.grabarCerrarToma();
+        const turno = respuestas.tomar();
+        const estado = await window.cc.grabarCerrarToma();
+        if (respuestas.atrasada(turno)) return;
+        vista.estado = estado;
         pintar();
     },
     /** Clic derecho sobre una palabra de la clase en curso (`preguntarBorde`). */
-    alBorde: async ({ toma, paredMs }) => {
-        const borde = await preguntarBorde(toma, paredMs);
+    alBorde: async ({ toma, paredMs, abierta }) => {
+        const borde = await preguntarBorde(toma, paredMs, abierta);
         if (!borde) return;
-        vista.estado = await window.cc.grabarEditar({ tipo: 'borde', toma, borde, paredMs });
+        const turno = respuestas.tomar();
+        const estado = await window.cc.grabarEditar({ tipo: 'borde', toma, borde, paredMs });
         anotar('grabar.borde', { toma, borde });
+        if (respuestas.atrasada(turno)) return;
+        vista.estado = estado;
         pintar();
     }
 };
+
+/* ─── Deshacer y rehacer ──────────────────────────────────────────────────
+ *
+ * El historial NO está acá, y es la decisión más importante de esta tanda. Está
+ * en el motor (`engine/deshacer.js`), porque cada cambio de esta pantalla
+ * reescribe el XML y el sidecar en el mismo gesto: un deshacer que arreglara la
+ * lista dejaría el archivo con el cambio puesto, y entonces lo que se ve y lo que
+ * va a abrir Premiere dirían cosas distintas.
+ *
+ * O sea que el de la revisión de cortes (`src/js/visor/estado.js`) no se pudo
+ * reusar tal cual, aunque la forma sea la misma —dos pilas, un rótulo de qué se
+ * hizo, un tope de sesenta y el mismo atajo—: allá la verdad es la ventana hasta
+ * que alguien aprieta "Guardar", así que copiar `rev.segments` alcanza. Lo que sí
+ * se reusó es todo lo que se podía reusar sin mudar la verdad de sitio: el gesto,
+ * el aviso que dice QUÉ se deshizo y no solo que algo pasó, y la regla de que
+ * adentro de un campo de texto manda el deshacer del texto.
+ */
+
+/** @param {'atras'|'adelante'} hacia */
+async function volverAtras(hacia) {
+    const turno = respuestas.tomar();
+    const r = hacia === 'adelante'
+        ? await window.cc.grabarRehacer()
+        : await window.cc.grabarDeshacer();
+    // Dos Cmd-Z seguidos son dos pedidos en vuelo, igual que dos clics: la
+    // respuesta que llega atrasada deja la pantalla un paso más adelante de lo
+    // que el motor ya deshizo. Lo que se dice —qué se deshizo, o por qué no se
+    // pudo— se dice igual: eso pasó, la que puede estar vieja es la foto.
+    const vieja = respuestas.atrasada(turno);
+    if (r.estado && !vieja) vista.estado = r.estado;
+
+    if (r.error) { toast(r.error); pintar(); return; }
+    if (!r.ok) {
+        toast(hacia === 'adelante' ? 'No hay nada que rehacer.' : 'No hay nada que deshacer.');
+        pintar();
+        return;
+    }
+    // Un comentario abierto al margen puede ser el que se acaba de deshacer.
+    margen.cerrarTodos($('grabar-tomas'));
+    anotar(hacia === 'adelante' ? 'grabar.rehace' : 'grabar.deshace', { que: r.que });
+    toast(`${hacia === 'adelante' ? 'Rehecho' : 'Deshecho'}: ${r.que}.`);
+    pintar();
+}
 
 /**
  * Llena el selector con las entradas que haya y devuelve la lista.
@@ -549,25 +808,75 @@ async function terminar() {
 }
 
 /**
- * La barra espaciadora no puede abrir ni cerrar nada.
+ * Los atajos de esta pantalla.
  *
- * Se pensó y se descartó: el editor está escribiendo comentarios mientras la
- * clase corre, y una tecla que cierre una toma por error no se deshace —el audio
- * siguió—. Las tomas las abren y las cierran las palabras del profesor, que es
- * de donde salen los tiempos buenos.
+ * Qué hace cada tecla lo decide `teclas.js`, que no toca el DOM y por eso se
+ * puede probar; acá está lo que hay que hacer con la respuesta. El oyente va en
+ * el documento por lo mismo que en el reproductor y en la pestaña de cortes: el
+ * foco lo tiene lo último que se tocó, así que atarlo a un elemento sería pedirle
+ * a quien graba que haga clic en la lista antes de poder apretar R.
+ *
+ * **La barra espaciadora sigue sin hacer nada**, y eso no cambió con el deshacer
+ * puesto: una toma abierta o cerrada por error se deshace, pero el audio siguió
+ * corriendo mientras tanto y el "3, 2, 1" del profesor ya pasó. Las tomas las
+ * abren y las cierran sus palabras, que es de donde salen los tiempos buenos.
  */
 function teclas(e) {
-    if (estaEscribiendo(document.activeElement)) return;
-    if (e.key === 'Escape') {
-        const caja = document.querySelector('.toma-caja');
-        if (caja) { caja.remove(); e.preventDefault(); }
+    if (!$('view-grabar').classList.contains('is-visible')) return;
+    const gesto = queHace(e, {
+        // El mismo `estaEscribiendo(evento.target)` del reproductor y de la
+        // pestaña de cortes, sin agregarle nada: con el oyente en el documento, el
+        // `target` de una tecla ES el campo que tiene el foco, así que mirar
+        // además `activeElement` sería una segunda regla que dice lo mismo hasta el
+        // día en que una de las dos se cambie.
+        escribiendo: estaEscribiendo(e.target),
+        grabando: Boolean(vista.estado && vista.estado.grabando),
+        // La que se eligió con un clic, y si no hay ninguna la abierta.
+        activa: tomaDeLasTeclas(vista.estado, vista.elegida),
+        vistas: (vista.estado && vista.estado.vistas) || vista.vistas
+    });
+    if (!gesto) return;
+
+    if (gesto.que === 'cerrar-caja') {
+        const abierta = document.querySelector('.toma.es-comentando');
+        if (abierta) { margen.cerrar(abierta); e.preventDefault(); }
+        return;
     }
+    e.preventDefault();
+    if (gesto.que === 'vista') {
+        // Sobre una elegida a mano se dice en qué toma cayó, y sobre la abierta
+        // no: la abierta la tiene a la vista el scroll pegado al fondo, y una
+        // elegida hace rato puede estar arriba, fuera de la pantalla. Un aviso en
+        // cada tecla sería ruido; en el caso en que el cambio puede no verse, es
+        // lo único que dice que pasó algo.
+        if (puedeElegirse(vista.estado, vista.elegida)) {
+            toast(`Toma ${gesto.toma} en ${gesto.vista}.`);
+        }
+        acciones.alCambiar({ tipo: 'vista', toma: gesto.toma, vista: gesto.vista });
+        return;
+    }
+    volverAtras(gesto.que === 'rehacer' ? 'adelante' : 'atras');
 }
 
 /** Se cablea una vez; entrar y salir del paso no vuelve a pedir el micrófono. */
 export function wireGrabar() {
     if (vista.cableado) return;
     vista.cableado = true;
+
+    // La preferencia que quedó de cuando el interruptor escondía el texto entero.
+    olvidar(TRANSCRIPT_VIEJO);
+    // El scroll de la columna de la izquierda, pegado al final de la lista de
+    // tomas mientras nadie suba a leer.
+    vista.fondo = pegado.cablear($('grabar-izq'), $('grabar-tomas'));
+
+    // Un clic en una tarjeta elige su toma (`elegir`). El oyente va en la lista y
+    // no en cada tarjeta porque las tarjetas se rehacen en cada repintado: atarlo
+    // a las de ahora sería cablearlo de nuevo cada tres segundos. Y no estorba a
+    // nadie: los botones de la tarjeta hacen lo suyo y el clic sigue subiendo.
+    $('grabar-tomas').addEventListener('click', e => {
+        const tarjeta = e.target.closest('.toma');
+        if (tarjeta) elegir(Number(tarjeta.dataset.toma));
+    });
 
     $('grabar-entrada').onchange = e => abrirEntrada(e.target.value);
     $('grabar-entradas').onclick = refrescarEntradas;
@@ -601,11 +910,26 @@ export function wireGrabar() {
         vista.grabadasAbiertas = !vista.grabadasAbiertas;
         pintarGrabadas();
     };
-    $('grabar-transcript').onclick = () => {
-        vista.transcript = !vista.transcript;
-        recordar(TRANSCRIPT_RECORDADO, vista.transcript ? 'si' : 'no');
-        pintarTranscript();
+    $('grabar-compact').onclick = () => {
+        vista.compacto = !vista.compacto;
+        recordar(ORILLAS_RECORDADAS, vista.compacto ? 'no' : 'si');
+        pintarCompacto();
     };
+    $('grabar-descartadas').onclick = () => {
+        vista.sinDescartadas = !vista.sinDescartadas;
+        recordar(DESCARTADAS_RECORDADAS, vista.sinDescartadas ? 'si' : 'no');
+        pintar();
+    };
+    $('grabar-deshacer').onclick = () => volverAtras('atras');
+    $('grabar-rehacer').onclick = () => volverAtras('adelante');
+    // El mismo "Cerrar acá" que cuelga de la toma abierta, en un sitio fijo de la
+    // barra. Hace falta los dos: el de la tarjeta es el preciso —dice en qué toma
+    // cae— pero la tarjeta se mueve, y ahora que la lista va de la más vieja a la
+    // más nueva y el scroll se puede haber subido a leer, puede no estar en
+    // pantalla. Este se aprieta en medio de una interrupción, con el profesor
+    // esperando, y para eso tiene que estar siempre en el mismo pixel: es el mismo
+    // motivo por el que "Claqueta" está al lado y no dentro de una tarjeta.
+    $('grabar-cerrar-toma').onclick = () => acciones.alCerrar();
     for (const boton of document.querySelectorAll('.grabadas-modo')) {
         boton.onclick = () => {
             vista.modo = boton.dataset.modo;
@@ -621,8 +945,11 @@ export function wireGrabar() {
         // persona—; si el motor la oye solo, mejor, y si el aplauso se marcó unos
         // décimos tarde no importa: en post `align.js` la corre contra el audio.
         // Apretar de nuevo la mueve a ahora.
-        vista.estado = await window.cc.grabarClaqueta(Date.now());
+        const turno = respuestas.tomar();
+        const estado = await window.cc.grabarClaqueta(Date.now());
         anotar('grabar.claqueta-a-mano', {});
+        if (respuestas.atrasada(turno)) return;
+        vista.estado = estado;
         pintar();
     };
 
