@@ -5,6 +5,7 @@
  *
  *   node tools/probar-vivo.js
  *   node tools/probar-vivo.js --wav=<Live-Mix.wav> --minutos=4 --capturas=/tmp/cc-vivo
+ *   node tools/probar-vivo.js --ritmo=1000   (tiempo real: tarda lo que dura la clase)
  *
  * Qué prueba, y por qué hacía falta otro arnés. `probar-repintado.js` y
  * `probar-lista.js` corren contra la MAQUETA: datos de mentira, sin motor y sin
@@ -271,8 +272,19 @@ function medidasDe(tomas) {
  * Se empuja de a un segundo de audio y se le da aire al reloj del motor, que cada
  * tres segundos corre el ciclo de señales (`grabacion.CICLO_MS`) y es el que abre
  * y cierra las tomas.
+ *
+ * **Cuánto aire, o sea `--ritmo`, cambia lo que se está probando.** Por omisión se
+ * le dan 120 ms de reloj por cada segundo de audio, así que cuatro minutos de clase
+ * pasan en unos cincuenta: alcanza para ver la cadena entera y es lo que permite
+ * correr esto seguido. Lo que ese apuro NO reproduce es el reparto del vivo: el
+ * ciclo de señales sigue corriendo cada tres segundos de RELOJ, así que cada pasada
+ * se come veinticinco segundos de audio en vez de tres, y las señales caen de otra
+ * manera — sobre el mismo WAV salieron 6, 7 y 8 tomas en corridas distintas.
+ * `--ritmo=1000` es tiempo real: cuatro minutos de clase tardan cuatro minutos y el
+ * ciclo ve lo que vería en una clase. Es la corrida que hay que hacer cuando lo que
+ * se quiere saber es dónde caen las tomas, y no si la cadena anda.
  */
-async function empujarAudio(wc, raw, alAvanzar) {
+async function empujarAudio(wc, raw, alAvanzar, ritmoMs) {
     const pcm = fs.readFileSync(raw);
     const bytesPorPedazo = MUESTRAS_POR_PEDAZO * 2;
     const pedazosPorSegundo = Math.round(TASA / MUESTRAS_POR_PEDAZO);
@@ -291,7 +303,7 @@ async function empujarAudio(wc, raw, alAvanzar) {
         if (pedazos % pedazosPorSegundo === 0) {
             // Un respiro por segundo de audio: sin esto el reloj del motor no
             // llega a correr el ciclo y las tomas aparecerían todas al final.
-            await dormir(120);
+            await dormir(ritmoMs);
             if (pedazos % (pedazosPorSegundo * 15) === 0) await alAvanzar(off / pcm.byteLength);
         }
     }
@@ -313,6 +325,8 @@ async function correr({ win, arg }) {
     const { ipcMain } = require('electron');
     const rodecaster = require(path.join(RAIZ, 'engine', 'rodecaster-xml'));
     const raw = arg('raw');
+    // Cuánto reloj por cada segundo de audio. 1000 es tiempo real; ver `empujarAudio`.
+    const ritmo = Number(arg('ritmo') || 120);
     const notas = arg('notas');
     const capturas = arg('capturas');
     const preguntas = atajarCarteles(ipcMain);
@@ -384,7 +398,7 @@ async function correr({ win, arg }) {
             const e = await delMotor(wc);
             process.stdout.write(`\r      ${(hecho * 100).toFixed(0)}% · ` +
                 `${(e && e.tomas || []).length} tomas · ${e && e.segundos}s de audio    `);
-        });
+        }, ritmo);
         process.stdout.write('\n');
         const e = await esperarTomas(wc, 2, Date.now() + 120000);
         const cerradas = (e.tomas || []).filter(t => t.outMs != null).length;
