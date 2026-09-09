@@ -300,14 +300,22 @@ class Taller {
             .replace(/\n\t\t<CCFileModTime>[^<]*<\/CCFileModTime>/g, '');
         this.proyecto.escribir(medio, t);
 
-        // Las duraciones: la del medio y la de cada fuente. El molde dura media
-        // hora y el archivo nuevo lo que dura, y una fuente que declara más de
-        // lo que hay deja el clip con cola negra.
+        // Las duraciones: la de cada stream y la que declara cada fuente. Son dos
+        // números distintos del mismo hecho y el molde trae los dos del archivo
+        // de origen, que dura otra cosa. El stream de más deja cola negra; la
+        // fuente de menos es peor, porque Premiere cree que el material se
+        // termina antes y todo lo que venga después no existe. Medido contra un
+        // proyecto que escribió Premiere: ahí las 182 fuentes declaran lo que
+        // dura su stream, salvo por el redondeo entre cuadros y muestras.
         for (const k of clonados) {
             const clase = this.proyecto.clase(k);
             if (clase === 'VideoStream' || clase === 'AudioStream') {
                 this.proyecto.escribir(k, this.proyecto.contenido(k)
                     .replace(/<Duration>\d+<\/Duration>/g, `<Duration>${ticks}</Duration>`));
+            }
+            if (clase === 'VideoMediaSource' || clase === 'AudioMediaSource') {
+                this.proyecto.escribir(k, this.proyecto.contenido(k)
+                    .replace(/<OriginalDuration>\d+<\/OriginalDuration>/, `<OriginalDuration>${ticks}</OriginalDuration>`));
             }
         }
 

@@ -306,15 +306,18 @@ module.exports = t => {
          * dónde cae cada corte y del plan, con qué vista. Escribir uno sin el
          * otro sería preparar un caso que no existe en el disco.
          */
-        const claseConVistas = (dir, nombre, medio, vistas) => {
+        const claseConVistas = (dir, nombre, medio, vistas, medioPantalla) => {
+            const archivoDe = pista => (pista === 2 && medioPantalla) || medio;
             const clips = (pista, prendida) => vistas.map((vista, i) =>
                 `<clipitem id="${pista}${i}"><name>c</name>`
                 + `<enabled>${prendida(vista) ? 'TRUE' : 'FALSE'}</enabled>`
                 + `<start>${i * 30}</start><end>${(i + 1) * 30}</end>`
                 + `<in>${1800 + i * 30}</in><out>${1800 + (i + 1) * 30}</out>`
                 + (i === 0
-                    ? `<file id="f${pista}"><name>a.mov</name><pathurl>file://${medio}</pathurl>`
-                        + '<duration>36000</duration><media><video></video></media></file>'
+                    ? `<file id="f${pista}"><name>${path.basename(archivoDe(pista))}</name>`
+                        + `<pathurl>file://${archivoDe(pista)}</pathurl>`
+                        + '<duration>36000</duration><media><video></video>'
+                        + '<audio><channelcount>2</channelcount></audio></media></file>'
                     : `<file id="f${pista}"/>`)
                 + '</clipitem>').join('');
             const xml = xmlDe(nombre).replace('<video></video>',
@@ -546,6 +549,61 @@ module.exports = t => {
             });
         });
 
+        t.test('adentro de «CAM» está todo el sonido de la clase, alineado', () => {
+            // Es para lo que el editor entra ahí: ver si las ondas coinciden y
+            // resincronizar en un solo lugar para las trece clases. Abajo del
+            // clip de cámara tiene que estar su propio audio, el de la otra
+            // cámara y cada canal que el aparato grabó por separado.
+            const dir = carpeta({
+                'material/cam.mov': 'la cámara',
+                'material/sr.mov': 'el grabador de pantalla',
+                'material/1_COMBO-1.wav': 'un canal suelto',
+                'material/Live-Mix.wav': 'la mezcla'
+            });
+            const f = n => path.join(dir, 'material', n);
+            claseConVistas(dir, '01_clase', f('cam.mov'), ['PV'], f('sr.mov'));
+            conAudio(dir, '01_clase', [f('1_COMBO-1.wav'), f('Live-Mix.wav')], 1);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const cam = p.porNombre('Sequence', nidos.NOMBRES.camara);
+                const pistas = pistasAudioDe(p, cam);
+                t.eq(pistas.length, 4, `su audio, el del SR y los dos canales: ${pistas.length} pista(s)`);
+
+                const primeros = pistas.map(k => cortesDe(p, k)[0]);
+                t.deep(primeros.map(it => it && nidoDelCorte(p, it)),
+                    ['cam.mov', 'sr.mov', '1_COMBO-1.wav', 'Live-Mix.wav'],
+                    'el propio arriba, después el de la otra cámara y después los sueltos');
+                t.deep(primeros.map(it => !/<IsMuted>true<\/IsMuted>/.test(p.contenido(it))),
+                    [false, false, false, true],
+                    'solo suena el Live-Mix: doce pistas prendidas serían doce voces encima');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('«CAM» y «SR» no se contienen: sería una anidación circular', () => {
+            // El editor lo pidió como «que traiga el audio de la anidación», y
+            // así no se puede: cada uno adentro del otro es un ciclo y Premiere
+            // no abre el proyecto. Entra el ARCHIVO, que suena lo mismo y está
+            // en el mismo segundo porque el nido no es más que eso puesto en su
+            // franja. Que ningún nido de imagen mire a una secuencia es la forma
+            // de comprobar que no se coló el ciclo.
+            const dir = carpeta({ 'material/cam.mov': 'la cámara', 'material/sr.mov': 'la pantalla' });
+            const f = n => path.join(dir, 'material', n);
+            claseConVistas(dir, '01_clase', f('cam.mov'), ['PV'], f('sr.mov'));
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                for (const nombre of [nidos.NOMBRES.camara, nidos.NOMBRES.pantalla]) {
+                    const seq = p.porNombre('Sequence', nombre);
+                    const adentro = p.cierre([seq], { claseFrontera: ['Media'] })
+                        .filter(k => /SequenceSource$/.test(p.clase(k)));
+                    t.eq(adentro.length, 0, `«${nombre}» no tiene ninguna secuencia adentro`);
+                }
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
         t.test('cada nido llega del color de su pista, también en el panel', () => {
             // El color del corte manda en la línea de tiempo; el del ítem del
             // panel manda en el panel Y lo hereda cualquier corte que se agregue
@@ -590,6 +648,33 @@ module.exports = t => {
                 // Dos clases de veinte minutos con los cinco de aire en el medio.
                 const LARGO = 36000 / 30;
                 t.near(dice, 2 * LARGO + nidos.AIRE_SEG, 0.01, `el nido dice durar ${dice}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('y un archivo importado también, en las dos fuentes que lo declaran', () => {
+            // Lo mismo que el nido pero para el material: `OriginalDuration` es
+            // cuánto material dice haber, y venía copiada del archivo del que se
+            // clonó el molde. Un WAV de cuarenta minutos entraba diciendo durar
+            // treinta y cinco. Medido contra un proyecto que escribió Premiere:
+            // ahí las 182 fuentes declaran lo que dura su stream.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const cpi = p.porNombre('ClipProjectItem', 'a.mov');
+                const partes = p.cierre([cpi], {});
+                const fuentes = partes.filter(k => /^(Video|Audio)MediaSource$/.test(p.clase(k)));
+                t.ok(fuentes.length >= 1, 'el archivo tiene al menos una fuente');
+
+                // El `<duration>` del XML va en CUADROS: 36000 a 30 fps son
+                // veinte minutos, que es lo que dice durar el archivo.
+                for (const k of fuentes) {
+                    const dice = prproj.aSegundos(
+                        Number(/<OriginalDuration>(\d+)<\/OriginalDuration>/.exec(p.contenido(k))[1]));
+                    t.near(dice, 36000 / 30, 0.01, `${p.clase(k)} dice durar ${dice}`);
+                }
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });

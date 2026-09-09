@@ -62,6 +62,30 @@ const REVERSIONES = [
         caen: ['un corte entra en el nido corrido por la franja de su clase']
     },
     {
+        que: 'los nidos de imagen se quedan sin el sonido con el que se valida la sincronía',
+        archivo: 'engine/prproj-nidos.js',
+        de: '            ponerLosCanales(nido, clase, 2);',
+        a: '',
+        filtro: 'prproj-curso',
+        caen: ['adentro de «CAM» está todo el sonido de la clase, alineado']
+    },
+    {
+        que: 'CAM y SR se meten el nido del otro adentro, que es un ciclo que Premiere no abre',
+        archivo: 'engine/prproj-nidos.js',
+        de: '            poner(nido.pistasAudio[1], clase, fuentes[otro], { deAudio: true, sonando: false, etiqueta: otraEtiqueta });',
+        a: '            poner(nido.pistasVideo[0], clase, fuentes[otro], { etiqueta: otraEtiqueta });',
+        filtro: 'prproj-curso',
+        caen: ['adentro de «CAM» está todo el sonido de la clase, alineado']
+    },
+    {
+        que: 'un archivo importado declara la duración del molde y no la suya',
+        archivo: 'engine/prproj-secuencia.js',
+        de: "            if (clase === 'VideoMediaSource' || clase === 'AudioMediaSource') {",
+        a: '            if (false) {',
+        filtro: 'prproj-curso',
+        caen: ['y un archivo importado también, en las dos fuentes que lo declaran']
+    },
+    {
         que: 'el recuadro vuelve a ser una anidación aparte en vez de la misma CAM',
         archivo: 'engine/prproj-curso.js',
         de: '            const recuadro = poner(pista.mini, nidos.camara, corte, true, nidos.etiquetaDeCamara);',

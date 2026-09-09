@@ -171,27 +171,86 @@ function armarLosNidos(taller, pedido) {
         return suyos ? suyos.get(archivo.id) || null : null;
     };
 
-    // ── Las dos de imagen, que son una pista y un clip por clase ──
+    /**
+     * Un archivo de una clase, entero, en la pista y el lugar que le tocan.
+     *
+     * Es el único corte que hacen los nidos: de punta a punta de la franja y
+     * entrando por el segundo cero. Lo de picar en bloques es de las clases.
+     */
+    const poner = (suPista, clase, archivo, opciones) => {
+        const medio = medioDe(clase, archivo);
+        if (!suPista || !medio) return;
+        const op = opciones || {};
+        // Un archivo sin sonido no tiene fuente de audio, y pedirle una a
+        // `colocarCorte` sería tirar. Una cámara muda es rara pero no imposible.
+        const esAudio = op.deAudio;
+        if (esAudio && !medio.fuenteAudio) return;
+        const franja = franjas.get(clase);
+        taller.colocarCorte({
+            pista: suPista,
+            medio,
+            desdeSeg: franja.desdeSeg,
+            hastaSeg: franja.desdeSeg + (archivo.duracionSeg || franja.largoSeg),
+            entradaSeg: 0,
+            etiqueta: op.etiqueta,
+            sonando: op.sonando
+        });
+        cortes++;
+    };
+
+    /**
+     * Los canales sueltos del aparato de una clase, uno por pista, desde `desde`.
+     *
+     * Cuántas pistas hacen falta es el máximo entre las clases y no el de la
+     * primera: una clase grabada con un canal menos dejaría a las demás sin
+     * dónde poner el suyo. La pista `i` es el mismo canal en todas porque
+     * `course-scan` los ordena igual siempre y deja el Live-Mix último.
+     */
+    const cuantosCanales = clases.reduce((n, c) => Math.max(n, c.pistas.audio.length), 0);
+    const ponerLosCanales = (nido, clase, desde) => {
+        clase.pistas.audio.forEach((pista, i) => {
+            // El ojo prendido de cada canal se hereda del XML, que ya decidió
+            // que solo suene el Live-Mix. Decidirlo otra vez acá sería tener la
+            // misma regla en dos sitios esperando a que se separen.
+            poner(nido.pistasAudio[desde + i], clase, archivoDe(pista), {
+                deAudio: true,
+                sonando: pista.cortes.length ? pista.cortes[0].sonando : false
+            });
+        });
+    };
+
+    // ── Las dos de imagen ──
+    //
+    // **Un clip de video por clase, y abajo TODO el sonido de esa clase.** Lo
+    // pidió el editor y es para lo que sirve entrar acá: el audio propio de la
+    // imagen que se está mirando, el de la otra cámara, y los diez canales que
+    // el Rodecaster grabó por separado, todos alineados en la misma franja. Con
+    // eso se valida a ojo que las ondas coincidan y se resincroniza en un solo
+    // lugar para las trece clases.
+    //
+    // **Entran los ARCHIVOS y no los otros nidos**, aunque el editor lo pidió
+    // como «que traiga el audio de la anidación». `CAM` con `SR` adentro y `SR`
+    // con `CAM` adentro es una anidación circular y Premiere no la abre. Con los
+    // archivos suena lo mismo y está en el mismo segundo, porque los nidos no
+    // son más que esos archivos puestos en su franja.
     const deImagen = (nombre, cual, etiqueta) => {
+        const otro = cual === 'camara' ? 'pantalla' : 'camara';
+        const otraEtiqueta = cual === 'camara' ? ETIQUETA_DE_PANTALLA : ETIQUETA_DE_CAMARA;
         const nido = taller.crearSecuencia({
-            nombre, pistasVideo: 1, pistasAudio: 1, duracionSeg: largoSeg
+            nombre, pistasVideo: 1, pistasAudio: 2 + cuantosCanales, duracionSeg: largoSeg
         });
         taller.guardarEn(bin, nido.itemDelPanel);
         taller.pintarItemDelPanel(nido.itemDelPanel, etiqueta);
         for (const clase of clases) {
-            const archivo = fuentesDeVideo(clase)[cual];
-            const medio = medioDe(clase, archivo);
-            if (!medio) continue;
-            const franja = franjas.get(clase);
-            taller.colocarCorte({
-                pista: nido.pistasVideo[0],
-                medio,
-                desdeSeg: franja.desdeSeg,
-                hastaSeg: franja.desdeSeg + (archivo.duracionSeg || franja.largoSeg),
-                entradaSeg: 0,
-                etiqueta
-            });
-            cortes++;
+            const fuentes = fuentesDeVideo(clase);
+            poner(nido.pistasVideo[0], clase, fuentes[cual], { etiqueta });
+            // Los dos audios de imagen van arriba y pintados de su color, que es
+            // lo único que distingue una onda de otra de un vistazo. Mudos: al
+            // abrir el nido tiene que sonar el Live-Mix y nada más, o son doce
+            // pistas hablando encima.
+            poner(nido.pistasAudio[0], clase, fuentes[cual], { deAudio: true, sonando: false, etiqueta });
+            poner(nido.pistasAudio[1], clase, fuentes[otro], { deAudio: true, sonando: false, etiqueta: otraEtiqueta });
+            ponerLosCanales(nido, clase, 2);
         }
         return nido;
     };
@@ -199,13 +258,10 @@ function armarLosNidos(taller, pedido) {
     const camara = deImagen(NOMBRES.camara, 'camara', ETIQUETA_DE_CAMARA);
     const pantalla = deImagen(NOMBRES.pantalla, 'pantalla', ETIQUETA_DE_PANTALLA);
 
-    // ── El audio: una pista por canal del aparato ──
+    // ── El audio: una pista por canal del aparato, y nada más ──
     //
-    // Cuántas pistas es el máximo entre las clases y no el de la primera: una
-    // clase grabada con un canal menos dejaría a las demás sin dónde poner el
-    // suyo. La pista `i` es el mismo canal en todas porque `course-scan` los
-    // ordena igual siempre y deja el Live-Mix último.
-    const cuantosCanales = clases.reduce((n, c) => Math.max(n, c.pistas.audio.length), 0);
+    // Este es el que va en las clases, así que trae los canales pelados: los dos
+    // audios de imagen son para validar la sincronía, no para la entrega.
     const audio = taller.crearSecuencia({
         nombre: NOMBRES.audio,
         pistasVideo: 1,
@@ -214,26 +270,7 @@ function armarLosNidos(taller, pedido) {
     });
     taller.guardarEn(bin, audio.itemDelPanel);
     taller.pintarItemDelPanel(audio.itemDelPanel, ETIQUETA_DE_AUDIO);
-    for (const clase of clases) {
-        const franja = franjas.get(clase);
-        clase.pistas.audio.forEach((pista, i) => {
-            const archivo = archivoDe(pista);
-            const medio = medioDe(clase, archivo);
-            if (!medio || !audio.pistasAudio[i]) return;
-            taller.colocarCorte({
-                pista: audio.pistasAudio[i],
-                medio,
-                desdeSeg: franja.desdeSeg,
-                hastaSeg: franja.desdeSeg + (archivo.duracionSeg || franja.largoSeg),
-                entradaSeg: 0,
-                // El ojo prendido de cada canal se hereda del XML, que ya decidió
-                // que solo suene el Live-Mix. Decidirlo otra vez acá sería tener
-                // la misma regla en dos sitios esperando a que se separen.
-                sonando: pista.cortes.length ? pista.cortes[0].sonando : false
-            });
-            cortes++;
-        });
-    }
+    for (const clase of clases) ponerLosCanales(audio, clase, 0);
 
     // ── El slide: la pantalla encima de la cámara, sin componer ──
     //
