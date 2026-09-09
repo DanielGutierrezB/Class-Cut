@@ -74,6 +74,10 @@ const FILES = [
     'repasar.test.js',
     'verificar-corte.test.js',
     'media-server.test.js',
+    'prproj.test.js',
+    'prproj-panel.test.js',
+    'prproj-clase.test.js',
+    'prproj-curso.test.js',
     // Al final: es el único que le saca el motor al caché de módulos y se lo
     // devuelve, y si eso alguna vez saliera mal, mejor que lo pague nadie.
     'maqueta.test.js'

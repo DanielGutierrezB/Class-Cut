@@ -328,6 +328,185 @@ const REVERSIONES = [
             'plegada mide menos que entera: si no, no sirvió de nada',
             'no inventa una barra donde no había'
         ]
+    },
+
+    // ── El proyecto de Premiere ──
+
+    {
+        que: 'el gzip sale con el XFL que le deja el nivel 9 y no el que escribe Premiere',
+        archivo: 'engine/prproj.js',
+        de: '    gz[8] = 0;\n',
+        a: '',
+        filtro: 'prproj.test',
+        caen: [
+            'la cabecera sale con los cuatro campos forzados',
+            'guardar un proyecto sano deja un archivo que se puede releer'
+        ]
+    },
+    {
+        que: 'un objeto raíz se reconoce a cualquier profundidad (se pierde la regla de la tabulación)',
+        archivo: 'engine/prproj.js',
+        de: "const ABRE = /^\\t<([A-Za-z0-9_.]+) Object(ID|UID)=\"([^\"]+)\"/;",
+        a: "const ABRE = /^\\s*<([A-Za-z0-9_.]+) Object(ID|UID)=\"([^\"]+)\"/;",
+        filtro: 'prproj.test',
+        caen: ['lo que cuelga del <Project> no entra al índice']
+    },
+    {
+        que: 'al clonar se renueva también el <DefMappingID>, que es una constante y no una identidad',
+        archivo: 'engine/prproj.js',
+        de: 'const GUID_SUELTO = /<(ID|ClipID)>([^<]*)<\\/(?:ID|ClipID)>/g;',
+        a: 'const GUID_SUELTO = /<(ID|ClipID|DefMappingID)>([^<]*)<\\/(?:ID|ClipID|DefMappingID)>/g;',
+        filtro: 'prproj.test',
+        caen: ['<ID> y <ClipID> se renuevan; <DefMappingID> no']
+    },
+    {
+        que: 'guardar escribe sin verificar que el grafo cierre',
+        archivo: 'engine/prproj.js',
+        de: '        if (!revision.ok) throw new Error(`el grafo no cierra: ${comoSeLee(revision)}`);\n',
+        a: '',
+        filtro: 'prproj.test',
+        caen: ['guardar se niega a escribir un proyecto roto, y no deja el archivo']
+    },
+    {
+        que: 'un bin recién creado se queda con la lista de ítems vacía en vez de sin lista',
+        archivo: 'engine/prproj-secuencia.js',
+        de: "        p.escribir(bin, p.contenido(bin).replace(/\\n\\t*<Items Version=\"\\d+\">[\\s\\S]*?<\\/Items>/, ''));",
+        a: "        ponerLista(p, bin, 'Items', 'Item', []);",
+        filtro: 'prproj-panel',
+        caen: ['un bin recién creado no lleva lista de ítems']
+    },
+    {
+        que: 'el color de un bin se hereda del molde en vez de escribirse',
+        archivo: 'engine/prproj-secuencia.js',
+        de: "        const props = { 'Column.PropertyText.Label': `BE.Prefs.LabelColors.${ETIQUETAS[COLOR_DE.bin].indice}` };",
+        a: '        const props = {};',
+        filtro: 'prproj-panel',
+        caen: ['un bin sale mango, sin importar de qué color era el que se copió']
+    },
+    {
+        que: 'la poda borra los moldes al descolgar, antes de haber clonado nada',
+        archivo: 'engine/prproj-secuencia.js',
+        de: '        this._deLaPlantilla = new Set(p.cierre([raiz], {}).filter(k => k !== raiz));',
+        a: '        this._deLaPlantilla = new Set(p.cierre([raiz], {}).filter(k => k !== raiz));\n'
+            + '        for (const k of this._deLaPlantilla) p.borrar(k);',
+        filtro: 'prproj-panel',
+        caen: ['pero no borra nada todavía, porque de ahí se clona']
+    },
+    {
+        que: 'la poda mira lo que había antes en vez de lo que la raíz alcanza hoy',
+        archivo: 'engine/prproj-secuencia.js',
+        de: '            if (!vivos.has(k) && p.tiene(k)) { p.borrar(k); podados++; }',
+        a: '            if (p.tiene(k)) { p.borrar(k); podados++; }',
+        filtro: 'prproj-panel',
+        caen: [
+            'y no toca lo que el curso volvió a colgar',
+            'y el archivo queda sano después de podar'
+        ]
+    },
+    {
+        que: 'guardar el primer ítem de un bin da por hecho que la lista ya está',
+        archivo: 'engine/prproj-secuencia.js',
+        de: "        if (ubicarLista(p.contenido(contenedor), 'Items')) {\n"
+            + "            agregarALista(p, contenedor, 'Items', 'Item', attrs);\n"
+            + '            return;\n'
+            + '        }',
+        a: "        agregarALista(p, contenedor, 'Items', 'Item', attrs);\n"
+            + '        if (true) return;',
+        filtro: 'prproj-panel',
+        caen: ['guardar el primer ítem crea la lista que no estaba']
+    },
+    {
+        que: 'la ruta del clip se toma de la URL sin desescaparla',
+        archivo: 'engine/clase-del-xml.js',
+        de: '    return limpia.split(\'/\').map(seg => {\n'
+            + '        try { return decodeURIComponent(seg); } catch (e) { return seg; }\n'
+            + '    }).join(\'/\');',
+        a: '    return limpia;',
+        filtro: 'prproj-clase',
+        caen: [
+            'la ruta vuelve desescapada',
+            'un nombre con acentos y espacios sobrevive la ida y la vuelta'
+        ]
+    },
+    {
+        que: 'los canales se suponen estéreo en vez de leer lo que midió ffprobe',
+        archivo: 'engine/clase-del-xml.js',
+        de: '            canales: canales == null ? 2 : Math.min(2, Math.max(1, Math.round(canales))),',
+        a: '            canales: 2,',
+        filtro: 'prproj-clase',
+        caen: ['el recuento de canales es el que midió ffprobe, no una suposición']
+    },
+    {
+        que: 'las pistas explotadas por canal no se vuelven a juntar (el estéreo queda partido en dos)',
+        archivo: 'engine/clase-del-xml.js',
+        de: '    const salida = [];\n'
+            + '    for (const pista of pistas) {\n'
+            + '        const antes = salida[salida.length - 1];\n'
+            + '        if (antes && mismoMaterial(antes, pista)) continue;\n'
+            + '        salida.push(pista);\n'
+            + '    }\n'
+            + '    return salida;',
+        a: '    return pistas;',
+        filtro: 'prproj-clase',
+        caen: ['un par explotado vuelve a ser una pista']
+    },
+    {
+        que: 'dos pistas se juntan por tener el mismo archivo, sin mirar si traen los mismos cortes',
+        archivo: 'engine/clase-del-xml.js',
+        de: '    return a.cortes.every((c, i) =>\n'
+            + '        c.desdeSeg === b.cortes[i].desdeSeg && c.hastaSeg === b.cortes[i].hastaSeg\n'
+            + '        && c.entradaSeg === b.cortes[i].entradaSeg);',
+        a: '    return true;',
+        filtro: 'prproj-clase',
+        caen: ['el mismo archivo en dos pistas con cortes distintos NO se junta']
+    },
+    {
+        que: 'el bloque de audio se busca desde el <media> y lo caza el de una definición de archivo',
+        archivo: 'engine/clase-del-xml.js',
+        de: "    return { cuerpo, video: video.texto, audio: bloqueDe(cuerpo, 'audio', video.fin).texto };",
+        a: "    return { cuerpo, video: video.texto, audio: bloqueDe(cuerpo, 'audio', media).texto };",
+        filtro: 'prproj-clase',
+        caen: [
+            'un <enabled>FALSE</enabled> es una pista que entra apagada',
+            'un par explotado vuelve a ser una pista',
+            'diez fuentes distintas quedan en diez pistas'
+        ]
+    },
+    {
+        que: 'las notas en vivo le ganan a las clases procesadas (se elige la fuente pobre)',
+        archivo: 'engine/prproj-curso.js',
+        de: "    const cortes = xmlsDe(dirCortes);\n"
+            + "    if (cortes.length) return { ok: true, tipo: 'cortes', dir: dirCortes, xmls: cortes };\n"
+            + '\n'
+            + '    const notas = xmlsDe(dirNotas);\n'
+            + "    if (notas.length) return { ok: true, tipo: 'notas', dir: dirNotas, xmls: notas };",
+        a: "    const notas = xmlsDe(dirNotas);\n"
+            + "    if (notas.length) return { ok: true, tipo: 'notas', dir: dirNotas, xmls: notas };\n"
+            + '\n'
+            + '    const cortes = xmlsDe(dirCortes);\n'
+            + "    if (cortes.length) return { ok: true, tipo: 'cortes', dir: dirCortes, xmls: cortes };",
+        filtro: 'prproj-curso',
+        caen: ['con clases procesadas manda The Cutter']
+    },
+    {
+        que: 'el proyecto se escribe encima del que ya estaba en la carpeta',
+        archivo: 'engine/prproj-curso.js',
+        de: '    if (!fs.existsSync(primera)) return { ruta: primera, corrida: 0 };',
+        a: '    return { ruta: primera, corrida: 0 };',
+        filtro: 'prproj-curso',
+        caen: [
+            'si ya hay uno, se escribe al lado y no encima',
+            'y si hay varios, sigue contando'
+        ]
+    },
+    {
+        que: 'los intermedios del pipeline entran como si fueran clases',
+        archivo: 'engine/prproj-curso.js',
+        de: '        .filter(e => e.isFile() && /\\.xml$/i.test(e.name)\n'
+            + '            && !INTERMEDIOS.test(e.name) && e.name !== MAESTRO)',
+        a: '        .filter(e => e.isFile() && /\\.xml$/i.test(e.name))',
+        filtro: 'prproj-curso',
+        caen: ['los intermedios del pipeline no se confunden con la entrega']
     }
 ];
 
