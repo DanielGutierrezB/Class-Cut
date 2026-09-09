@@ -1,0 +1,328 @@
+/**
+ * grabar-analisis.css — La columna de la derecha del paso Grabar: lo que la
+ * pantalla contesta mientras la clase se graba.
+ *
+ * El panel con sus bloques —la sesión, la cobertura del temario, la calidad del
+ * lenguaje— y, debajo, el monitor de la entrada de video. Van juntos porque son
+ * la misma columna y se reparten su grilla, y van aparte de `grabar.css` porque
+ * esa hoja llegó al techo de mil líneas que el proyecto se puso. La frontera es
+ * la que la pantalla ya tenía: a la izquierda está lo que se toca —las tomas, su
+ * texto, sus bordes—, y acá lo que se mira de reojo sin dejar de grabar.
+ *
+ * Se carga DESPUÉS de `grabar.css` (ver `src/index.html`). Las reglas salieron
+ * de ahí en bloque y sin cambiarle un valor a ninguna, así que el orden en que
+ * llegan al navegador tiene que seguir siendo el mismo o la cascada deja de ser
+ * la que se aprobó.
+ */
+
+/* ── El panel de análisis ────────────────────────────────────────────── */
+
+.grabar-analisis {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.analisis-bloque {
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.analisis-bloque h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+}
+
+/* Los bloques que todavía no miden nada se ven apagados a propósito: un número
+   de relleno que parece real es peor que un espacio vacío. */
+.analisis-bloque.es-pendiente { opacity: 0.7; }
+
+.analisis-filas {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 10px;
+    margin: 0;
+    font-size: 12px;
+}
+
+.analisis-filas dt { color: var(--text-dim); }
+
+.analisis-filas dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.analisis-pendiente {
+    margin: 10px 0 0;
+    font-size: 11px;
+    color: var(--text-mute);
+    line-height: 1.5;
+}
+
+/* Lo que no se pudo medir se dice en ámbar y no en rojo: no es un error de la
+   clase, es que la medición no está — y la clase sigue grabándose igual. */
+.analisis-pendiente.es-falla { color: var(--warn); }
+
+/* Y lo que la app decidió no medir todavía NO va en ámbar, que es el punto: el
+   modelo local no se consulta mientras se graba para no pelearle la GPU al
+   Whisper (`engine/gpu.js`), y en ámbar se leería como que algo se rompió. Va
+   con la barra del acento —lo mismo que la app usa para hablar de sí misma— y
+   con la tinta un escalón más clara, para que se lea entero y no se saltee. */
+.analisis-pendiente.es-abstenido {
+    color: var(--text-dim);
+    padding-left: 8px;
+    border-left: 2px solid var(--accent-dim);
+}
+
+/* Un rótulo que separa dos grupos de filas dentro de un mismo bloque, cuando lo
+   de arriba y lo de abajo no se miden igual. Va con una línea encima porque es
+   una frontera y no un título: lo de abajo es del mismo bloque. */
+.analisis-rotulo {
+    margin: 12px 0 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+    font-size: 11px;
+    color: var(--text-mute);
+}
+
+/* ── La zona de un número ────────────────────────────────────────────────
+ *
+ * El profesor está grabando: lee esto de reojo, sin frenar la clase. Así que el
+ * número tiene que traer puesto si está en zona o no, y por eso es color y no
+ * un rótulo — un rótulo hay que leerlo.
+ *
+ * Lo que está bien se marca flojito y lo que hay que mirar, fuerte. Es a
+ * propósito y es la mitad de que esto no se vuelva ruido: si el verde gritara
+ * igual que el ámbar, seis filas encendidas todo el tiempo se dejan de mirar a
+ * los dos minutos. Lo normal tiene que verse normal. */
+.analisis-filas dd.es-bien { color: var(--ok); opacity: 0.75; }
+
+.analisis-filas dd.es-ojo {
+    color: var(--warn);
+    font-weight: 600;
+}
+
+/* ── La calidad del lenguaje ─────────────────────────────────────────── */
+
+/* Qué muletillas fueron, que es lo primero que pregunta quien ve el número. */
+.lengua-cuales {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.lengua-detalle {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+}
+
+/* La cita va como se cita en el resto de la app: es lo que el profesor dijo, y
+   reconocer su propia frase es lo que hace que el aviso se entienda solo. */
+.lengua-cita { color: var(--text); font-style: italic; }
+
+/* ── La lista de temas del CD ────────────────────────────────────────────
+ *
+ * El desplegable es el mismo gesto que el de las clases ya grabadas y el de la
+ * clave en Ajustes, así que se ve igual: la flechita a la izquierda del
+ * resumen, sin el triángulo nativo. */
+
+.temario-caja { margin-top: 10px; }
+
+.temario-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    font-size: 11.5px;
+    color: var(--text-dim);
+}
+
+.temario-summary::-webkit-details-marker { display: none; }
+
+.temario-summary::before {
+    content: '▸';
+    color: var(--text-mute);
+    font-size: 10px;
+}
+
+.temario-caja[open] > .temario-summary::before { content: '▾'; }
+
+.temario-summary:hover { color: var(--text); }
+
+/* De dónde salió la lista, cuando no la pegó nadie en esta clase. */
+.temario-origen { color: var(--text-mute); font-size: 11px; }
+
+.temario-campo {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.temario-campo:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.temario-campo::placeholder { color: var(--text-mute); }
+
+.temario-acciones {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.temario-objetivos { margin-top: 12px; }
+
+.temario-grupo {
+    margin: 10px 0 4px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-mute);
+}
+
+.temario-grupo:first-child { margin-top: 0; }
+
+.temario-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.temario-lista li {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 0 3px 10px;
+    border-left: 2px solid transparent;
+}
+
+/* Los que faltan van encendidos y los cubiertos apagados, al revés de lo que
+   pediría la intuición: lo que hay que leer de este bloque con la clase en
+   curso es lo que el profesor todavía tiene que decir. Lo ya dicho está para
+   poder confirmarlo, no para mirarlo. */
+.temario-lista.es-falta li {
+    border-left-color: var(--warn);
+    color: var(--text);
+}
+
+.temario-lista.es-cubierto li {
+    border-left-color: var(--ok);
+    color: var(--text-dim);
+}
+
+.temario-tema { flex: 1; }
+
+/* En qué toma quedó dicho: es el dato que deja ir a mirarla. */
+.temario-toma {
+    flex: none;
+    font-size: 10.5px;
+    color: var(--text-mute);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── El monitor de referencia ────────────────────────────────────────────
+ *
+ * Va abajo a la derecha, debajo del panel de análisis. Es la esquina más lejos
+ * del transcript, que es lo único de esta pantalla que se lee palabra por
+ * palabra —y sobre lo que se selecciona para comentar y se arrastran los
+ * bordes—; el monitor se mira de reojo, para saber si entra imagen y hacia
+ * dónde apunta, así que el sitio que le toca es el que no le saca nada a lo que
+ * sí se lee. La columna de la derecha ya mide 300px con la vista cerrada o
+ * abierta: desplegarla no mueve ni un píxel de la de la izquierda.
+ *
+ * Con la vista cerrada el elemento va `hidden` y su fila mide cero. No es solo
+ * estética: cerrada no hay cámara abierta, y lo que no está no ocupa. */
+
+@media (min-width: 1101px) {
+    .grabar-cols { grid-template-rows: minmax(0, 1fr) auto; }
+    .grabar-izq { grid-row: 1 / -1; }
+    .grabar-analisis { grid-column: 2; grid-row: 1; }
+    .grabar-ojo { grid-column: 2; grid-row: 2; }
+}
+
+/* Punteado y no macizo, y sin nada rojo: el borde entero es el que dice que esto
+   no es una fuente que esté grabando. El rojo y el punto que late son el idioma
+   de "REC" en todas las cámaras del mundo, y usarlos acá sería decir justo lo
+   contrario de lo que pasa. */
+.grabar-ojo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    /* El tope es el ancho de la columna de la derecha, y está para la pantalla
+       angosta: ahí las columnas se apilan y sin esto el monitor se estiraría a
+       todo lo ancho —medio metro de cámara de referencia debajo de las tomas—.
+       Pegado a la derecha para que siga siendo la misma esquina de siempre. */
+    max-width: 320px;
+    margin-left: auto;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+}
+
+.grabar-ojo-cabeza {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Dicho con todas las letras y no con un ícono: confundir este monitor con una
+   cámara que graba es un malentendido caro, y un ícono se interpreta. */
+.grabar-ojo-marca {
+    flex: 1;
+    font-size: 10px;
+    text-transform: uppercase;
+    /* Apretada: en los 300px de la columna, con el botón de cerrar al lado, con
+       el espaciado del resto de los títulos la frase caía en dos renglones y
+       partida por la mitad se lee peor que chica. */
+    letter-spacing: 0.02em;
+    color: var(--text-mute);
+}
+
+/* Negro y no del color del fondo: el rectángulo tiene que leerse como una
+   pantalla incluso cuando la cámara todavía no mandó el primer cuadro. */
+.grabar-ojo-video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: var(--radius-sm);
+    /* `contain` y no `cover`: una cámara 4:3 recortada muestra menos de lo que
+       está entrando, que es exactamente lo que se vino a mirar. */
+    object-fit: contain;
+}
+
+.grabar-ojo-nota {
+    margin: 0;
+    font-size: 12px;
+    color: var(--warn);
+}
+
+/* La barra de arriba ya lleva cinco grupos y el selector de audio se queda con
+   los 280px. Este se recorta: los nombres de cámara son cortos —"Rodecaster
+   Video", "FaceTime HD"— y de todos modos el `title` del selector no es lo que
+   se mira para saber si entra imagen; para eso está la vista. */
+.grabar-ojo-fuente .picker { max-width: 190px; }

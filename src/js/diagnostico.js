@@ -25,7 +25,8 @@ export async function showDoctor() {
     for (const tool of doc.tools) {
         rows.push([tool.key, tool.found
             ? `<span class="badge badge-ok">ok</span> <span class="mono">${esc(tool.path)}</span> <span class="cell-dim">(${esc(tool.source)})</span>`
-            : `<span class="badge ${tool.required ? 'badge-err' : 'badge-warn'}">${tool.required ? 'falta' : 'todavía no hace falta'}</span> <span class="cell-dim">buscado en: ${esc(tool.searched.join(', '))}</span>`
+            : `<span class="badge ${tool.required ? 'badge-err' : 'badge-warn'}">${tool.required ? 'falta' : 'opcional'}</span> ` +
+                `<span class="cell-dim">${tool.nota ? esc(tool.nota) + ' ' : ''}Buscado en: ${esc(tool.searched.join(', '))}</span>`
         ]);
     }
     if (doc.ai) rows.push([nombreDelCriterio(doc.ai), insigniaModelo(doc.ai)]);

@@ -15,6 +15,7 @@ import {
     actualizarDuracion
 } from './vista-clases.js';
 import { run, startProcessing, alAvanzarEtapa, alCambiarClase } from './vista-corrida.js';
+import { abrirGrabar, wireGrabar, pintarEstado } from './grabar/index.js';
 import { openReview, wireReview } from './visor/index.js';
 import { audioDelReproductor, cerrarReproductor } from './visor/reproductor.js';
 import { rev } from './visor/estado.js';
@@ -24,31 +25,36 @@ import { showAjustes } from './ajustes.js';
 import { init as initActualizar, buscar as buscarUpdate } from './actualizar.js';
 import { refrescar as refrescarModelo } from './modelo.js';
 
-/** ¿Hubo una corrida en esta sesión? Es lo que hace visitable el paso 3. */
+/** ¿Hubo una corrida en esta sesión? Es lo que hace visitable el paso de Procesar. */
 const huboCorrida = () => run.total > 0;
 
 /** Ir a un paso. Es lo único que sabe atar una vista con la de al lado. */
 function irAPaso(n) {
     anotar('paso', { a: n, carpetas: state.carpetas.length, clases: clases().length });
     switch (n) {
+        case PASOS.grabar:
+            closeDrawer();
+            cerrarReproductor();
+            abrirGrabar();
+            return;
         case PASOS.carpetas:
             closeDrawer();
             cerrarReproductor();
             dropError('');
             renderCargadas();
             showView('drop');
-            marcarPaso(PASOS.carpetas, huboCorrida());
+            marcarPaso(PASOS.carpetas);
             return;
         case PASOS.clases:
             cerrarReproductor();
             renderScan();
             showView('classes');
-            marcarPaso(PASOS.clases, huboCorrida());
+            marcarPaso(PASOS.clases);
             return;
         case PASOS.procesar:
             cerrarReproductor();
             showView('run');
-            marcarPaso(PASOS.procesar, huboCorrida());
+            marcarPaso(PASOS.procesar);
             return;
         case PASOS.revisar:
             // El visor decide con qué clase abre y marca su propio paso.
@@ -74,12 +80,13 @@ async function sacarCarpeta(root) {
     quitarCarpeta(root);
     if (!state.carpetas.length) { irAPaso(PASOS.carpetas); return; }
     renderScan();
-    refrescarPasos(huboCorrida());
+    refrescarPasos();
 }
 
 async function init() {
     const info = await window.cc.appInfo();
 
+    wireGrabar();
     wireCarpeta({ alCargar: () => irAPaso(PASOS.clases) });
     wireClases({ alQuitarCarpeta: sacarCarpeta });
     wireReview({ alVolver: () => irAPaso(PASOS.clases) });
@@ -107,7 +114,7 @@ async function init() {
         // que el cabezal no puede seguir diciendo que está corriendo.
         refrescarModelo();
         // Y ahora hay clases procesadas: el paso de Revisar se puede visitar.
-        refrescarPasos(huboCorrida());
+        refrescarPasos();
     };
     $('btn-process').onclick = () => procesar(false);
     // Tirar horas de transcripción no puede pasar por un clic distraído.
@@ -232,6 +239,9 @@ async function llenarModelos() {
 // pública toda función que existiera.
 window.dev = {
     addFolder, abrirClase: openDrawer, abrirVisor: openReview, buscarUpdate,
+    // La toma de notas en vivo, para poder mirarla sin un Rodecaster enchufado:
+    // `grabarEstado` dibuja la lista con un estado ya grabado (ver `grabar/index.js`).
+    abrirGrabar, grabarEstado: pintarEstado,
     // Para poder comparar desde afuera lo que se ve contra lo que dicen los
     // datos: sin esto, verificar el reproductor es mirar la pantalla y opinar.
     visor: () => rev,

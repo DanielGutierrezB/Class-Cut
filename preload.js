@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('cc', {
     updateDownload: payload => ipcRenderer.invoke('update-download', payload),
     updateCancel: () => ipcRenderer.invoke('update-cancel'),
     updateInstall: target => ipcRenderer.invoke('update-install', target),
-    pickFolder: () => ipcRenderer.invoke('pick-folder'),
+    pickFolder: opciones => ipcRenderer.invoke('pick-folder', opciones),
     confirmar: payload => ipcRenderer.invoke('confirmar', payload),
     preguntar: payload => ipcRenderer.invoke('preguntar', payload),
     scan: folder => ipcRenderer.invoke('scan', folder),
@@ -42,6 +42,26 @@ contextBridge.exposeInMainWorld('cc', {
     pendientes: id => ipcRenderer.invoke('pendientes', id),
     saveNotas: payload => ipcRenderer.invoke('save-notas', payload),
     waveformWindow: payload => ipcRenderer.invoke('waveform-window', payload),
+
+    // Toma de notas en vivo. El audio va por `send` y no por `invoke` porque
+    // llega varias veces por segundo y no hay nada que esperar de vuelta:
+    // esperar una respuesta por cada pedazo pondría el reloj de la captura a
+    // depender de lo rápido que conteste el disco.
+    grabarIniciar: payload => ipcRenderer.invoke('grabar-iniciar', payload),
+    grabarPcm: chunk => ipcRenderer.send('grabar-pcm', chunk),
+    grabarClaqueta: paredMs => ipcRenderer.invoke('grabar-claqueta', paredMs),
+    grabarTemario: texto => ipcRenderer.invoke('grabar-temario', texto),
+    grabarEditar: cambio => ipcRenderer.invoke('grabar-editar', cambio),
+    grabarEditarGrabada: (json, cambio) => ipcRenderer.invoke('grabar-editar-grabada', json, cambio),
+    grabarCerrarToma: () => ipcRenderer.invoke('grabar-cerrar-toma'),
+    grabarEstado: () => ipcRenderer.invoke('grabar-estado'),
+    grabarVistas: () => ipcRenderer.invoke('grabar-vistas'),
+    grabarListar: dirs => ipcRenderer.invoke('grabar-listar', dirs),
+    grabarRegenerar: json => ipcRenderer.invoke('grabar-regenerar', json),
+    grabarTerminar: () => ipcRenderer.invoke('grabar-terminar'),
+    onGrabarAviso: callback => {
+        ipcRenderer.on('grabar-aviso', (_event, payload) => callback(payload));
+    },
     reveal: target => ipcRenderer.invoke('reveal', target),
     openPath: target => ipcRenderer.invoke('open-path', target),
 

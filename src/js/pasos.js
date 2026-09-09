@@ -18,18 +18,33 @@ import { $ } from './chrome.js';
 import { state, hayRevisable } from './estado.js';
 
 export const PASOS = {
-    carpetas: 1,
-    clases: 2,
-    procesar: 3,
-    revisar: 4
+    // Grabar va primero porque es lo primero que pasa en el tiempo: las notas se
+    // toman durante el rodaje y todo lo demás trabaja sobre lo que salió de ahí.
+    // Es el único paso al que siempre se puede entrar: no necesita que haya nada
+    // cargado, justamente porque es de donde sale lo que se carga.
+    grabar: 1,
+    carpetas: 2,
+    clases: 3,
+    procesar: 4,
+    revisar: 5
 };
 
 let actual = PASOS.carpetas;
 let irA = null;
+/**
+ * Quién sabe si hubo una corrida. Lo pone `wirePasos`, y es la ÚNICA fuente:
+ * antes cada vista le pasaba su propia respuesta a `marcarPaso`, y una que se
+ * mostraba sin pasar nada apagaba Procesar, mientras que otra pasaba `true` y
+ * lo prendía en una sesión sin corrida. Hasta que se cablea, no hubo ninguna.
+ */
+let saberSiHuboCorrida = () => false;
 
 /** Si se puede ir a un paso, y si no, por qué no. */
-function alcance(n, corrida) {
+function alcance(n) {
+    const corrida = saberSiHuboCorrida();
     switch (n) {
+        case PASOS.grabar:
+            return { puede: true, porque: 'Tomar las notas mientras se graba la clase' };
         case PASOS.carpetas:
             return { puede: true, porque: 'Agregar otra carpeta o cambiar de curso' };
         case PASOS.clases:
@@ -51,15 +66,11 @@ function alcance(n, corrida) {
     }
 }
 
-/**
- * Repinta el cabezal.
- *
- * @param {boolean} corrida si hubo un procesamiento en esta sesión
- */
-export function refrescarPasos(corrida) {
+/** Repinta el cabezal. Lo llaman las vistas cuando cambia lo que hace visitable un paso. */
+export function refrescarPasos() {
     for (const boton of document.querySelectorAll('#steps .step')) {
         const n = Number(boton.dataset.step);
-        const { puede, porque } = alcance(n, corrida);
+        const { puede, porque } = alcance(n);
         boton.classList.toggle('is-current', n === actual);
         boton.classList.toggle('is-done', n < actual && puede);
         boton.disabled = !puede || n === actual;
@@ -68,9 +79,9 @@ export function refrescarPasos(corrida) {
 }
 
 /** Deja marcado en qué paso estamos. Lo llaman las vistas al mostrarse. */
-export function marcarPaso(n, corrida) {
+export function marcarPaso(n) {
     actual = n;
-    refrescarPasos(Boolean(corrida));
+    refrescarPasos();
 }
 
 export function pasoActual() {
@@ -82,11 +93,12 @@ export function pasoActual() {
  */
 export function wirePasos(params) {
     irA = params.irA;
+    saberSiHuboCorrida = params.corrida;
     for (const boton of document.querySelectorAll('#steps .step')) {
         boton.onclick = () => {
             const n = Number(boton.dataset.step);
-            if (n !== actual && alcance(n, params.corrida()).puede) irA(n);
+            if (n !== actual && alcance(n).puede) irA(n);
         };
     }
-    refrescarPasos(params.corrida());
+    refrescarPasos();
 }

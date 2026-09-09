@@ -32,6 +32,7 @@ const claudeOauth = require('./engine/claude-oauth');
 const updates = require('./engine/updates');
 const mediaServer = require('./engine/media-server');
 const registro = require('./engine/registro');
+const ipcGrabar = require('./ipc/grabar');
 const devShot = require('./dev-shot');
 
 let mainWindow = null;
@@ -152,7 +153,8 @@ app.on('window-all-closed', () => {
 });
 
 // El modelo es un proceso aparte y no se entera de que la app cerró: sin esto
-// queda cargado ocupando memoria hasta que alguien lo mate a mano.
+// queda cargado ocupando memoria hasta que alguien lo mate a mano. (La grabación
+// en curso, si hay, la cierra su propio puente: `ipc/grabar.js`.)
 app.on('before-quit', () => { ia.parar(); });
 
 // ─── Puente con la ventana ────────────────────────────────────────────
@@ -221,17 +223,26 @@ function ajustesParaLaVentana() {
 
 ipcMain.handle('ajustes-leer', () => ajustesParaLaVentana());
 
+/**
+ * Guarda un PARCHE sobre lo que hay, no el objeto entero.
+ *
+ * Cada pantalla manda solo lo suyo: la de Ajustes el criterio de IA, la de
+ * Grabar dónde caen las notas. Si la de Ajustes mandara todo lo que cargó al
+ * abrirse, pisaría lo que la otra guardó mientras estaba abierta.
+ */
 ipcMain.handle('ajustes-guardar', (event, datos) => {
+    const parche = datos || {};
     try {
         // Una clave pegada a mano viaja UNA vez por acá y termina en el Llavero;
         // `ajustes.guardar` (sanear) la descarta del JSON.
-        const pegada = datos && datos.ia && datos.ia.anthropic && datos.ia.anthropic.apiKey;
+        const pegada = parche.ia && parche.ia.anthropic && parche.ia.anthropic.apiKey;
         if (pegada) claves.guardar('anthropic', String(pegada).trim());
-        const guardados = ajustes.guardar(datos);
+        const guardados = ajustes.guardar({ ...ajustes.leer(), ...parche });
         // Del proveedor y el modelo, no del objeto entero: `datos` es
         // exactamente el sitio por donde puede pasar una clave pegada a mano, y
         // `registro.sanear` la taparía igual, pero no hace falta ni acercarla.
         anotar('ajustes.guardados', {
+            que: Object.keys(parche),
             proveedor: guardados.ia.proveedor,
             modelo: guardados.ia[guardados.ia.proveedor].modelo,
             clavePegada: Boolean(pegada)
@@ -418,19 +429,30 @@ ipcMain.handle('preguntar', async (event, { titulo, mensaje, opciones } = {}) =>
     return result.response >= elegibles.length ? -1 : result.response;
 });
 
-ipcMain.handle('pick-folder', async () => {
+// El texto es de quien llama: el mismo diálogo sirve para agregar una carpeta de
+// curso y para elegir dónde caen las notas de una grabación, y no dicen lo mismo.
+ipcMain.handle('pick-folder', async (event, opciones) => {
+    const o = opciones || {};
     const result = await dialog.showOpenDialog(mainWindow, {
-        title: 'Elegí la carpeta del curso, del día o de la clase',
-        buttonLabel: 'Agregar',
+        title: o.titulo || 'Elegí la carpeta del curso, del día o de la clase',
+        buttonLabel: o.boton || 'Agregar',
         properties: ['openDirectory', 'createDirectory']
     });
     if (result.canceled || !result.filePaths.length) return null;
     return result.filePaths[0];
 });
 
+/**
+ * Escanea una carpeta con lo que la app sabe y el escáner no: dónde caen las
+ * notas que se toman en vivo, para la clase que no trae su XML adentro.
+ */
+function escanear(folder) {
+    return scanner.scan(folder, { notasDirs: ajustes.carpetasDeNotas() });
+}
+
 /** Escanea una carpeta y mide su material, dejándola cargada. */
 async function escanearYMedir(folder) {
-    const result = scanner.scan(folder);
+    const result = escanear(folder);
     if (!result.ok) return result;
 
     send('scan-found', result);
@@ -681,7 +703,7 @@ ipcMain.handle('process', async (event, payload) => {
 
     const classes = [];
     for (const root of raices) {
-        const scan = scanner.scan(root);
+        const scan = escanear(root);
         if (!scan.ok) continue;
         classes.push(...scan.classes.filter(c => wanted.has(c.id)));
     }
@@ -804,6 +826,10 @@ ipcMain.handle('reveal', (event, target) => {
     shell.showItemInFolder(target);
     return true;
 });
+
+// ─── Toma de notas en vivo ────────────────────────────────────────────
+
+ipcGrabar.registrar({ ipcMain, app, send, anotar });
 
 ipcMain.handle('open-path', async (event, target) => {
     if (typeof target !== 'string' || !target) return false;

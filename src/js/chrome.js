@@ -17,6 +17,24 @@ export function anotar(evento, datos) {
     if (window.cc && window.cc.anotar) window.cc.anotar(evento, datos || {});
 }
 
+/**
+ * Recordar una preferencia de la ventana entre sesiones, y leerla.
+ *
+ * Es `localStorage` con el `try` puesto: en modo privado o con el almacén lleno
+ * tira, y una preferencia que no se pudo guardar no puede tumbar nada. Es para
+ * lo que es de la ventana —qué entrada de audio, qué ancho de panel, qué
+ * volumen—; lo que el motor necesita saber va a los ajustes, no acá.
+ *
+ * @returns {string|null} lo guardado, tal cual; quien lo lee lo interpreta
+ */
+export function recordado(clave) {
+    try { return localStorage.getItem(clave); } catch { return null; }
+}
+
+export function recordar(clave, valor) {
+    try { localStorage.setItem(clave, String(valor)); } catch { /* modo privado */ }
+}
+
 // Quién está en cada paso del cabezal y a cuál se puede ir vive en `pasos.js`:
 // dejó de ser "pintar el número que toca" cuando los pasos se volvieron
 // navegables en las dos direcciones.

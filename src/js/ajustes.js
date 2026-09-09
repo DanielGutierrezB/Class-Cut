@@ -169,7 +169,10 @@ async function probar() {
 
 async function guardar() {
     recogerFormulario();
-    const res = await window.cc.ajustesGuardar(borrador);
+    // Solo el criterio de IA, que es lo que esta pantalla edita. Lo demás que
+    // hay en los ajustes (dónde caen las notas en vivo) tiene otro dueño, y
+    // mandarlo de vuelta pisaría lo que ese guardó mientras esto estaba abierto.
+    const res = await window.cc.ajustesGuardar({ ia: borrador.ia });
     if (!res.ok) { toast(res.error); return; }
     borrador = res.ajustes;
     toast('Ajustes guardados. Valen desde la próxima corrida.');
