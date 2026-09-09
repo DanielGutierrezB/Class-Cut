@@ -25,6 +25,8 @@
 
 const fs = require('fs');
 
+const vivo = require('./notas-vivo');
+
 // El conteo con el que arranca cada toma. Escrito de oído, así que aparece como
 // "3, 2, 1.", "3. 2, 1.", "3 2 1.", "Ok, 3 2 1." y hasta "3 2 3 2 1." (un falso
 // arranque, en el curso real). Se pide un run de al menos dos números para no
@@ -35,6 +37,10 @@ const COUNT_RUN = /^(?:ok\b\s*[.,]?\s*)?(?:(?:3|2|1|tres|dos|uno)\b\s*[.,]?\s*){
 // escribe la herramienta del CD hoy; "claqueta" queda aceptado por si algún día
 // se escribe en español.
 const CLAP_TEXT = /clapperboard|claqueta/i;
+
+// La firma que deja la toma de notas en vivo (ver `FIRMA` en `notas-xml.js`).
+// Se escribe como comentario, así que hay que buscarla en el texto crudo.
+const FIRMA_EN_VIVO = /class-cut:\s*notas-en-vivo/i;
 
 const SEPARATOR = ' - ';
 
@@ -155,6 +161,13 @@ function parseXml(text, options) {
     const width = tagNumber(formatBlock, 'width');
     const height = tagNumber(formatBlock, 'height');
 
+    // Si lo escribió la toma de notas en vivo de esta misma app (paso "Grabar").
+    // Se busca en el archivo entero porque la firma va antes de la <sequence>.
+    // Cambia una cosa en post: el desfase de una clase así es la demora entre
+    // apretar dos botones y viene bien medido, así que `align.js` le da más
+    // margen antes de pedir que alguien lo confirme a mano.
+    const deNotasEnVivo = FIRMA_EN_VIVO.test(src);
+
     const markers = [];
     const markerRe = /<marker>([\s\S]*?)<\/marker>/g;
     let mm;
@@ -269,6 +282,7 @@ function parseXml(text, options) {
         timebase,
         ntsc,
         mediaTimebase,
+        deNotasEnVivo,
         nominalDurationFrames,
         nominalDurationSec: nominalDurationFrames == null ? null : nominalDurationFrames / timebase,
         width,
@@ -289,7 +303,14 @@ function makeBlock(inMarker, outMarker, timebase, idx) {
     const endFrame = outMarker ? outMarker.inFrame : inMarker.outFrame;
     return {
         index: idx,
-        view: inMarker.name || '',
+        // El nombre del marcador es la vista, y es lo único del marcador que se
+        // traduce: el `comment` es de quien escribió la nota y no se toca nunca,
+        // pero el nombre es un identificador que el resto del pipeline usa para
+        // buscar en la tabla de vistas. Estos XML los escribió la herramienta
+        // del CD el día que tomó esas notas, así que pueden traer nombres que
+        // ya no se ofrecen (`SL`, `SR`); si llegaran crudos, el plan de cortes
+        // los mandaría a la primera cámara avisando "vista desconocida".
+        view: vivo.vistaLeida(inMarker.name),
         color: inMarker.color,
         startFrame: inMarker.inFrame,
         endFrame,

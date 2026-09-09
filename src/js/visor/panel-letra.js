@@ -14,6 +14,7 @@
  */
 
 import { $, toast } from '../chrome.js';
+import { spansSeleccionados } from '../seleccion.js';
 import { rev } from './estado.js';
 import { notas, guardar } from './comentarios.js';
 import { repartir, palabraEn, anclaDe } from './letra.js';
@@ -234,12 +235,7 @@ function fueraDeVista(elemento) {
 
 /** Qué palabras abarca lo que el editor dejó seleccionado. */
 function seleccionDePalabras() {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
-
-    const rango = sel.getRangeAt(0);
-    const palabras = [...$('letra-body').querySelectorAll('.letra-palabra')]
-        .filter(span => rango.intersectsNode(span));
+    const palabras = spansSeleccionados($('letra-body'), '.letra-palabra');
     if (!palabras.length) return null;
 
     const bloqueIndice = Number(palabras[0].dataset.bloque);

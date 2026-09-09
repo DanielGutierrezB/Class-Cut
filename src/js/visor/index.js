@@ -1,12 +1,12 @@
 'use strict';
 /**
- * Paso 4: revisar los cortes antes de dar la clase por buena.
+ * Paso 5: revisar los cortes antes de dar la clase por buena.
  *
  * Este archivo coordina; lo que dibuja está en `onda`, `bordes` y `guion`.
  */
 
 import { $, showView, toast, anotar, estaEscribiendo } from '../chrome.js';
-import { esc, fmtClock, fmtDur, plural } from '../formato.js';
+import { claseDeVista, esc, fmtClock, fmtDur, plural } from '../formato.js';
 import { state, clases } from '../estado.js';
 import { marcarPaso, PASOS } from '../pasos.js';
 import { rev, actual, alRedibujar, cambio, editar, deshacer, rehacer, olvidarHistoria } from './estado.js';
@@ -56,7 +56,7 @@ export async function openReview(id) {
     pausarEscucha();
 
     showView('review');
-    marcarPaso(PASOS.revisar, true);
+    marcarPaso(PASOS.revisar);
     $('rev-title').textContent = 'Cargando…';
 
     // Los cubos de la onda: uno por píxel del canvas y no más. Eran 2400 para
@@ -226,7 +226,7 @@ function renderReviewList() {
                 <span class="rev-item-n">Bloque ${segment.blockIndex + 1}</span>
                 <span class="rev-item-time">${fmtClock(segment.sourceStartSec)}</span>
                 <span class="cell-dim">${(segment.sourceEndSec - segment.sourceStartSec).toFixed(1)}s</span>
-                <span class="badge ${segment.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(segment.view)}</span>
+                <span class="badge ${claseDeVista(segment.view)}">${esc(segment.view)}</span>
                 ${segment.keep ? '' : `<span class="badge badge-err" title="${esc(segment.disabledReason || 'Lo sacaste de la clase')}">fuera</span>`}
                 ${aire ? `<span class="badge badge-warn" title="No se dice nada durante esos segundos">⏸ ${Math.round(aire)}s</span>` : ''}
                 ${notas ? `<span class="badge badge-nota" title="Va a salir como marcador en el XML">✎ ${notas}</span>` : ''}

@@ -10,6 +10,8 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 
+const vivo = require('../engine/notas-vivo');
+
 /** El módulo es ESM porque vive en la ventana; desde acá se importa a mano. */
 async function cargar() {
     return import(pathToFileURL(path.join(__dirname, '..', 'src', 'js', 'visor', 'pista.js')).href);
@@ -158,6 +160,23 @@ module.exports = async t => {
         const p = conRecuadro(planDeEjemplo());
         t.eq(p.tramos[1].camara, 1, 'la pantalla va de imagen principal');
         t.eq(p.tramos[1].inset, 0, 'el profesor va en el recuadro');
+    });
+
+    t.test('slides, multi y doble también van con la pantalla, y con recuadro', () => {
+        // Es la mitad del cambio que fundió `SL` y `SR` en `S`: las cuatro vistas
+        // que no son el profesor salen del grabador de pantalla, así que las
+        // cuatro heredan su tratamiento —el color de la cámara 2 en la tira y el
+        // profesor en la esquina—. El mapa se pide al motor y no se escribe acá:
+        // si allá cambiara a qué fuente va una vista, esto tiene que enterarse.
+        const plan = ['S', 'MG', 'X2'].map((view, index) => ({
+            blockIndex: index, keep: true,
+            sourceStartSec: index * 100, sourceEndSec: index * 100 + 10, view
+        }));
+        const p = pista.construir(plan, {
+            viewMap: vivo.MAPA_DE_VISTAS, camaras: 2, vistaDelProfesor: 'PV'
+        });
+        t.deep(p.tramos.map(x => x.camara), [1, 1, 1]);
+        t.deep(p.tramos.map(x => x.inset), [0, 0, 0]);
     });
 
     t.test('un bloque del profesor no lleva recuadro', () => {

@@ -55,7 +55,11 @@ export function renderEdges() {
     $('rev-keep').checked = segment.keep !== false;
 
     const cameras = rev.data.cameras || [];
-    const viewMap = rev.data.cutplan.viewMap || { PV: 0, R: 1 };
+    // Las vistas que se ofrecen son las del mapa, y el mapa lo completa el motor
+    // al servir la revisión (`resolveViewMap` en `engine/cutplan.js`). Acá había
+    // un `{PV: 0, R: 1}` de respaldo: una tercera copia de qué vistas existen y a
+    // qué fuente va cada una, que se quedaba vieja sin que nada se quejara.
+    const viewMap = rev.data.cutplan.viewMap;
     $('rev-views').innerHTML = Object.keys(viewMap).map(view => {
         const camera = cameras[viewMap[view]];
         return `<button class="view-btn ${segment.view === view ? 'is-on' : ''}" data-view="${esc(view)}">

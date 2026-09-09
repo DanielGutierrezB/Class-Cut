@@ -83,7 +83,14 @@ function loadReview(params) {
         fps: cls.fps || 30,
         liveMixPath: cls.liveMixPath,
         cameras: (cls.videos || []).map((v, i) => ({ index: i, name: v.name, path: v.path })),
-        cutplan,
+        // Con la tabla de vistas completada al servir, no con la que se guardó el
+        // día que se procesó: de esa tabla salen tanto la fuente con la que el
+        // reproductor muestra cada bloque como los botones con los que se cambia
+        // de vista (`src/js/visor/bordes.js`). Sin completarla, una clase vieja
+        // ofrece las vistas que existían entonces y muestra las demás con la
+        // primera cámara, y volver a guardar la arreglaría sola pero recién
+        // después de haber mirado el corte equivocado.
+        cutplan: { ...cutplan, viewMap: cutplanEngine.resolveViewMap(cutplan.viewMap) },
         offset: align ? align.offset : null,
         refine: align ? align.refine : null,
         // Lo que se dijo dos veces y ya se quitó. Va al visor para que el guion

@@ -49,6 +49,22 @@ const DEFAULTS = {
     maxOffsetSec: 60     // más que esto no se aplica solo
 };
 
+/**
+ * El mismo tope, pero cuando las notas se tomaron con la herramienta en vivo.
+ *
+ * El de 60 s existe porque un XML escrito a mano puede tener los marcadores en
+ * cualquier parte, y un desfase enorme suele significar que están mal y no que la
+ * clase empiece tarde: pedir confirmación evita correr toda la clase por un error
+ * de tipeo.
+ *
+ * Con las notas en vivo el desfase es otra cosa: es la demora entre apretar
+ * "Iniciar grabación" y apretar grabar en el Rodecaster, y puede ser de minutos
+ * si alguien se distrajo. Además viene bien medido —la claqueta la puso una
+ * máquina y los cues son transcript de verdad, no cincuenta caracteres
+ * recortados—, así que hacer que un humano lo confirme no aporta nada.
+ */
+const MAX_OFFSET_EN_VIVO = 600;
+
 const CONFIDENCE = { alta: 'alta', media: 'media', baja: 'baja' };
 
 function opt(options, key) {
@@ -359,7 +375,8 @@ function sealEdge(edge, options) {
 function alignClass(params) {
     const {
         blocks = [], words = [], wav = null,
-        classNumber = null, clapMarkerSec = null, durationSec = null
+        classNumber = null, clapMarkerSec = null, durationSec = null,
+        deNotasEnVivo = false
     } = params || {};
     const options = params && params.options ? params.options : {};
     const fps = opt(options, 'fps');
@@ -374,7 +391,10 @@ function alignClass(params) {
     let offsetSec = decision.chosen.value || 0;
     let needsConfirmation = false;
 
-    if (Math.abs(offsetSec) > opt(options, 'maxOffsetSec')) {
+    const topeDelDesfase = deNotasEnVivo
+        ? Math.max(MAX_OFFSET_EN_VIVO, opt(options, 'maxOffsetSec'))
+        : opt(options, 'maxOffsetSec');
+    if (Math.abs(offsetSec) > topeDelDesfase) {
         needsConfirmation = true;
         warnings.push({
             code: 'desfase_grande',
@@ -586,5 +606,5 @@ function enforce(blocks, context) {
 module.exports = {
     alignClass, anchorEdge, applySnap, refineWithAudio, sealEdge,
     offsetProbe, chooseOffset, limitsFor,
-    ALIGN_VERSION, DEFAULTS, CONFIDENCE
+    ALIGN_VERSION, DEFAULTS, CONFIDENCE, MAX_OFFSET_EN_VIVO
 };

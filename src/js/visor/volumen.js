@@ -24,7 +24,7 @@
  * exactamente eso— y no tiene sentido pagar ese riesgo.
  */
 
-import { $ } from '../chrome.js';
+import { $, recordar, recordado as leerRecordado } from '../chrome.js';
 
 /**
  * Hasta dónde se puede subir.
@@ -329,16 +329,13 @@ function pintar() {
 }
 
 function guardar() {
-    try { localStorage.setItem(RECORDADO, String(estado.porcentaje)); } catch { /* modo privado */ }
+    recordar(RECORDADO, estado.porcentaje);
 }
 
 /** El volumen guardado, o el de fábrica si no hay o quedó fuera de rango. */
 function recordado() {
-    try {
-        const guardado = localStorage.getItem(RECORDADO);
-        if (guardado != null && guardado !== '') return porcentajeValido(guardado);
-    } catch { /* modo privado */ }
-    return POR_DEFECTO;
+    const guardado = leerRecordado(RECORDADO);
+    return guardado != null && guardado !== '' ? porcentajeValido(guardado) : POR_DEFECTO;
 }
 
 function mover(valor) {

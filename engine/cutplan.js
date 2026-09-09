@@ -12,11 +12,31 @@
  * no toca no se borra: entra deshabilitada, y cambiar de plano después es un clic.
  */
 
+const vivo = require('./notas-vivo');
+
 const CUTPLAN_VERSION = 1;
 
-// La convención del curso. Es un default, no una ley: la tabla se arma con los
-// nombres que traiga el XML y un nombre desconocido cae en la primera cámara.
-const DEFAULT_VIEW_MAP = { PV: 0, R: 1 };
+// A qué fuente va cada vista. Sale de la lista de vistas y no de una copia
+// escrita acá: mientras estuvo copiada, esta tabla conocía dos nombres de los
+// seis que la pantalla de grabar ofrecía, y las otras cuatro caían en la primera
+// cámara con un aviso de "vista desconocida" que nadie podía arreglar.
+//
+// Sigue siendo un default y no una ley: la tabla se arma con los nombres que
+// traiga el XML, y uno desconocido cae en la primera cámara.
+const DEFAULT_VIEW_MAP = vivo.MAPA_DE_VISTAS;
+
+/**
+ * La tabla con la que se resuelve una vista, sea de un plan nuevo o de uno viejo.
+ *
+ * El plan guarda su `viewMap` en el disco, así que una clase procesada antes de
+ * que una vista existiera lo tiene sin ella. Lo guardado manda —si alguien mandó
+ * `R` a la primera cámara, así se queda— y lo que falta se completa con lo de
+ * hoy, que es lo que evita que un bloque en `S` de una clase vieja se muestre
+ * con la cámara del profesor solo por la fecha en que se procesó.
+ */
+function resolveViewMap(viewMap) {
+    return { ...DEFAULT_VIEW_MAP, ...(viewMap || {}) };
+}
 
 function round(n) {
     return Math.round(n * 1000) / 1000;
@@ -26,7 +46,8 @@ function round(n) {
  * @param {object} params
  *   blocks      bloques alineados (align.js)
  *   videos      capturas de la clase, en orden
- *   viewMap     {PV: 0, R: 1} — nombre de marcador → índice de cámara
+ *   viewMap     nombre de marcador → índice de cámara; lo que falte sale de
+ *               `DEFAULT_VIEW_MAP`
  *   durationSec duración real del material
  */
 function buildCutplan(params) {
@@ -34,7 +55,7 @@ function buildCutplan(params) {
         blocks = [], videos = [], audios = [],
         durationSec = null, fps = 30
     } = params || {};
-    const viewMap = { ...DEFAULT_VIEW_MAP, ...(params && params.viewMap) };
+    const viewMap = resolveViewMap(params && params.viewMap);
     const warnings = [];
 
     if (!videos.length) {
@@ -173,4 +194,4 @@ function viewsIn(blocks) {
     return counts;
 }
 
-module.exports = { buildCutplan, viewsIn, DEFAULT_VIEW_MAP, CUTPLAN_VERSION };
+module.exports = { buildCutplan, viewsIn, resolveViewMap, DEFAULT_VIEW_MAP, CUTPLAN_VERSION };

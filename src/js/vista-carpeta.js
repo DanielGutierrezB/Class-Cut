@@ -1,5 +1,5 @@
 'use strict';
-/** Paso 1: soltar o elegir carpetas. Se pueden sumar todas las que hagan falta. */
+/** Paso 2: soltar o elegir carpetas. Se pueden sumar todas las que hagan falta. */
 
 import { $, toast } from './chrome.js';
 import { state, clases, ponerCarpeta } from './estado.js';

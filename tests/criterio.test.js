@@ -831,11 +831,25 @@ module.exports = function (t) {
     t.group('colores · el XML conserva lo que puso el CD');
 
     t.test('el entero de Premiere se decodifica a su color real', () => {
-        // PV en el curso real: 4281740498 = RGB(54, 44, 210)
+        // PV en el curso real: 4281740498 = 0xFF362CD2. Viene ABGR, así que el
+        // byte de más peso después del alfa es el AZUL: RGB(210, 44, 54), el rojo
+        // de Premiere. Leído como ARGB daba RGB(54, 44, 210), un azul, y el
+        // marcador llegaba a Resolve de un color que nadie había elegido.
         const color = fcp.colorComponents(4281740498);
-        t.eq(color.red, 54 * 257);
+        t.eq(color.red, 210 * 257);
         t.eq(color.green, 44 * 257);
-        t.eq(color.blue, 210 * 257);
+        t.eq(color.blue, 54 * 257);
+    });
+
+    t.test('el naranja del screen recorder llega naranja', () => {
+        // R en el curso real: 4280578025 = 0xFF246FE9, que las notas de formatos
+        // de OpenTimelineIO listan como el naranja de Premiere. Es el caso que
+        // delató el orden invertido: PV y R salían los dos azules, y la pantalla
+        // de tomar notas pintaba dos vistas del mismo color.
+        const color = fcp.colorComponents(4280578025);
+        t.eq(color.red, 233 * 257);
+        t.eq(color.green, 111 * 257);
+        t.eq(color.blue, 36 * 257);
     });
 
     t.test('la claqueta blanca sigue siendo blanca', () => {
@@ -857,7 +871,7 @@ module.exports = function (t) {
             { name: 'PV', comment: 'x', startSec: 0, color: 4281740498 }, 30
         );
         t.ok(xml.includes('<pproColor>4281740498</pproColor>'), 'falta el entero de Premiere');
-        t.ok(xml.includes('<red>13878</red>'), 'falta el RGB para Resolve');
+        t.ok(xml.includes('<red>53970</red>'), 'falta el RGB para Resolve');
     });
 
     t.test('sin color original no se inventa un pproColor', () => {

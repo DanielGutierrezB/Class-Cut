@@ -36,7 +36,7 @@
  * el por qué está en `aplicarMostrar`.
  */
 
-import { $, toast } from '../chrome.js';
+import { $, toast, recordar, recordado as leerRecordado } from '../chrome.js';
 import { rev } from './estado.js';
 // Con otro nombre: acá ya hay un `guardar`, el que recuerda el interruptor.
 import { notas, guardar as guardarNotas } from './comentarios.js';
@@ -475,12 +475,12 @@ function aplicarMostrar() {
 }
 
 function guardar() {
-    try { localStorage.setItem(RECORDADO, estado.mostrar ? '1' : '0'); } catch { /* modo privado */ }
+    recordar(RECORDADO, estado.mostrar ? '1' : '0');
 }
 
 /** Prendidas salvo que se hayan apagado a mano: es el modo con más información. */
 function recordado() {
-    try { return localStorage.getItem(RECORDADO) !== '0'; } catch { return true; }
+    return leerRecordado(RECORDADO) !== '0';
 }
 
 // ─── Ciclo de vida ────────────────────────────────────────────────────

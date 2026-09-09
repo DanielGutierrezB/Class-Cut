@@ -1,8 +1,8 @@
 'use strict';
-/** Paso 2: la tabla de clases, agrupada por carpeta, y el detalle de una. */
+/** Paso 3: la tabla de clases, agrupada por carpeta, y el detalle de una. */
 
 import { $, alertsHtml, anotar } from './chrome.js';
-import { esc, fmtDur, fmtClock, fmtMs, fmtTokens, plural } from './formato.js';
+import { claseDeVista, esc, fmtDur, fmtClock, fmtMs, fmtTokens, plural } from './formato.js';
 import { state, clases, findClass, marcadas, estaColapsada, alternarCarpeta } from './estado.js';
 
 const KIND_LABEL = {
@@ -88,8 +88,7 @@ function viewBadges(views) {
     const entries = Object.entries(views || {});
     if (!entries.length) return '<span class="cell-dim">—</span>';
     return entries.map(([name, count]) => {
-        const cls = name === 'PV' ? 'badge-pv' : (name === 'R' ? 'badge-r' : 'badge-info');
-        return `<span class="badge ${cls}">${esc(name)} ${count}</span>`;
+        return `<span class="badge ${claseDeVista(name)}">${esc(name)} ${count}</span>`;
     }).join('');
 }
 
@@ -459,7 +458,7 @@ function drawerHtml(cls) {
                 <span class="block-idx">${b.index + 1}.</span>
                 <span class="block-time">${fmtClock(b.startSec)} → ${fmtClock(b.endSec)}</span>
                 <span class="block-dur">${b.durationSec.toFixed(1)} s</span>
-                <span class="badge ${b.view === 'PV' ? 'badge-pv' : (b.view === 'R' ? 'badge-r' : 'badge-info')}">${esc(b.view || '?')}</span>
+                <span class="badge ${claseDeVista(b.view)}">${esc(b.view || '?')}</span>
                 ${b.complete ? '' : '<span class="badge badge-err">sin OUT</span>'}
                 ${b.hasCount ? '' : '<span class="badge badge-warn">sin conteo</span>'}
             </div>

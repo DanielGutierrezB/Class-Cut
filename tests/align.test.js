@@ -152,6 +152,21 @@ module.exports = function (t) {
         t.ok(result.warnings.some(w => w.code === 'desfase_grande'));
     });
 
+    t.test('pero no si las notas se tomaron en vivo', () => {
+        // El tope de 60 s está para atrapar marcadores mal puestos a mano. Con las
+        // notas en vivo el desfase es la demora entre apretar "Iniciar grabación" y
+        // apretar grabar en el Rodecaster, que puede ser de minutos si alguien se
+        // distrajo, y viene bien medido: la claqueta la puso una máquina.
+        const blocks = [block(0, 100, 130, 'primera frase del bloque uno', 'última frase del bloque uno')];
+        const words = say('claqueta 1, clase 1', 200);
+        const result = align.alignClass({
+            blocks, words, classNumber: 1, clapMarkerSec: 10, deNotasEnVivo: true
+        });
+        t.eq(result.offset.needsConfirmation, false);
+        t.eq(result.warnings.some(w => w.code === 'desfase_grande'), false);
+        t.ok(align.MAX_OFFSET_EN_VIVO > align.DEFAULTS.maxOffsetSec);
+    });
+
     t.group('align · anclaje y confianza');
 
     t.test('un bloque cuya frase aparece una sola vez queda en confianza alta', () => {

@@ -106,6 +106,7 @@ async function decidirCortes(params) {
             classNumber: cls.classNumber,
             clapMarkerSec: cls.clapSec,
             durationSec: cls.durationSec,
+            deNotasEnVivo: cls.deNotasEnVivo,
             options
         });
         // Con qué reloj se decidió queda escrito en el plan, y no es un dato de

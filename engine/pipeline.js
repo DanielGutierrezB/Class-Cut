@@ -73,7 +73,7 @@ function cronometro() {
  * @param {object} params
  *   root      raíz agregada (donde va "The Cutter")
  *   cls       clase del escaneo, ya medida
- *   viewMap   {PV: 0, R: 1}
+ *   viewMap   nombre de vista → índice de cámara, para pisar el de `cutplan.js`
  *   force     rehacer la transcripción aunque haya una guardada
  *   onStage   (stage, info) para el progreso
  *   signal    AbortSignal para cancelar

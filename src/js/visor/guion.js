@@ -13,7 +13,8 @@
  */
 
 import { $, toast } from '../chrome.js';
-import { esc, plural } from '../formato.js';
+import { claseDeVista, esc, plural } from '../formato.js';
+import { spansSeleccionados } from '../seleccion.js';
 import { rev, cambio } from './estado.js';
 import { notas, guardar, anclaDeSeleccion } from './comentarios.js';
 import { COLORES_DE_CAMARA, comentariosEn } from './pista.js';
@@ -227,7 +228,7 @@ export function renderScript() {
             <div class="script-lado">
                 <button class="script-n" data-ir="${block.index}"
                         title="Ir a este bloque en Cortes">Bloque ${numeroDe(block)}</button>
-                <span class="badge ${block.view === 'PV' ? 'badge-pv' : 'badge-r'}">${esc(block.view || '—')}</span>
+                <span class="badge ${claseDeVista(block.view)}">${esc(block.view || '—')}</span>
             </div>
             <div>
                 ${block.note ? `<div class="script-note">${esc(block.note)}</div>` : ''}
@@ -480,11 +481,8 @@ export function wireGuion(irALaPestaña) {
         // En el siguiente turno: durante `mouseup` el navegador todavía no
         // terminó de fijar la selección.
         setTimeout(() => {
-            const sel = window.getSelection();
-            if (!sel || sel.isCollapsed || !sel.rangeCount) return;
-            const rango = sel.getRangeAt(0);
-            const spans = [...raiz.querySelectorAll('.script-palabra')]
-                .filter(span => rango.intersectsNode(span));
+            const spans = spansSeleccionados(raiz, '.script-palabra');
+            if (!spans.length) return;
             const ancla = anclaDeSeleccion(palabrasSeleccionadas(spans, bloqueDe));
             if (ancla) abrirCaja(ancla);
         }, 0);

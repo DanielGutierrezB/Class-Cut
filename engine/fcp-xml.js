@@ -446,17 +446,21 @@ function clipItemXml(params) {
 /**
  * El color de un marcador, venga como nombre o como el entero de Premiere.
  *
- * `pproColor` es ARGB empaquetado: el `4281740498` que el Rodecaster le pone a
- * los marcadores PV es RGB(54, 44, 210). Se pasa a componentes de 16 bits (x257)
- * y el color llega idéntico al que eligió el director de contenido.
- */
-/**
- * El color vino como el entero nativo de Premiere y no como nombre.
+ * `pproColor` viene ABGR y no ARGB: el byte de más peso después del alfa es el
+ * AZUL. O sea que el `4280578025` (0xFF246FE9) que el Rodecaster le pone a los
+ * marcadores R es RGB(233, 111, 36) —un naranja—, no RGB(36, 111, 233) —un azul—.
+ * Está documentado así en las notas de formatos de OpenTimelineIO, que listan ese
+ * entero exacto como el naranja de Premiere.
  *
- * Lo deciden dos sitios —los componentes RGB y el `pproColor`— y tienen que
- * decidir lo mismo: si discrepan se escribe un entero que no coincide con el RGB
- * de al lado, y Premiere y Resolve muestran colores distintos para el mismo
- * marcador. Que es exactamente lo que esto vino a evitar.
+ * Leerlo al revés no rompía nada de forma visible, y por eso duró: los seis bytes
+ * siguen siendo un color válido y el XML importa igual. Lo que pasaba es que era
+ * OTRO color. Premiere no se enteraba —lee `pproColor`, el entero, y lo muestra
+ * bien— pero Resolve lee los componentes RGB de al lado, así que la misma
+ * secuencia salía con los marcadores naranjas en un editor y azules en el otro. Y
+ * la pantalla de tomar notas, que pinta cada vista con este mismo color, mostraba
+ * el profesor azul cuando en la secuencia llegaba rojo.
+ *
+ * Se pasa a componentes de 16 bits (x257), que es lo que el formato quiere.
  */
 function esEnteroDePremiere(color) {
     return typeof color === 'number' && isFinite(color);
@@ -464,12 +468,26 @@ function esEnteroDePremiere(color) {
 
 function colorComponents(color) {
     if (esEnteroDePremiere(color)) {
-        const red = (color >>> 16) & 255;
-        const green = (color >>> 8) & 255;
-        const blue = color & 255;
+        const { red, green, blue } = componentesDePremiere(color);
         return { alpha: 0, red: red * 257, green: green * 257, blue: blue * 257 };
     }
     return MARKER_COLORS[String(color || 'white').toLowerCase()] || MARKER_COLORS.white;
+}
+
+/**
+ * El entero de Premiere a bytes de rojo, verde y azul.
+ *
+ * Acá y en un solo sitio porque el orden de los bytes es lo que se leyó mal, y
+ * mientras cada lado desempaquetaba por su cuenta no había ningún lugar donde
+ * arreglarlo una vez. Lo usan el XML de intercambio (los componentes RGB de cada
+ * marcador) y `tests/colores.test.js`, que con esto compara los colores de la
+ * pantalla contra el mismo desempaquetado que se escribe en la secuencia.
+ *
+ * @param {number} color el `pproColor` nativo, 0xAABBGGRR
+ */
+function componentesDePremiere(color) {
+    const n = color >>> 0;
+    return { red: n & 255, green: (n >>> 8) & 255, blue: (n >>> 16) & 255 };
 }
 
 function markerXml(marker, fps) {
@@ -610,6 +628,7 @@ ${markersXml}      </sequence>
 module.exports = {
     sequenceXml,
     markerXml,
+    xmlSafe,
     encuadreDelRecuadro,
     encuadreXml,
     aUnidadesDelCuadro,
@@ -622,6 +641,7 @@ module.exports = {
     pathUrl,
     xmlSafe,
     colorComponents,
+    componentesDePremiere,
     MARKER_COLORS,
     CLIP_LABELS,
     FileRegistry

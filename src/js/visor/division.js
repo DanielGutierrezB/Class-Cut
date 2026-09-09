@@ -10,7 +10,7 @@
  * que se toma cada vez que se abre una clase.
  */
 
-import { $ } from '../chrome.js';
+import { $, recordar, recordado as leerRecordado } from '../chrome.js';
 
 const RECORDADO = 'cc.ancho-del-texto';
 const POR_DEFECTO = 380;
@@ -32,24 +32,18 @@ function acotar(px) {
     return Math.min(techo, Math.max(MINIMO_TEXTO, Math.round(px)));
 }
 
-function aplicar(px, recordar) {
+function aplicar(px, guardar) {
     const ancho = acotar(px);
     $('rev-letra').style.width = `${ancho}px`;
     $('player-split').setAttribute('aria-valuenow', String(ancho));
-    if (recordar) {
-        try { localStorage.setItem(RECORDADO, String(ancho)); } catch { /* modo privado */ }
-    }
+    if (guardar) recordar(RECORDADO, ancho);
     return ancho;
 }
 
 /** El ancho guardado, o el de fábrica si no hay o quedó ilegible. */
 function recordado() {
-    let px = POR_DEFECTO;
-    try {
-        const guardado = Number(localStorage.getItem(RECORDADO));
-        if (Number.isFinite(guardado) && guardado > 0) px = guardado;
-    } catch { /* modo privado */ }
-    return px;
+    const guardado = Number(leerRecordado(RECORDADO));
+    return Number.isFinite(guardado) && guardado > 0 ? guardado : POR_DEFECTO;
 }
 
 function mover(evento) {

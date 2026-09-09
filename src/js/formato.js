@@ -23,6 +23,19 @@ export function fmtClock(seconds) {
     return h ? `${h}:${base}` : base;
 }
 
+/**
+ * La hora del día de un instante en milisegundos: "15:07:03".
+ *
+ * Es lo que se muestra en la toma de notas en vivo, donde todo va con la hora
+ * del día: el editor la compara contra su reloj, no contra el arranque de nada.
+ */
+export function fmtHora(ms) {
+    if (ms == null) return '—';
+    const d = new Date(ms);
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 export function esc(text) {
     return String(text == null ? '' : text)
         .replace(/&/g, '&amp;')
@@ -33,6 +46,29 @@ export function esc(text) {
 
 export function plural(n, one, many) {
     return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Con qué clase se pinta el cartelito de una vista, en las pantallas de después.
+ *
+ * Solo `PV` y `R` tienen color propio acá, y es a propósito: son las dos
+ * etiquetas de clip del XML (`CLIP_LABELS` en `fcp-xml.js`) y los dos `.cam-N`
+ * del reproductor, así que ese color ya está diciendo de qué fuente salió el
+ * bloque que se está mirando. Las demás vistas no salen de una tercera fuente
+ * —`S`, `MG` y `X2` se graban con el grabador de pantalla, igual que `R`—, así
+ * que pintarlas de otro color sería inventar una fuente que no existe, y
+ * pintarlas de rosa sería decir que son `R`. Van neutras, con su nombre escrito.
+ *
+ * Ojo: esto NO es lo mismo que el color de la lista de tomas de Grabar, donde
+ * cada vista tiene el suyo (`colorEnLaApp` en `engine/notas-vivo.js`). Allá la
+ * pregunta es qué eligió el director; acá, con qué se grabó. Vivía escrito en
+ * tres pantallas y dos se habían quedado con la respuesta de cuando las vistas
+ * eran dos: un bloque `S` salía rosa, o sea con el nombre de una vista y el
+ * color de otra.
+ */
+export function claseDeVista(nombre) {
+    if (nombre === 'PV') return 'badge-pv';
+    return nombre === 'R' ? 'badge-r' : 'badge-info';
 }
 
 /**

@@ -1,5 +1,5 @@
 'use strict';
-/** Paso 3: procesar las clases marcadas y contar cómo fue. */
+/** Paso 4: procesar las clases marcadas y contar cómo fue. */
 
 import { $, showView, alertsHtml } from './chrome.js';
 import { esc, fmtDur, fmtMs, fmtTokens, fmtFalta, plural } from './formato.js';
@@ -77,7 +77,7 @@ export async function startProcessing(desdeCero) {
     run.desdeCero = Boolean(desdeCero);
 
     showView('run');
-    marcarPaso(PASOS.procesar, true);
+    marcarPaso(PASOS.procesar);
     const verbo = desdeCero ? 'Reprocesando' : 'Procesando';
     $('run-title').textContent = selected.length === 1
         ? `${verbo} 1 clase`
@@ -372,10 +372,10 @@ function finishProcessing(response) {
     $('run-cifra').textContent = cerrado.join(' · ');
     $('run-sub').textContent = `${exported.length} de ${run.total} ${exported.length === 1 ? 'lista' : 'listas'}`;
 
-    // Sigue siendo el paso 3: escribir los XML es en lo que termina procesar, no
-    // un sitio aparte al que se va. Lo que cambia es que ahora Revisar quedó
-    // habilitado en el cabezal.
-    marcarPaso(PASOS.procesar, true);
+    // Sigue siendo el paso de Procesar: escribir los XML es en lo que termina
+    // procesar, no un sitio aparte al que se va. Lo que cambia es que ahora
+    // Revisar quedó habilitado en el cabezal.
+    marcarPaso(PASOS.procesar);
 
     $('run-alerts').innerHTML = alertsHtml(avisosDeLaCorrida(response).slice(0, 12));
 }

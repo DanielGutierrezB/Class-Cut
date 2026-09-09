@@ -26,7 +26,7 @@ const notas = require('./notas');
 // el color que él eligió.
 const NOMBRE_DE_NOTA = 'Nota';
 
-// Blanco, como entero ARGB de Premiere: 0xFFFFFFFF. Va el número y no el nombre
+// Blanco, como entero nativo de Premiere: 0xFFFFFFFF. Va el número y no el nombre
 // `white` a propósito — solo los enteros escriben `pproColor`, que es lo único
 // que evita que Premiere ajuste el color al más parecido de su paleta. Y este
 // entero no es inventado: es exactamente el que el Rodecaster le pone a sus
@@ -36,7 +36,7 @@ const COLOR_DE_NOTA = 0xFFFFFFFF;
 
 /**
  * El color del marcador es el que eligió el director de contenido y viaja tal
- * cual: `pproColor` es el entero ARGB del XML original y `fcp-xml` lo convierte
+ * cual: `pproColor` es el entero nativo del XML original y `fcp-xml` lo convierte
  * sin interpretarlo. Recolorear por vista o por confianza convertía el XML en un
  * informe de la herramienta; lo que hay que revisar se dice en la interfaz, que
  * es donde se mira.
