@@ -1257,6 +1257,10 @@ function grabadas() {
             lengua: agregadoDeLengua(tomas),
             tomas,
             carpeta: CURSO,
+            // El WAV que dejó la grabación. Sin esto el cartel de borrar decía
+            // "ningún audio" en todas, o sea que tapaba justo lo que el cartel
+            // existe para nombrar: los cientos de megas que no van a la papelera.
+            sesiones: [{ archivo: `${CURSO}/${nombre}.wav` }],
             archivos: archivosDeNotas(CURSO, nombre)
         };
     };
@@ -1547,6 +1551,112 @@ function editarEnMemoria(json, cambio) {
         throw new Error(`Cambio sin definir: ${c.tipo}`);
     }
     return { archivos: clase.archivos };
+}
+
+/**
+ * El nombre de una clase, como lo arma `engine/nombre-de-clase.js`.
+ *
+ * Copiado y no importado porque acá no hay `require`: la maqueta corre en la
+ * ventana. Lo que importa que sea igual es la forma, porque la lista vuelve a
+ * leer la parte de ahí — si esto escribiera `_p1_`, la maqueta mostraría una
+ * parte 1 que la app no muestra.
+ */
+function nombreArmado({ clase, parte, curso, cuandoMs }) {
+    const d = new Date(cuandoMs);
+    const dos = n => String(n).padStart(2, '0');
+    const fecha = `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+    const hora = `${dos(d.getHours())}-${dos(d.getMinutes())}-${dos(d.getSeconds())}`;
+    return `${dos(clase)}_${Number(parte) > 1 ? `p${parte}_` : ''}${curso}_${fecha}_${hora}`;
+}
+
+/**
+ * Renombrar una clase de la lista (`clasesGrabadas.renombrar`).
+ *
+ * **Las tres negativas del motor están acá, y son la mitad de lo que hay que
+ * poder mirar.** Un stub que siempre contesta `{ok:true}` deja sin dibujar
+ * justamente lo que se pidió que se explicara: por qué algo no se puede. Así que
+ * se niega por lo mismo que allá —la clase que se está grabando, el curso vacío,
+ * el nombre repetido— y con el mismo texto, que es el que la pantalla muestra tal
+ * cual.
+ *
+ * Y la hora NO se toca, que es la regla entera: sale del `ceroMs` que la clase ya
+ * tenía y el nombre nuevo la vuelve a escribir igual.
+ */
+function renombrarEnMemoria(json, cambio) {
+    const c = cambio || {};
+    const clase = listaGrabadas().find(x => x.archivos.json === json);
+    if (!clase) throw new Error('No encuentro esa clase.');
+
+    const sesion = sesionEnVivo();
+    if (sesion && sesion.secuencia === clase.secuencia) {
+        throw new Error('Esa clase se está grabando ahora. Terminá la grabación para renombrarla.');
+    }
+    if (c.curso != null && !String(c.curso).trim()) {
+        throw new Error('El nombre del curso no puede quedar vacío.');
+    }
+    // Sin hora recuperable el motor se planta, y la maqueta tiene que poder
+    // mostrarlo: una clase con `ceroMs` en null es la clase vieja de antes de que
+    // el sidecar la guardara (ver `horaDeCaptura` en `clases-grabadas.js`).
+    if (!clase.ceroMs) {
+        throw new Error('Esta clase no dice a qué hora se grabó, y sin esa hora el ' +
+            'nombre nuevo no podría emparejarse con la carpeta del Rodecaster.');
+    }
+
+    const numero = Number(c.clase != null ? c.clase : clase.clase);
+    const curso = c.curso != null ? String(c.curso) : clase.curso;
+    // Reusar un número la convierte en la parte siguiente, y quedarse en el propio
+    // le deja la parte que tenía: es lo que la pantalla prometió mientras se
+    // escribía (`parteQueQueda` en `src/js/grabar/gestionar.js`).
+    const parte = numero === Number(clase.clase)
+        ? (Number(clase.parte) || 1)
+        : listaGrabadas().filter(x => x !== clase && Number(x.clase) === numero).length + 1;
+
+    const nombre = nombreArmado({ clase: numero, parte, curso, cuandoMs: clase.ceroMs });
+    if (nombre === clase.secuencia) {
+        return { secuencia: nombre, archivos: clase.archivos, movida: false, audios: 0 };
+    }
+    if (listaGrabadas().some(x => x !== clase && x.secuencia === nombre)) {
+        throw new Error(`Ya hay una clase llamada «${nombre}» en esa carpeta.`);
+    }
+
+    clase.secuencia = nombre;
+    clase.clase = numero;
+    clase.parte = parte;
+    clase.curso = curso;
+    clase.archivos = archivosDeNotas(clase.carpeta, nombre);
+    return {
+        secuencia: nombre,
+        archivos: clase.archivos,
+        movida: true,
+        audios: (clase.sesiones || []).length
+    };
+}
+
+/**
+ * Borrar una clase de la lista (`clasesGrabadas.borrar`).
+ *
+ * Se va de la lista y no vuelve, que es lo que hay que poder mirar: el cartel
+ * pregunta por archivos que no van a la papelera, y una maqueta donde la clase
+ * reaparece al repintar no probaría que el gesto llega hasta el final. `yaGrabadas`
+ * la guarda entre preguntas justamente para eso (ver `listaGrabadas`).
+ */
+function borrarEnMemoria(json) {
+    const clase = listaGrabadas().find(x => x.archivos.json === json);
+    if (!clase) throw new Error('No encuentro esa clase.');
+
+    const sesion = sesionEnVivo();
+    if (sesion && sesion.secuencia === clase.secuencia) {
+        throw new Error('Esa clase se está grabando ahora. Terminá la grabación para borrarla.');
+    }
+
+    yaGrabadas = listaGrabadas().filter(x => x !== clase);
+    return {
+        secuencia: clase.secuencia,
+        // Lo que se fue de verdad, que es lo que el motor cuenta después de
+        // borrar: el cartel dijo cuántos decía tener la clase.
+        audios: (clase.sesiones || []).length,
+        borrados: 2 + (clase.sesiones || []).length
+    };
 }
 
 /**
@@ -1901,6 +2011,26 @@ window.cc = {
         await espera(120);
         try {
             return { ok: true, ...editarEnMemoria(json, cambio) };
+        } catch (err) {
+            return { ok: false, error: err.message };
+        }
+    },
+    // Los dos de gestionar la lista, envueltos igual que el de arriba y que
+    // `ipc/grabar.js`: el motor tira con el motivo y el puente lo convierte en
+    // `{ok:false, error}`, que es lo que el formulario muestra tal cual. La demora
+    // es la de tres archivos moviéndose, no la de un campo del sidecar.
+    grabarRenombrar: async (json, cambio) => {
+        await espera(180);
+        try {
+            return { ok: true, ...renombrarEnMemoria(json, cambio) };
+        } catch (err) {
+            return { ok: false, error: err.message };
+        }
+    },
+    grabarBorrar: async json => {
+        await espera(180);
+        try {
+            return { ok: true, ...borrarEnMemoria(json) };
         } catch (err) {
             return { ok: false, error: err.message };
         }

@@ -368,7 +368,7 @@ function casos(wc) {
             // la marca tiene que mudarse en el mismo repintado, no después.
             hacer: async () => {
                 await clic(wc, cabeza(1));
-                await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-cabeza .btn-ghost`);
+                await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-descartar`);
                 await tecla(wc, 'p');
             },
             ademas: async () => {
@@ -384,7 +384,7 @@ function casos(wc) {
         {
             que: 'recuperar la deja como estaba y se la puede volver a elegir',
             hacer: async () => {
-                await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-cabeza .btn-ghost`);
+                await clic(wc, `#grabar-tomas .toma[data-toma="1"] .toma-descartar`);
                 await clic(wc, cabeza(1));
             },
             ademas: async () => {
@@ -442,8 +442,8 @@ function casos(wc) {
         {
             que: 'descartar y recuperar deja la vista donde estaba',
             hacer: async () => {
-                await clic(wc, `#grabar-tomas .toma[data-toma="2"] .toma-cabeza .btn-ghost`);
-                await clic(wc, `#grabar-tomas .toma[data-toma="2"] .toma-cabeza .btn-ghost`);
+                await clic(wc, `#grabar-tomas .toma[data-toma="2"] .toma-descartar`);
+                await clic(wc, `#grabar-tomas .toma[data-toma="2"] .toma-descartar`);
             }
         },
         {
