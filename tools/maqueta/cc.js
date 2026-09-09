@@ -916,6 +916,13 @@ function tomaParaLaPantalla(toma, tomas) {
         outMs: toma.outMs,
         palabras: toma.palabras,
         lengua: toma.lengua || null,
+        // Qué le pasó a la relectura, cuando le pasó algo (`engine/insistir.js`).
+        // Va acá por lo que dice el comentario de arriba, leído al revés: la lista
+        // escrita a mano evita que la pantalla dibuje con un campo que la app no
+        // manda, y por eso mismo un campo que la app SÍ manda y que acá falte es
+        // un estado que la maqueta no puede mostrar — o sea el único sitio donde
+        // se puede mirar el diseño de ese aviso sin grabar una clase entera.
+        relectura: toma.relectura || null,
         // Rehecho en cada lectura, como allá: la sugerencia habla de una palabra
         // concreta de la toma anterior, y esa palabra se mueve.
         empalme: empalmeParaLaPantalla(toma, tomas),
