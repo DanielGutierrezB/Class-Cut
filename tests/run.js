@@ -59,6 +59,7 @@ const FILES = [
     'regenerar.test.js',
     'gestionar-clases.test.js',
     'renombrar-vista.test.js',
+    'puente-grabar.test.js',
     'silencios.test.js',
     'retimeo.test.js',
     'reloj.test.js',
