@@ -72,6 +72,24 @@ async function rehacer(sesion, id) {
         // para volver a buscarla cuando el audio la alcance (`releerOrillas`).
         toma.orillaCorta = espejo.grabadoHastaMs(sesion) < toma.outMs + oirToma.ORILLA_MS;
 
+        // Sin palabras es la toma que no se pudo releer con ningún modelo
+        // (`engine/insistir.js`). Se escribe la marca y se para acá: lo que la
+        // toma tiene es el texto del ciclo de señales, que está declarado
+        // descartable, y medir la lengua o buscarle una "Pausa" adentro sería
+        // sacar conclusiones de un texto del que no se cree ni una palabra.
+        //
+        // La marca se guarda igual, y es lo único que importa de este renglón: la
+        // toma queda dicha y regenerable en vez de quedar callada. Y `orillaCorta`
+        // se recalcula ARRIBA aunque no haya texto, porque es un dato del audio y
+        // no del texto: si la toma acaba de cerrar, `releerOrillas` la vuelve a
+        // encolar cuando el audio la alcance y eso le regala otra ronda entera de
+        // intentos, con la máquina quizás en otro estado. Es gratis y es la única
+        // segunda chance automática que tiene.
+        if (!leido.palabras) {
+            espejo.fijar(sesion);
+            return;
+        }
+
         // Señales que el ciclo liviano no oyó. No se parte la toma sola: se avisa,
         // porque partir es una decisión de contenido y acá el editor está mirando.
         // Se busca solo ADENTRO: una "Pausa" que cae en una orilla es de la toma
@@ -101,6 +119,10 @@ async function rehacer(sesion, id) {
         // y una consulta metida acá adentro retrasaría la clase entera.
         medirToma.conModelo({ toma, tomas: sesion.estado.tomas, avisar: avisador(sesion) });
     } catch (err) {
+        // Lo que llega acá ya no es un whisper-cli que se murió —eso lo atiende
+        // `oirToma.leer` y termina en la marca de la toma, sin cartel— sino un bug
+        // de este archivo o de los medidores. Ahí sí va el aviso de arriba: no hay
+        // nada escrito en ninguna toma que lo cuente.
         if (sesion.viva) sesion.avisar({ tipo: 'error', mensaje: err.message });
     }
 }

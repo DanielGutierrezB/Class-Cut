@@ -143,6 +143,9 @@ function resumen(sesion) {
             // Lo medido de esta toma, tal cual: la tarjeta puede querer decir
             // cuál fue la toma que le movió el número al panel.
             lengua: t.lengua || null,
+            // Y qué le pasó a su relectura, si le pasó algo: es lo que la tarjeta
+            // dibuja como aviso (`engine/insistir.js`).
+            relectura: t.relectura || null,
             // Cómo pega con la anterior, y qué hacen los dos botones si no pega.
             // Va rehecho y no tal como está guardado, igual que `repiteA`: la
             // sugerencia habla de una palabra concreta de la toma anterior, y esa

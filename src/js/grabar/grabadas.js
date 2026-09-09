@@ -589,10 +589,18 @@ async function regenerar(clase) {
         pintar();
         return;
     }
-    toast(r.sinAudio
-        ? `Clase ${clase.clase}: ${plural(r.tomas - r.sinAudio, 'toma releída', 'tomas releídas')}; ` +
-            `${r.sinAudio} sin audio para releer.`
-        : `Clase ${clase.clase}: ${plural(r.tomas, 'toma releída', 'tomas releídas')} y XML reescrito.`);
+    // Lo que no salió va en el mismo aviso y no se calla: una regeneración que
+    // dejó tres tomas sin texto y contesta "8 tomas releídas" es la misma pérdida
+    // silenciosa que la política de reintento vino a arreglar
+    // (`engine/insistir.js`). Las que quedaron mal siguen marcadas en su tarjeta;
+    // esto es para que alguien vaya a mirarlas.
+    const leidas = r.tomas - r.sinAudio - r.sinLeer;
+    const peros = [];
+    if (r.sinAudio) peros.push(`${r.sinAudio} sin audio para releer`);
+    if (r.sinLeer) peros.push(`${plural(r.sinLeer, 'quedó', 'quedaron')} sin releer`);
+    if (r.degradadas) peros.push(`${plural(r.degradadas, 'salió', 'salieron')} con un modelo más liviano`);
+    toast(`Clase ${clase.clase}: ${plural(leidas, 'toma releída', 'tomas releídas')}` +
+        (peros.length ? `; ${peros.join(', ')}.` : ' y XML reescrito.'));
     await cargar();
 }
 

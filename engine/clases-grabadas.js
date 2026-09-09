@@ -201,16 +201,35 @@ async function regenerar(json, avisar) {
         const aviso = typeof avisar === 'function' ? avisar : () => {};
 
         let sinAudio = 0;
+        let degradadas = 0;
+        let sinLeer = 0;
         for (const [i, toma] of tomas.entries()) {
             const leido = await oirToma.leer(archivos, toma);
+            // **Y acá es donde la marca se limpia sola.** `leer` devuelve
+            // `relectura: null` cuando la toma salió con el modelo bueno, así que
+            // el `Object.assign` borra la marca que le había quedado de la clase
+            // en vivo. Es justo para lo que existe este botón: la toma que quedó
+            // leída con un modelo peor —porque el sistema se llevaba a whisper-cli
+            // mientras se grababa— es exactamente la que esto arregla, y acá la
+            // GPU está libre, que es la razón por la que ahora sí puede salir.
             if (leido) Object.assign(toma, leido);
             else sinAudio++;
+            if (leido && leido.relectura) {
+                if (leido.relectura.estado === 'degradada') degradadas++;
+                else sinLeer++;
+            }
             aviso({ tipo: 'regenerando', json, hechas: i + 1, total: tomas.length });
         }
 
         workspace.writeAtomic(clase.xml, notasXml.xmlDeNotas(estado));
         workspace.writeJson(clase.json, notasXml.sidecar(estado));
-        return { tomas: tomas.length, sinAudio, archivos: { xml: clase.xml, json: clase.json } };
+        // `degradadas` y `sinLeer` se cuentan para poder decirlo al terminar: una
+        // regeneración que no logró leer tres tomas y contesta "8 tomas releídas"
+        // es la misma pérdida silenciosa que esto vino a arreglar.
+        return {
+            tomas: tomas.length, sinAudio, degradadas, sinLeer,
+            archivos: { xml: clase.xml, json: clase.json }
+        };
     } finally {
         regenerando.delete(json);
     }

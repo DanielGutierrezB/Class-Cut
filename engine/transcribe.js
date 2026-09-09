@@ -394,6 +394,25 @@ function motivoDeSalida(code, signal, stderr, stdout) {
 }
 
 /**
+ * La misma distinción, pero para decidir en vez de para contar.
+ *
+ * `motivoDeSalida` arma una frase, y una frase sirve para que el editor entienda
+ * y no para que la app elija: con solo el mensaje, la política tendría que volver
+ * a averiguar cómo se murió leyendo el texto que ella misma escribió, y una
+ * expresión regular sobre un mensaje en castellano es la peor manera de tomar
+ * una decisión. Van los dos juntos y del mismo `close`, así que no pueden
+ * discrepar.
+ *
+ * Se cuelga del error y no se devuelve aparte porque el error es lo único que
+ * cruza los tres `await` que hay entre acá y quien decide (`engine/insistir.js`).
+ */
+function comoMurio(code, signal) {
+    return code == null
+        ? { como: 'senal', senal: signal || null, codigo: null }
+        : { como: 'codigo', senal: null, codigo: code };
+}
+
+/**
  * Corre whisper-cli sobre un WAV. Devuelve el transcript ya normalizado.
  * @param {object} options { language, onProgress, signal }
  */
@@ -508,8 +527,10 @@ function runWhisper(wavPath, options) {
                 return reject(new TranscribeError('Transcripción cancelada.', 'cancelado'));
             }
             if (code !== 0) {
-                return reject(new TranscribeError(
-                    motivoDeSalida(code, signal, stderr, stdout), 'whisper'));
+                const err = new TranscribeError(
+                    motivoDeSalida(code, signal, stderr, stdout), 'whisper');
+                err.muerte = comoMurio(code, signal);
+                return reject(err);
             }
 
             const jsonPath = `${outBase}.json`;
@@ -704,6 +725,7 @@ module.exports = {
     reescribir,
     runWhisper,
     motivoDeSalida,
+    comoMurio,
     collapseLoops,
     segmentsFromWords,
     wordsFromWhisperJson,

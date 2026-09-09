@@ -55,6 +55,8 @@ const FILES = [
     'empalme.test.js',
     'empalme-vista.test.js',
     'gpu.test.js',
+    'insistir.test.js',
+    'relectura-caida.test.js',
     'sesion.test.js',
     'regenerar.test.js',
     'gestionar-clases.test.js',

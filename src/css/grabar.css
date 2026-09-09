@@ -545,6 +545,21 @@
     color: var(--warn);
 }
 
+/* La toma que se releyó con un modelo más liviano porque el sistema se llevó a
+   whisper-cli por delante (`engine/insistir.js`). NO va en ámbar, y es la misma
+   decisión que `.analisis-pendiente.es-abstenido` en el panel: la app hizo lo que
+   decidió hacer y la toma tiene texto, así que el ámbar de los otros avisos la
+   leería como algo roto en medio de una clase que se está grabando. Va con la
+   barra del acento, que es lo que esta app usa para hablar de sí misma.
+
+   La otra mitad —`es-sin-leer`— se queda con el ámbar heredado a propósito: ahí
+   la toma NO tiene el texto bueno, y eso pesa lo mismo que "se cerró sola". */
+.toma-aviso.es-degradada {
+    color: var(--text-dim);
+    padding-left: 8px;
+    border-left: 2px solid var(--accent-dim);
+}
+
 .toma-nota {
     width: 100%;
     margin-top: 10px;

@@ -168,6 +168,11 @@ async function rellenarHuecos(archivo, words, opciones) {
                 // "Tiene cara…"—, porque un pedazo de siete segundos no le
                 // alcanza para detectar nada y elige lo que se le parezca.
                 language: o.idioma || 'es',
+                // El mismo modelo con el que se leyó el tramo grande. Si esa
+                // pasada tuvo que bajar de modelo porque el sistema se la llevaba
+                // por delante (`engine/insistir.js`), releer un hueco con el
+                // grande sería levantar justo lo que acaba de no caber.
+                modelo: o.modelo,
                 signal: o.signal
             });
         } catch (err) {
@@ -227,6 +232,10 @@ function aHoraDelDia(words, sesion, desdeSec) {
  *   hastaMs   hora del día donde termina
  *   liviano   true para el ciclo de señales
  *   idioma    por defecto español, que es el del curso
+ *   modelo    con qué leer el tramo grande, si no es el de siempre. Lo usa la
+ *             política de reintento cuando el sistema se lleva a whisper-cli y
+ *             hay que bajar un escalón (`engine/insistir.js`); sin él manda
+ *             `paths.whisperModel`, que es lo que pasa en toda clase que sale bien
  * @returns {Promise<{palabras:Array, colapsadas:number}|null>}
  */
 async function escuchar(params) {
@@ -249,6 +258,11 @@ async function escuchar(params) {
         // de una grabación es lo último que uno quiere.
         const liviano = p.liviano ? paths.modeloLiviano() : null;
         if (liviano && liviano.path) opciones.model = liviano;
+        // Y el escalón de abajo, cuando la pasada grande ya se murió con el bueno
+        // y quien la pide decidió bajar (`engine/oir-toma.js`). Va con la misma
+        // regla que el liviano —tiene que venir con ruta— porque caer al de
+        // siempre en silencio dejaría a la toma marcada como degradada mintiendo.
+        if (!p.liviano && p.modelo && p.modelo.path) opciones.model = p.modelo;
 
         const salida = await transcribe.runWhisper(recortado.archivo, opciones);
 
@@ -266,7 +280,7 @@ async function escuchar(params) {
         const relleno = p.liviano
             ? { words: limpias.words, agregadas: 0 }
             : await rellenarHuecos(recortado.archivo, limpias.words, {
-                idioma: opciones.language, signal: p.signal
+                idioma: opciones.language, modelo: opciones.model, signal: p.signal
             });
 
         return {

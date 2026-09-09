@@ -272,6 +272,13 @@ function sidecar(estado) {
             // agregado tiene que poder rehacerse sin volver a medir nada: lo que
             // cambia es cuáles cuentan, no lo que se midió de cada una.
             lengua: t.lengua || null,
+            // Qué le pasó a la relectura de esta toma, cuando le pasó algo
+            // (`engine/insistir.js`). Va al sidecar y no solo a la pantalla porque
+            // es justamente el dato que se necesita DESPUÉS: la toma que quedó
+            // leída con un modelo peor —o sin releer— es la que alguien va a
+            // querer regenerar con calma, y viviendo solo en memoria se perdería
+            // al cerrar la app, que es cuando termina un día de rodaje.
+            relectura: t.relectura || null,
             // Cómo pega con la toma anterior (`engine/empalme.js`). De acá se
             // guarda lo poco que no se puede rehacer leyendo: lo que contestó el
             // modelo, que se pagó, y que el editor descartó el ajuste. La

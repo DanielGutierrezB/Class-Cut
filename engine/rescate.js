@@ -259,7 +259,9 @@ function tirar(temporal) {
 /**
  * Lo que se oye en un tramo suelto, en el reloj de la clase.
  *
- * @param {object} params { wavPath, desdeSec, hastaSec, language, signal, options }
+ * @param {object} params { wavPath, desdeSec, hastaSec, language, modelo, signal, options }
+ *   `modelo` es para quien ya tuvo que bajar de modelo en la pasada grande y no
+ *   puede volver a levantar el bueno para un hueco (`engine/oir.js`).
  * @returns {Promise<Array>} palabras con `start`, `end`, `text` y `dtw`
  */
 async function leerTramo(params) {
@@ -275,6 +277,7 @@ async function leerTramo(params) {
     try {
         leido = await transcribe.runWhisper(pedazo, {
             language: params.language || opt(options, 'language') || undefined,
+            ...(params.modelo && params.modelo.path ? { model: params.modelo } : {}),
             signal: params.signal
         });
     } finally {

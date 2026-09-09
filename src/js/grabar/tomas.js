@@ -73,22 +73,63 @@ function marcaDeDescartada() {
     return marca;
 }
 
-/** Los avisos que el motor dejó sobre la toma; los que no vienen no se dibujan. */
+/**
+ * Los avisos que el motor dejó sobre la toma, como texto y clase.
+ *
+ * Aparte del dibujo para poder probarlo: los que no vienen no se dibujan, y cuál
+ * viene es una decisión que se puede equivocar sola. Es la misma separación que
+ * `queDecir` en `grabar/empalme.js`.
+ *
+ * **Ninguno es un cartel.** Son renglones de doce píxeles adentro de la tarjeta
+ * de su toma, que es la convención que esta pantalla ya tenía para todo lo que
+ * hay que saber de una toma concreta. Un diálogo o una franja arriba, en medio de
+ * una clase que se está grabando, se cierra sin leer — y con veinte tomas por
+ * clase se convierte en algo que se aprende a cerrar.
+ */
+export function avisos(toma) {
+    const lista = [];
+    if (toma.cerradaSola) {
+        lista.push({ texto: 'Se cerró sola: nadie dijo "Pausa" antes de la toma siguiente o de terminar.' });
+    }
+    if (toma.repiteA) {
+        lista.push({
+            texto: `Empieza igual que la toma ${toma.repiteA}: probablemente la repite.`,
+            clase: 'es-repite'
+        });
+    }
+    if (toma.pausaAdentro) {
+        lista.push({
+            texto: `Hay un "Pausa" adentro, a las ${fmtHora(toma.pausaAdentro)}. ` +
+                'Con clic derecho sobre esa palabra se corta el OUT ahí.'
+        });
+    }
+
+    // Lo que le pasó a la relectura, con el texto tal como lo escribió el motor
+    // (`engine/insistir.js`): la explicación es una sola y no se reescribe acá,
+    // que es lo mismo que hace el panel con el porqué de la abstención.
+    //
+    // **Los dos estados no se pintan igual, y la diferencia es la que ya está
+    // resuelta entre `es-abstenido` y `es-falla` en el panel de análisis.**
+    // `degradada` es la app haciendo lo que decidió hacer, y salió bien: la toma
+    // tiene texto. Va con la barra del acento —lo que la app usa para hablar de
+    // sí misma— y no en ámbar, porque en ámbar se leería como que algo se rompió
+    // en medio de la clase. `sin-leer` sí es una falta: esa toma no tiene el texto
+    // bueno, y va en el ámbar de los demás avisos, que es el peso que le
+    // corresponde en una tarjeta y no arriba de todo.
+    const r = toma.relectura;
+    if (r && r.estado === 'degradada') lista.push({ texto: r.porque, clase: 'es-degradada' });
+    if (r && r.estado === 'sin-leer') lista.push({ texto: r.porque, clase: 'es-sin-leer' });
+
+    return lista;
+}
+
 function avisosDe(toma) {
-    const avisos = [];
-    const aviso = (texto, clase) => {
+    return avisos(toma).map(({ texto, clase }) => {
         const p = document.createElement('p');
         p.className = clase ? `toma-aviso ${clase}` : 'toma-aviso';
         p.textContent = texto;
-        avisos.push(p);
-    };
-    if (toma.cerradaSola) aviso('Se cerró sola: nadie dijo "Pausa" antes de la toma siguiente o de terminar.');
-    if (toma.repiteA) aviso(`Empieza igual que la toma ${toma.repiteA}: probablemente la repite.`, 'es-repite');
-    if (toma.pausaAdentro) {
-        aviso(`Hay un "Pausa" adentro, a las ${fmtHora(toma.pausaAdentro)}. ` +
-            'Con clic derecho sobre esa palabra se corta el OUT ahí.');
-    }
-    return avisos;
+        return p;
+    });
 }
 
 function botonChico(texto, titulo, alClic) {
