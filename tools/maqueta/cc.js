@@ -2414,9 +2414,12 @@ window.cc = {
      * fingir que quedó guardada en disco sería una de las mentiras que esta
      * maqueta viene evitando.
      */
+    // En la app de verdad la plantilla se busca sola entre los proyectos del
+    // editor y casi nunca se pregunta. La maqueta hace lo mismo: contesta que la
+    // encontró, con `hallada` para que se vea el aviso de cuál salió elegida.
     prprojPlantilla: async () => (plantillaElegida
         ? { ok: true, ruta: plantillaElegida }
-        : { ok: false, falta: 'sin-elegir' }),
+        : { ok: true, ruta: `${CURSO}/Curso viejo.prproj`, hallada: true }),
     prprojElegirPlantilla: async () => {
         plantillaElegida = `${CURSO}/Plantilla de mentira.prproj`;
         return { ok: true, ruta: plantillaElegida };

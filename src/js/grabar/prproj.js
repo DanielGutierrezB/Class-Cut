@@ -122,12 +122,12 @@ export async function pedir(ruta) {
         plantilla = await window.cc.prprojPlantilla();
         if (!plantilla.ok) return;
     }
-    // Cuando la encontró sola, se dice cuál. No es un permiso que se pida —el
-    // molde no se toca, solo se copia— pero elegir un archivo del editor sin
-    // nombrarlo sería magia, y la magia es lo que después nadie sabe deshacer.
-    if (plantilla.hallada) {
-        toast(`Usé «${plantilla.ruta.split('/').pop()}» de molde, un proyecto tuyo que ya estaba.`);
-    }
+    // Cuando la encontró sola se dice cuál, pero recién al final, junto con el
+    // resultado: armar el proyecto tarda un segundo y un aviso acá lo pisaría el
+    // de «Proyecto armado» antes de que nadie llegue a leerlo. No es un permiso
+    // que se pida —el molde no se toca, solo se copia— pero elegir un archivo del
+    // editor sin nombrarlo sería magia, y la magia es lo que nadie sabe deshacer.
+    const molde = plantilla.hallada ? plantilla.ruta.split('/').pop() : null;
 
     suyo.generando.set(ruta, { hecho: 0, total: 0, que: 'Leyendo las clases…' });
     repintar();
@@ -143,7 +143,8 @@ export async function pedir(ruta) {
     // en el regenerado: un «listo» que se calla las tres clases que no entraron
     // es una pérdida silenciosa.
     const peros = (r.avisos || []).length ? ` · ${r.avisos.join(' · ')}` : '';
-    toast(`Proyecto armado con ${plural(r.clases, 'clase', 'clases')}${peros}`);
+    const deQue = molde ? ` · de molde usé «${molde}», un proyecto tuyo que ya estaba` : '';
+    toast(`Proyecto armado con ${plural(r.clases, 'clase', 'clases')}${peros}${deQue}`);
     repintar();
 }
 
