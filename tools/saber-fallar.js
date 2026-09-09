@@ -62,6 +62,42 @@ const REVERSIONES = [
         caen: ['un corte entra en el nido corrido por la franja de su clase']
     },
     {
+        que: 'el respaldo de audio vuelve a ser una segunda copia del mismo nido',
+        archivo: 'engine/prproj-curso.js',
+        de: '                pista: secuencia.pistasAudio[1],\n'
+            + '                medio,',
+        a: '                pista: secuencia.pistasAudio[1],\n'
+            + '                medio: nidos.audio.comoFuente,',
+        filtro: 'prproj-curso',
+        caen: ['arriba el nido de audio y abajo el Live-Mix crudo, muteado']
+    },
+    {
+        que: 'la mezcla se busca por posición y no por cuál quedó sonando',
+        archivo: 'engine/prproj-nidos.js',
+        de: '    const suenan = clase.pistas.audio.filter(p => p.cortes.some(c => c.sonando));\n'
+            + '    return suenan.length === 1 ? suenan[0] : null;',
+        a: '    return clase.pistas.audio[clase.pistas.audio.length - 1] || null;',
+        filtro: 'prproj-nidos',
+        caen: ['la mezcla es la única que suena, esté donde esté',
+            'con dos sonando no hay una mezcla, así que no se elige ninguna']
+    },
+    {
+        que: 'los nidos vuelven a quedar verdes en el panel, como cualquier otra secuencia',
+        archivo: 'engine/prproj-nidos.js',
+        de: '        taller.pintarItemDelPanel(nido.itemDelPanel, etiqueta);',
+        a: '',
+        filtro: 'prproj-curso',
+        caen: ['cada nido llega del color de su pista, también en el panel']
+    },
+    {
+        que: 'un nido hereda del molde cuánto material dice tener',
+        archivo: 'engine/prproj-secuencia.js',
+        de: '                if (tics > 0) {',
+        a: '                if (false) {',
+        filtro: 'prproj-curso',
+        caen: ['un nido dice que dura lo que dura, y no lo que duraba el molde']
+    },
+    {
         que: 'con slides no se agrega la pista, y el recuadro queda tapado',
         archivo: 'engine/prproj-curso.js',
         de: '    const pistasVideo = hayS ? 4 : 3;',

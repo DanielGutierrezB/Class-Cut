@@ -96,13 +96,25 @@ module.exports = t => {
         t.deep(indices.slice().sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6, 7]);
     });
 
-    t.test('solo los dos medidos traen el entero de la línea de tiempo', () => {
+    t.test('solo los medidos traen el entero de la línea de tiempo', () => {
         // El nombre alcanza para el panel; la línea de tiempo quiere además
         // el entero cacheado. Poner uno inventado dejaría el clip de un
-        // color en el panel y de otro en la línea.
+        // color en el panel y de otro en la línea. Los cinco que están se
+        // leyeron de proyectos de verdad; los tres que faltan no aparecen en
+        // ninguno porque nadie usó todavía un clip de ese color.
         const conEntero = Object.keys(secuencia.ETIQUETAS)
             .filter(n => secuencia.ETIQUETAS[n].entero != null);
-        t.deep(conEntero.sort(), ['Cerulean', 'Rose']);
+        t.deep(conEntero.sort(), ['Caribbean', 'Cerulean', 'Forest', 'Iris', 'Rose']);
+    });
+
+    t.test('el entero es BGR, o sea el RGB del color leído al revés', () => {
+        // 14597935 es 0xDEBF2F: los bytes van azul, verde, rojo. Es la misma
+        // convención que `pproColor` en `fcp-xml.js`, y es la que hace que
+        // cerúleo sea un celeste y no un marrón.
+        const rgb = entero => [entero & 255, (entero >> 8) & 255, (entero >> 16) & 255];
+        t.deep(rgb(secuencia.ETIQUETAS.Cerulean.entero), [47, 191, 222]);
+        t.deep(rgb(secuencia.ETIQUETAS.Rose.entero), [247, 111, 164]);
+        t.deep(rgb(secuencia.ETIQUETAS.Forest.entero), [81, 184, 88]);
     });
 
 

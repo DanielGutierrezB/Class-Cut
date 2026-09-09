@@ -374,6 +374,48 @@ module.exports = t => {
             return sub ? (/<Name>([^<]*)<\/Name>/.exec(p.contenido(sub)) || [])[1] : null;
         };
 
+        /** Las pistas de audio de una secuencia, en orden. */
+        const pistasAudioDe = (p, seq) => {
+            const grupo = p.refsDe(seq).find(k => p.clase(k) === 'AudioTrackGroup');
+            return [...p.contenido(grupo).matchAll(/<Track Index="\d+" ObjectURef="([^"]+)"\/>/g)]
+                .map(m => prproj.clave('UID', m[1]))
+                .filter(k => p.tiene(k));
+        };
+
+        /**
+         * Si un corte mira a una secuencia o a un archivo.
+         *
+         * Es la única diferencia que importa entre las dos pistas de audio de la
+         * entrega, y no se ve en el nombre: el nido se llama `AUDIO` y el WAV
+         * `Live-Mix.wav`, pero los dos podrían llamarse igual. Lo que los separa
+         * de verdad es la clase del objeto que hay al final de la cadena.
+         */
+        const miraAUnNido = (p, item) => p
+            .cierre([item], { claseFrontera: ['Sequence', 'Media'] })
+            .some(k => /SequenceSource$/.test(p.clase(k)));
+
+        /**
+         * Le agrega a una clase ya escrita sus pistas de audio, con la mezcla en
+         * la posición `cualSuena`.
+         *
+         * Va aparte de `claseConVistas` porque casi ninguna prueba la necesita:
+         * lo que se mira en las otras es el orden de las pistas de video, y diez
+         * WAV de más solo harían más lento cada armado.
+         */
+        const conAudio = (dir, nombre, medios, cualSuena) => {
+            const pistas = medios.map((ruta, i) =>
+                '<track><clipitem id="a' + i + '"><name>c</name>'
+                + `<enabled>${i === cualSuena ? 'TRUE' : 'FALSE'}</enabled>`
+                + '<start>0</start><end>90</end><in>1800</in><out>1890</out>'
+                + `<file id="fa${i}"><name>${path.basename(ruta)}</name>`
+                + `<pathurl>file://${ruta}</pathurl><duration>36000</duration>`
+                + '<media><audio><channelcount>2</channelcount></audio></media></file>'
+                + '</clipitem></track>').join('');
+            const ruta = workspace.finalXml(dir, nombre);
+            fs.writeFileSync(ruta, fs.readFileSync(ruta, 'utf8')
+                .replace('<audio></audio>', `<audio>${pistas}</audio>`));
+        };
+
         t.test('sin ninguna S la clase lleva tres pistas: cámara, pantalla y recuadro', () => {
             const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
             claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV', 'R', 'PV']);
@@ -442,6 +484,112 @@ module.exports = t => {
                 t.near(segunda, 60 + LARGO + nidos.AIRE_SEG, 0.01,
                     `la segunda se corre su franja entera: ${segunda}`);
                 t.ok(segunda > primera, 'y dos clases con el mismo corte no pueden entrar en el mismo lugar');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('arriba el nido de audio y abajo el Live-Mix crudo, muteado', () => {
+            // **Las dos pistas no pueden ser lo mismo.** El editor abrió la
+            // primera versión y encontró el mismo nido dos veces: eso no es un
+            // respaldo, porque dos copias del mismo nido se rompen juntas. El
+            // respaldo tiene que apuntar al WAV, sin nido de por medio, para que
+            // siga siendo lo que salió del aparato pase lo que pase arriba.
+            const dir = carpeta({
+                'material/a.mov': 'no importa qué diga',
+                'material/1_COMBO-1.wav': 'ni esto',
+                'material/Live-Mix.wav': 'ni esto tampoco'
+            });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV']);
+            conAudio(dir, '01_clase', [
+                path.join(dir, 'material', '1_COMBO-1.wav'),
+                path.join(dir, 'material', 'Live-Mix.wav')
+            ], 1);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const pistas = pistasAudioDe(p, entregaDe(p, '01_clase'));
+                t.eq(pistas.length, 2, `dos pistas de audio y no ${pistas.length}`);
+
+                const arriba = cortesDe(p, pistas[0])[0];
+                const abajo = cortesDe(p, pistas[1])[0];
+                t.ok(arriba && abajo, 'las dos con su corte');
+                t.eq(nidoDelCorte(p, arriba), nidos.NOMBRES.audio, 'la de arriba es el nido');
+                t.ok(miraAUnNido(p, arriba), 'y mira de verdad a una secuencia');
+                t.ok(!miraAUnNido(p, abajo), 'la de abajo mira al archivo, no a una secuencia');
+                t.eq(nidoDelCorte(p, abajo), 'Live-Mix.wav', 'y el archivo es la mezcla, no el primer canal');
+                t.ok(/<IsMuted>true<\/IsMuted>/.test(p.contenido(abajo)), 'el respaldo entra muteado');
+                t.ok(!/<IsMuted>true<\/IsMuted>/.test(p.contenido(arriba)), 'y el nido sonando');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('sin saber cuál es la mezcla, la clase entra con una sola pista de audio', () => {
+            // Con dos canales sonando no hay UNA mezcla, así que no hay a quién
+            // señalar como respaldo. Antes que poner una pista cualquiera y
+            // llamarla el respaldo del editor, no se pone ninguna: una pista
+            // vacía en las trece clases es ruido que hay que saltear siempre.
+            const dir = carpeta({
+                'material/a.mov': 'no importa qué diga',
+                'material/1_COMBO-1.wav': 'ni esto',
+                'material/Live-Mix.wav': 'ni esto tampoco'
+            });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV']);
+            conAudio(dir, '01_clase', [
+                path.join(dir, 'material', '1_COMBO-1.wav'),
+                path.join(dir, 'material', 'Live-Mix.wav')
+            ], -1);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(pistasAudioDe(p, entregaDe(p, '01_clase')).length, 1);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('cada nido llega del color de su pista, también en el panel', () => {
+            // El color del corte manda en la línea de tiempo; el del ítem del
+            // panel manda en el panel Y lo hereda cualquier corte que se agregue
+            // después a mano. Pintando solo el corte, `CAM` era una secuencia
+            // verde más entre todas, que es justo donde el editor la busca.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const { ETIQUETAS } = require('../engine/prproj-moldes');
+                const colorDelPanel = nombre => {
+                    const cpi = p.porNombre('ClipProjectItem', nombre);
+                    return (/<Column\.PropertyText\.Label>BE\.Prefs\.LabelColors\.(\d+)</
+                        .exec(p.contenido(cpi)) || [])[1];
+                };
+                t.eq(colorDelPanel(nidos.NOMBRES.camara), String(ETIQUETAS[nidos.ETIQUETA_DE_CAMARA].indice));
+                t.eq(colorDelPanel(nidos.NOMBRES.pantalla), String(ETIQUETAS[nidos.ETIQUETA_DE_PANTALLA].indice));
+                t.eq(colorDelPanel(nidos.NOMBRES.audio), String(ETIQUETAS[nidos.ETIQUETA_DE_AUDIO].indice));
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('un nido dice que dura lo que dura, y no lo que duraba el molde', () => {
+            // `OriginalDuration` es cuánto material cree Premiere que hay del
+            // otro lado. Heredado del molde, un nido de nueve horas se presenta
+            // como uno de treinta y cinco minutos y los cortes de las últimas
+            // clases caen fuera de lo que existe.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            claseConVistas(dir, '01_clase', medio, ['PV']);
+            claseConVistas(dir, '02_clase', medio, ['PV']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const cpi = p.porNombre('ClipProjectItem', nidos.NOMBRES.camara);
+                const fuente = p.cierre([cpi], { claseFrontera: ['Sequence'] })
+                    .find(k => p.clase(k) === 'VideoSequenceSource');
+                const dice = prproj.aSegundos(
+                    Number(/<OriginalDuration>(\d+)<\/OriginalDuration>/.exec(p.contenido(fuente))[1]));
+
+                // Dos clases de veinte minutos con los cinco de aire en el medio.
+                const LARGO = 36000 / 30;
+                t.near(dice, 2 * LARGO + nidos.AIRE_SEG, 0.01, `el nido dice durar ${dice}`);
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });

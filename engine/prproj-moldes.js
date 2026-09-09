@@ -96,20 +96,27 @@ const FRONTERA_DEL_MEDIO = ['TranscriptClip'];
  * de un color cualquiera sin que nada se queje.
  *
  * El `entero` es la otra cara del dato y solo hace falta en la línea de tiempo,
- * donde el color va DOS veces: el nombre y el entero cacheado al lado. Están los
- * dos que se midieron; son BGR igual que `pproColor` (ver `componentesDePremiere`
- * en `fcp-xml.js`): 14597935 es 0xDEBF2F, que leído al revés da RGB(47,191,222),
- * un celeste; 10776567 es 0xA46FF7, que da RGB(247,111,164), un rosa. Los otros
- * seis no lo traen porque no los medí, y un corte con el nombre puesto y el
- * entero inventado se vería de un color en el panel y de otro en la línea.
+ * donde el color va DOS veces: el nombre y el entero cacheado al lado. Son BGR
+ * igual que `pproColor` (ver `componentesDePremiere` en `fcp-xml.js`): 14597935
+ * es 0xDEBF2F, que leído al revés da RGB(47,191,222), un celeste; 10776567 es
+ * 0xA46FF7, que da RGB(247,111,164), un rosa.
+ *
+ * **Los cinco que están salieron de barrer los proyectos del editor buscando el
+ * nombre y el entero pegados**, que es como Premiere los escribe siempre juntos.
+ * Los tres que faltan no aparecen en ninguno: nadie usó todavía un clip de ese
+ * color, así que no hay de dónde leerlos. Se dejan sin `entero` a propósito y
+ * `pintarCorte` no pinta lo que no puede pintar entero: un corte con el nombre
+ * puesto y el número inventado se vería de un color en el panel y de otro en la
+ * línea de tiempo, que es peor que quedarse gris porque parece que alguien lo
+ * cambió a mano.
  */
 const ETIQUETAS = {
     Violet: { indice: 0 },
-    Iris: { indice: 1 },
-    Caribbean: { indice: 2 },
+    Iris: { indice: 1, entero: 13408882 },
+    Caribbean: { indice: 2, entero: 10016297 },
     Lavender: { indice: 3 },
     Cerulean: { indice: 4, entero: 14597935 },
-    Forest: { indice: 5 },
+    Forest: { indice: 5, entero: 5814353 },
     Rose: { indice: 6, entero: 10776567 },
     Mango: { indice: 7 }
 };

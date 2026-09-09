@@ -52,14 +52,25 @@ const NOMBRES = {
 };
 
 /**
- * Los colores de las dos anidaciones de imagen.
+ * El color de cada anidación.
  *
  * Son los mismos que ya llevan los clips de cada pista —cerúleo la cámara, rosa
- * el grabador de pantalla— para que el nido y lo que hay adentro digan lo mismo.
- * El editor los pidió así y ya los viene mirando en la línea de tiempo.
+ * el grabador de pantalla, caribe el audio— para que el nido y lo que hay
+ * adentro digan lo mismo. El editor los pidió así y ya los viene mirando en la
+ * línea de tiempo.
+ *
+ * **Se pintan en dos lados y hacen falta los dos.** El color del corte manda en
+ * la línea de tiempo; el del ítem del panel manda en el panel de proyecto Y es
+ * el que hereda cualquier corte que se agregue después a mano. Pintando solo el
+ * corte, `CAM` sigue siendo una secuencia verde más entre cincuenta y siete en
+ * el panel, que es justo donde el editor la va a ir a buscar.
+ *
+ * `SLIDE` no está: es la pantalla apoyada sobre la cámara, o sea las dos cosas,
+ * y no hay un color que diga eso. Se queda con el verde de secuencia.
  */
 const ETIQUETA_DE_CAMARA = 'Cerulean';
 const ETIQUETA_DE_PANTALLA = 'Rose';
+const ETIQUETA_DE_AUDIO = 'Caribbean';
 
 
 /**
@@ -111,6 +122,23 @@ function fuentesDeVideo(clase) {
     };
 }
 
+/**
+ * La pista del Live-Mix, que es la mezcla que el aparato ya dejó lista.
+ *
+ * Se la reconoce por el ojo prendido y no por su posición ni por el nombre del
+ * archivo: `course-scan` la deja última hoy, pero eso es un orden que puede
+ * cambiar, y el nombre lo pone el Rodecaster. Lo que la define es que de las
+ * diez es la única que se escucha, y eso lo decidió el corte y viaja en el XML.
+ *
+ * Devuelve `null` cuando hay más de una sonando o ninguna, que son los dos casos
+ * en que no hay UNA mezcla: elegir igual sería señalar una pista cualquiera y
+ * llamarla el respaldo del editor.
+ */
+function pistaDelLiveMix(clase) {
+    const suenan = clase.pistas.audio.filter(p => p.cortes.some(c => c.sonando));
+    return suenan.length === 1 ? suenan[0] : null;
+}
+
 
 /**
  * Arma las cinco anidaciones del curso y las deja colgadas del bin que se pida.
@@ -143,6 +171,7 @@ function armarLosNidos(taller, pedido) {
             nombre, pistasVideo: 1, pistasAudio: 1, duracionSeg: largoSeg
         });
         taller.guardarEn(bin, nido.itemDelPanel);
+        taller.pintarItemDelPanel(nido.itemDelPanel, etiqueta);
         for (const clase of clases) {
             const archivo = fuentesDeVideo(clase)[cual];
             const medio = medioDe(clase, archivo);
@@ -178,6 +207,7 @@ function armarLosNidos(taller, pedido) {
         duracionSeg: largoSeg
     });
     taller.guardarEn(bin, audio.itemDelPanel);
+    taller.pintarItemDelPanel(audio.itemDelPanel, ETIQUETA_DE_AUDIO);
     for (const clase of clases) {
         const franja = franjas.get(clase);
         clase.pistas.audio.forEach((pista, i) => {
@@ -225,6 +255,7 @@ function armarLosNidos(taller, pedido) {
         nombre: NOMBRES.mini, pistasVideo: 1, pistasAudio: 1, duracionSeg: largoSeg
     });
     taller.guardarEn(bin, mini.itemDelPanel);
+    taller.pintarItemDelPanel(mini.itemDelPanel, ETIQUETA_DE_CAMARA);
     const suElCorte = taller.colocarCorte({
         pista: mini.pistasVideo[0],
         medio: camara.comoFuente,
@@ -272,8 +303,10 @@ module.exports = {
     NOMBRES,
     ETIQUETA_DE_CAMARA,
     ETIQUETA_DE_PANTALLA,
+    ETIQUETA_DE_AUDIO,
     franjasDe,
     largoDe,
     fuentesDeVideo,
+    pistaDelLiveMix,
     armarLosNidos
 };

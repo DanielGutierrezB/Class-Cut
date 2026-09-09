@@ -420,7 +420,7 @@ class Taller {
         this.siguienteIdDePista(grupoVideo, pistasVideo.length + 1);
         this.siguienteIdDePista(grupoAudio, pistasAudio.length + 2);
 
-        const panel = this.itemDeSecuencia(seq, pedido.nombre);
+        const panel = this.itemDeSecuencia(seq, pedido.nombre, pedido.duracionSeg || 0);
         return {
             secuencia: seq,
             pistasVideo,
@@ -459,17 +459,28 @@ class Taller {
      *
      * @returns {{cpi, masterClip, fuenteVideo, fuenteAudio}}
      */
-    itemDeSecuencia(seq, nombre) {
+    itemDeSecuencia(seq, nombre, duracionSeg) {
         const p = this.proyecto;
         const modelo = this.moldes.itemDeSecuencia;
         const { clonados } = this._clonar([modelo], { objFrontera: [this.moldes.secuencia] });
 
         const uidViejo = prproj.parte(this.moldes.secuencia)[1];
         const uidNuevo = prproj.parte(seq)[1];
+        const tics = prproj.aTicks(duracionSeg);
         for (const k of clonados) {
             const clase = p.clase(k);
             if (clase === 'VideoSequenceSource' || clase === 'AudioSequenceSource') {
                 p.cambiar(k, uidViejo, uidNuevo);
+                // **Cuánto material hay que ver ahí adentro.** El molde trae la
+                // duración de la secuencia de la que se clonó, y sin pisarla un
+                // nido de nueve horas se presenta como uno de treinta y cinco
+                // minutos: los cortes de la clase doce caen fuera de lo que
+                // Premiere cree que existe.
+                if (tics > 0) {
+                    p.escribir(k, p.contenido(k).replace(
+                        /<OriginalDuration>\d+<\/OriginalDuration>/,
+                        `<OriginalDuration>${tics}</OriginalDuration>`));
+                }
             }
             if (clase === 'ClipProjectItem' || clase === 'MasterClip') {
                 p.escribir(k, p.contenido(k)

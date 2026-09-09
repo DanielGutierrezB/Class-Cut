@@ -357,7 +357,7 @@ const VISTA_DE_SLIDE = 'S';
  * trece clases es ruido que hay que saltear cada vez que se mira una.
  */
 function armarClaseSobreNidos(taller, clase, pedido) {
-    const { nidos, franja, vistas, binSecuencias, avisos } = pedido;
+    const { nidos, franja, vistas, medios, binSecuencias, avisos } = pedido;
 
     // Los bloques salen de la primera pista de video, que `export.js` escribe
     // con un corte por bloque que sobrevivió al corte, encendido o apagado.
@@ -373,11 +373,14 @@ function armarClaseSobreNidos(taller, clase, pedido) {
     const hayS = bloques.some((corte, i) => vistaDe(i) === VISTA_DE_SLIDE);
     const pistasVideo = hayS ? 4 : 3;
 
+    // La segunda pista de audio es el Live-Mix crudo, así que solo existe si se
+    // sabe cuál es. Cuando no se sabe, la clase entra con una sola: mejor sin
+    // respaldo que con una pista vacía en las trece.
+    const vivo = nidos.pistaDelLiveMix(clase);
     const secuencia = taller.crearSecuencia({
         nombre: clase.nombre,
         pistasVideo,
-        // Dos: la de siempre y la copia muteada de respaldo.
-        pistasAudio: 2,
+        pistasAudio: vivo ? 2 : 1,
         duracionSeg: clase.duracionSeg
     });
     taller.guardarEn(binSecuencias, secuencia.itemDelPanel);
@@ -422,12 +425,35 @@ function armarClaseSobreNidos(taller, clase, pedido) {
         if (!esCamara && !esSlide) poner(pista.mini, nidos.mini, corte, true, nidos.etiquetaDeCamara);
     });
 
-    // Las dos pistas de audio son el mismo nido: la de arriba suena y la de
-    // abajo entra muteada de respaldo. Es lo que pidió el editor, y sirve para
-    // lo de siempre: tocar el audio y poder volver sin deshacer.
-    for (const corte of (clase.pistas.audio[0] ? clase.pistas.audio[0].cortes : [])) {
-        poner(secuencia.pistasAudio[0], nidos.audio, corte, true);
-        poner(secuencia.pistasAudio[1], nidos.audio, corte, false);
+    // **Las dos pistas de audio no son lo mismo, y esa es la gracia.** Arriba va
+    // el nido, que adentro tiene los diez canales del Rodecaster con el Live-Mix
+    // como único encendido: si un día hay que rescatar el micrófono de corbata
+    // de la clase siete, el canal está ahí y es cuestión de subirlo. Abajo va el
+    // Live-Mix a secas, apuntando al WAV y sin nido de por medio, muteado.
+    //
+    // El respaldo tiene que ser el archivo justamente porque el nido no lo es:
+    // dos copias del mismo nido se rompen juntas. Con el WAV crudo debajo, si el
+    // nido se desanida, se desincroniza o el editor lo toca de más, hay una
+    // pista que sigue siendo exactamente lo que salió del aparato, y volver es
+    // desmutearla.
+    if (vivo) {
+        for (const corte of vivo.cortes) {
+            poner(secuencia.pistasAudio[0], nidos.audio, corte, true, nidos.etiquetaDeAudio);
+            const medio = medios.get(corte.archivo.id);
+            if (!medio) continue;
+            // `entradaSeg` a secas, sin la franja: este corte mira al archivo de
+            // esta clase, no a la línea de nueve horas donde su clase empieza en
+            // `franja.desdeSeg`. Sumársela lo mandaría al medio de otra clase.
+            taller.colocarCorte({
+                pista: secuencia.pistasAudio[1],
+                medio,
+                desdeSeg: corte.desdeSeg,
+                hastaSeg: corte.hastaSeg,
+                entradaSeg: corte.entradaSeg,
+                sonando: false
+            });
+            colocados++;
+        }
     }
 
     const marcadores = clase.marcadores.filter(m => m.color != null);
@@ -444,7 +470,7 @@ function armarClaseSobreNidos(taller, clase, pedido) {
         conEfectos: 0,
         conSlides: hayS,
         pistasVideo,
-        pistasAudio: 2
+        pistasAudio: vivo ? 2 : 1
     };
 }
 
@@ -827,10 +853,13 @@ function poblar(taller, clases, avisos, decir, opciones) {
             nidos: {
                 ...armados,
                 etiquetaDeCamara: nidos.ETIQUETA_DE_CAMARA,
-                etiquetaDePantalla: nidos.ETIQUETA_DE_PANTALLA
+                etiquetaDePantalla: nidos.ETIQUETA_DE_PANTALLA,
+                etiquetaDeAudio: nidos.ETIQUETA_DE_AUDIO,
+                pistaDelLiveMix: nidos.pistaDelLiveMix
             },
             franja: armados.franjas.get(clase),
             vistas: op.carpeta ? vistasDe(op.carpeta, clase) : [],
+            medios: mediosPorClase.get(clase),
             binSecuencias,
             avisos
         }));

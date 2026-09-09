@@ -139,12 +139,50 @@ module.exports = t => {
         t.eq(nidos.ETIQUETA_DE_PANTALLA, fcp.CLIP_LABELS[1]);
     });
 
-    t.test('los dos colores están medidos, así que se pintan de verdad', () => {
+    t.test('los tres colores están medidos, así que se pintan de verdad', () => {
         // `pintarCorte` no pinta con un entero inventado: dejaría el clip de un
-        // color en el panel y de otro en la línea de tiempo. Los dos que usan
-        // los nidos tienen que ser de los medidos.
+        // color en el panel y de otro en la línea de tiempo. Los tres que usan
+        // los nidos tienen que ser de los medidos, o el editor abre el proyecto
+        // y ve tres nidos verdes como cualquier otra secuencia.
         const { ETIQUETAS } = require('../engine/prproj-moldes');
         t.ok(ETIQUETAS[nidos.ETIQUETA_DE_CAMARA].entero != null);
         t.ok(ETIQUETAS[nidos.ETIQUETA_DE_PANTALLA].entero != null);
+        t.ok(ETIQUETAS[nidos.ETIQUETA_DE_AUDIO].entero != null);
+    });
+
+    t.group('las anidaciones · cuál de los diez canales es la mezcla');
+
+    /** Una clase con sus pistas de audio y cuál de ellas suena. */
+    const conAudio = cuales => {
+        const c = clase('01', [600]);
+        c.pistas.audio = cuales.map((suena, i) => ({
+            cortes: [{ archivo: { id: 100 + i }, sonando: suena }]
+        }));
+        return c;
+    };
+
+    t.test('la mezcla es la única que suena, esté donde esté', () => {
+        // `course-scan` la deja última hoy, pero eso es un orden que puede
+        // cambiar. Lo que la define es el ojo prendido.
+        const c = conAudio([false, false, true, false]);
+        t.eq(nidos.pistaDelLiveMix(c), c.pistas.audio[2]);
+    });
+
+    t.test('y se la busca por el ojo, no por el nombre del archivo', () => {
+        const c = conAudio([false, true]);
+        c.pistas.audio[0].cortes[0].archivo.nombre = 'Live-Mix.wav';
+        c.pistas.audio[1].cortes[0].archivo.nombre = '3_HDMI-2.wav';
+        t.eq(nidos.pistaDelLiveMix(c), c.pistas.audio[1], 'gana la que suena, no la que se llama así');
+    });
+
+    t.test('con dos sonando no hay una mezcla, así que no se elige ninguna', () => {
+        // Serían dos pistas abiertas, no una mezcla. Señalar una sería inventar
+        // cuál de las dos es el respaldo del editor.
+        t.eq(nidos.pistaDelLiveMix(conAudio([true, false, true])), null);
+    });
+
+    t.test('con ninguna sonando tampoco hay a quién señalar', () => {
+        t.eq(nidos.pistaDelLiveMix(conAudio([false, false])), null);
+        t.eq(nidos.pistaDelLiveMix(conAudio([])), null);
     });
 };
