@@ -66,6 +66,12 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
  * —no tiene comas, ni palabras largas, ni frases que se pasan de renglón—.
  */
 
+// A qué ritmo se llenan las tomas de la maqueta, en palabras por minuto de toma.
+// Es el del curso de verdad medido con `tools/medir-lengua.js`, y tiene que
+// seguir siendo el mismo que usa `lenguaDe` más abajo: son los dos números que
+// el panel muestra uno al lado del otro.
+const RITMO_DE_HABLA = 160;
+
 const GUION = [
     'Bueno, arrancamos. Hoy vamos a ver cómo se arma un flujo de trabajo con el editor y qué cosas conviene automatizar desde el principio.',
     'Lo primero que quiero mostrarles es la diferencia entre pedirle algo puntual y darle contexto de todo el proyecto. Son dos formas de trabajar completamente distintas.',
@@ -378,6 +384,13 @@ const PROCESABLES = CARPETAS.flatMap(c => c.classes).filter(c => c.processable);
 /* ─── La toma de notas en vivo ───────────────────────────────────────────── */
 
 const CERO = Date.parse('2026-09-08T13:00:00');
+
+// El cero de la sesión que se muestra grabando. Los relojes del bloque "La
+// sesión" cuentan contra este número, así que con la fecha fija de arriba dirían
+// que se lleva grabando desde septiembre. Abriendo la maqueta con `?grabando` se
+// cuelga de la hora de ahora y los relojes corren de verdad; sin eso se queda con
+// la fija, que es lo que hace repetibles las capturas.
+let ceroDeLaSesion = CERO;
 const palabra = (ms, texto) => ({ t: ms, texto });
 
 /**
@@ -391,12 +404,12 @@ const palabra = (ms, texto) => ({ t: ms, texto });
 /**
  * La calidad del lenguaje de una toma (`engine/lengua.js`).
  *
- * **Es el único bloque cuyos números NO salen de las palabras de la maqueta, y
- * hay que decirlo.** Cada toma de acá tiene veinte palabras repartidas en un
- * minuto, así que un ritmo calculado sobre ellas daría treinta palabras por
- * minuto y el panel se vería siempre fuera de zona por un defecto de la maqueta
- * y no por nada del diseño. Los valores por defecto son los del curso de verdad:
- * 168 palabras por minuto de habla, una muletilla cada tanto y un 5% de aire.
+ * **Los números no se cuentan sobre las palabras de la maqueta, se declaran
+ * acá.** Son los del curso de verdad: 168 palabras por minuto de habla, una
+ * muletilla cada tanto y un 5% de aire. Lo que sí importa es que las tomas se
+ * llenen al mismo ritmo (`RITMO_DE_HABLA`, arriba), porque el bloque "La sesión"
+ * sí cuenta sobre las palabras y los dos ritmos se muestran uno al lado del otro:
+ * si se separan, la pantalla parece rota por culpa de la maqueta.
  *
  * Adentro, la forma es la de verdad: `det` es lo determinista y `ia` es lo que
  * contestó el modelo, con su estado propio. Es lo que deja mirar el bloque con
@@ -428,11 +441,30 @@ function lenguaDe(duraSec, opciones) {
     };
 }
 
+/**
+ * Lo que se dice en una toma de `duraSec`, encadenando renglones del guion.
+ *
+ * Uno solo no alcanza: son unas 25 palabras, y estirarlas sobre un minuto daba
+ * 26 palabras por minuto. El bloque "La sesión" cuenta el ritmo sobre estas
+ * palabras y el de lenguaje trae el suyo escrito a mano, así que los dos
+ * mostraban "Palabras por minuto" con números que no se parecían —y lo primero
+ * que uno piensa mirando la pantalla es que la app está mal, no la maqueta.
+ * Encadenando hasta llenar la toma a ritmo de habla, los dos dicen lo mismo.
+ */
+function loQueSeDice(desdeRenglon, duraSec) {
+    const cuantas = Math.max(1, Math.round((RITMO_DE_HABLA * duraSec) / 60));
+    const dichas = [];
+    for (let n = 0; dichas.length < cuantas; n++) {
+        dichas.push(...GUION[(desdeRenglon + n) % GUION.length].split(' '));
+    }
+    return dichas;
+}
+
 function tomaDe(i, desdeSec, duraSec, extra, ceroMs) {
     const cero = ceroMs == null ? CERO : ceroMs;
     const inMs = cero + desdeSec * 1000;
     const outMs = cero + (desdeSec + duraSec) * 1000;
-    const dichas = GUION[i % GUION.length].split(' ');
+    const dichas = loQueSeDice(i, duraSec);
     const paso = (duraSec * 1000) / (dichas.length + 1);
     return Object.assign({
         id: i + 1,
@@ -556,13 +588,25 @@ function comentarSobre(toma, desdeSec, hastaSec, comentario) {
     return toma;
 }
 
-function sesionEnVivo() {
+// Cuánto lleva grabando la sesión, y en qué segundo abre la toma que sigue en
+// curso. Van juntos acá arriba porque el cero en vivo se calcula restando el
+// primero a la hora de ahora: si se separan, los relojes y las palabras de la
+// toma abierta cuentan contra momentos distintos.
+const CORRIDOS = 420;
+const ABRE_LA_ULTIMA = 250;
+
+/**
+ * La sesión grabando. Sin argumento cuelga de `ceroDeLaSesion`, que es lo que
+ * decide si los relojes de arriba están quietos o corriendo.
+ */
+function sesionEnVivo(ceroMs) {
+    const cero = ceroMs == null ? ceroDeLaSesion : ceroMs;
     const tomas = [
         // Dos comentarios en la misma toma, y no uno: con uno solo el
         // subrayado se explica solo, y lo que hay que poder mirar es cómo se
         // distingue cuál es cuál cuando hay varios.
         comentarSobre(
-            comentarSobre(tomaDe(0, 20, 55), 6, 13, 'Acá va muy rápido, avisarle'),
+            comentarSobre(tomaDe(0, 20, 55, null, cero), 6, 13, 'Acá va muy rápido, avisarle'),
             28, 34, 'Sacar un clip corto de esta parte'),
         // La toma que se va de zona, y hace falta que haya una: con todo en
         // verde no se puede aprobar el color del aviso, que es la mitad de que
@@ -593,7 +637,7 @@ function sesionEnVivo() {
                     ]
                 }
             })
-        }),
+        }, cero),
         // Descartada y con los peores números de la clase a propósito: si el
         // agregado la contara, el ritmo y las muletillas de arriba se irían al
         // demonio, así que su exclusión se ve sin tener que buscarla.
@@ -601,17 +645,20 @@ function sesionEnVivo() {
             descartada: true,
             repiteA: 2,
             lengua: lenguaDe(40, { aire: 14, muletillas: 9, cuales: ['o sea', 'digamos', 'eh'] })
-        }),
+        }, cero),
         // La última abierta: es la que dibuja "Cerrar acá" y la toma en curso.
         // Sin medición, que es lo que le pasa de verdad: su texto es el del
-        // ciclo liviano y se descarta cuando cierre.
-        tomaDe(3, 250, 62, { outMs: null, lengua: null })
+        // ciclo liviano y se descarta cuando cierre. Dura lo que va del reloj y
+        // no un número fijo: mientras está abierta el profesor sigue hablando, y
+        // con un largo escrito a mano sus palabras se acababan mientras "La
+        // sesión" le seguía sumando segundos, o sea un ritmo cayéndose sola.
+        tomaDe(3, ABRE_LA_ULTIMA, CORRIDOS - ABRE_LA_ULTIMA, { outMs: null, lengua: null }, cero)
     ];
     return {
         secuencia: '05_curso-de-prueba_2026-09-08_15-20-00',
         clase: 5, parte: 1, curso: '2609_curso-de-prueba',
-        ceroMs: CERO,
-        claqueta: { ms: CERO + 6000, confirmada: true },
+        ceroMs: cero,
+        claqueta: { ms: cero + 6000, confirmada: true },
         vistas: VISTAS,
         dir: CURSO,
         // Dónde van a caer los dos archivos. El motor lo manda con cada resumen y
@@ -619,7 +666,7 @@ function sesionEnVivo() {
         archivos: archivosDeNotas(CURSO, '05_curso-de-prueba_2026-09-08_15-20-00'),
         grabando: true,
         terminando: false,
-        segundos: 420,
+        segundos: CORRIDOS,
         abierta: 4,
         // El temario del CD arranca vacío, que es como arranca una clase: el
         // bloque de cobertura se mira primero en su estado pendiente, y pegar la
@@ -977,9 +1024,10 @@ window.cc = {
     grabarEditar: async () => ({ ok: true, estado: sesionEnVivo() }),
     grabarEditarGrabada: async (json, cambio) => { await espera(120); return editarEnMemoria(json, cambio); },
     grabarCerrarToma: async () => ({ ok: true, estado: sesionEnVivo() }),
-    // Null: la maqueta abre sin grabación en curso, que es como se abre la app.
-    // Para ver la pantalla grabando: `dev.grabarEstado(maqueta.sesionEnVivo())`.
-    grabarEstado: async () => null,
+    // Sin `?grabando` contesta null, que es como abre la app: sin nada en curso.
+    // Con `?grabando` contesta la sesión, así la pantalla la encuentra sola por
+    // el mismo camino que del otro lado y no hay que empujarle un estado a mano.
+    grabarEstado: async () => (abreGrabando() ? sesionEnVivo() : null),
     grabarVistas: async () => VISTAS,
     grabarListar: async () => listaGrabadas(),
     grabarRegenerar: async () => ({ ok: true }),
@@ -1008,7 +1056,8 @@ window.cc = {
  * La puerta para probar a mano lo que la maqueta no puede mostrar sola.
  *
  * Hay estados que existen solo mientras algo pasa —la pantalla grabando— y que
- * abriendo la app nunca se ven quietos. Desde la consola del navegador:
+ * abriendo la app nunca se ven quietos. El camino corto es abrir
+ * `localhost:4321/?grabando`; desde la consola del navegador:
  *
  *   maqueta.grabando()     la pantalla de grabar, con una sesión en curso
  *   maqueta.cargar()       vuelve a meter las dos carpetas
@@ -1042,7 +1091,34 @@ async function cargarCarpetas() {
     for (const carpeta of CARPETAS) await window.dev.addFolder(carpeta.root);
 }
 
+const abreGrabando = () => new URLSearchParams(location.search).has('grabando');
+
+/**
+ * `?grabando` abre la maqueta con una clase a medio grabar.
+ *
+ * Es el estado que no se puede ver quieto abriendo la app: hay que apretar
+ * "Iniciar grabación" y esperar a que pasen cosas. Deja además el temario del CD
+ * ya pegado y medido, porque el bloque de cobertura vacío solo muestra su estado
+ * pendiente y lo que hay para mirar es la lista con unos temas dichos y otros no.
+ * Para verlo vacío, se borra la lista desde el mismo desplegable.
+ */
+function arrancarGrabando() {
+    ceroDeLaSesion = Date.now() - CORRIDOS * 1000;
+    enMemoria.temario = temarioDe([
+        'Objetivos de la clase:',
+        '- Mostrar la diferencia entre pedir algo puntual y dar contexto del proyecto',
+        '- Explicar qué es spec driven development y por qué cambia la forma de escribir código',
+        '- Armar una especificación corta en vivo, de punta a punta',
+        '- Enseñar a revisar lo que el modelo devuelve antes de aceptarlo',
+        '- Dejar el proyecto corriendo con la primera especificación aplicada'
+    ].join('\n'));
+    window.dev.abrirGrabar();
+}
+
 // `dev` lo publica `app.js`, que corre después de este archivo.
-window.addEventListener('DOMContentLoaded', () => setTimeout(cargarCarpetas, 60));
+window.addEventListener('DOMContentLoaded', () => setTimeout(async () => {
+    await cargarCarpetas();
+    if (abreGrabando()) arrancarGrabando();
+}, 60));
 
 })();
