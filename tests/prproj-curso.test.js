@@ -54,6 +54,24 @@ function xmlConRecuadro(nombre, cuantos, rutaMedio) {
     return xmlDe(nombre).replace('<video></video>', `<video><track>${clips}</track></video>`);
 }
 
+/**
+ * El mismo XML, pero con material de verdad y una etiqueta de color a elección.
+ *
+ * Sirve para dos cosas que `xmlDe` no puede: comprobar que un archivo entra una
+ * sola vez al panel aunque lo nombren tres XML, y provocar el aviso de la
+ * etiqueta que no está entre las medidas, que es el que se repetiría una vez por
+ * paso si no se filtrara.
+ */
+function xmlConMaterial(nombre, rutaMedio, etiqueta) {
+    const archivo = `<file id="f1"><name>a.mov</name><pathurl>file://${rutaMedio}</pathurl>`
+        + '<duration>300</duration><media><video></video></media></file>';
+    const clip = '<clipitem id="c0"><name>corte</name><start>0</start><end>60</end>'
+        + `<in>0</in><out>60</out>${archivo}`
+        + (etiqueta ? `<labels><label2>${etiqueta}</label2></labels>` : '')
+        + '</clipitem>';
+    return xmlDe(nombre).replace('<video></video>', `<video><track>${clip}</track></video>`);
+}
+
 function carpeta(armar) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-curso-'));
     for (const [relativa, contenido] of Object.entries(armar || {})) {
@@ -233,6 +251,24 @@ module.exports = t => {
     } else {
         const prproj = require('../engine/prproj');
 
+        /**
+         * Qué cuelga de un bin, por nombre y en el orden en que se ve el panel.
+         *
+         * Se sigue la lista `<Items>` y no el anidamiento del XML: en un
+         * `.prproj` los bins están todos al mismo nivel del archivo y quién
+         * cuelga de quién lo dice esa lista. Hace falta mirarlo así y no con
+         * `porNombre` porque las tres versiones de una clase llevan el mismo
+         * nombre a propósito: lo único que las distingue es el bin.
+         */
+        const hijosDe = (p, bin) => [...p.contenido(bin).matchAll(/<Item Index="\d+" ObjectURef="([^"]+)"\/>/g)]
+            .map(m => prproj.clave('UID', m[1]))
+            .filter(k => p.tiene(k));
+
+        const dentroDe = (p, bin) => hijosDe(p, bin).map(k => p.nombre(k));
+
+        const binDentroDe = (p, bin, nombre) => hijosDe(p, bin)
+            .find(k => p.clase(k) === 'BinProjectItem' && p.nombre(k) === nombre) || null;
+
         t.test('el curso entero sale en un proyecto que se puede releer', () => {
             const dir = carpeta({
                 'The Cutter/01_clase.xml': xmlDe('01_clase'),
@@ -300,6 +336,149 @@ module.exports = t => {
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });
+
+        t.group('el proyecto del curso · los pasos de antes del corte');
+
+        /**
+         * Una clase con sus dos pasos guardados en `Backup/`, como los deja el
+         * pipeline: el mismo nombre de secuencia adentro de los tres XML y el
+         * sufijo del paso pegado al nombre del archivo.
+         */
+        const conPasos = (dir, nombre, medio, pasos) => {
+            fs.mkdirSync(path.join(dir, workspace.OUTPUT_DIR, workspace.BACKUP_DIR), { recursive: true });
+            fs.writeFileSync(workspace.finalXml(dir, nombre), xmlConMaterial(nombre, medio));
+            for (const paso of pasos) {
+                fs.writeFileSync(workspace.artifact(dir, nombre, paso), xmlConMaterial(nombre, medio));
+            }
+        };
+
+        t.test('los pasos previos entran en «Pre», un bin por paso y adentro cada clase', () => {
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            conPasos(dir, '01_clase', medio, ['populatedXml', 'alignedXml']);
+            conPasos(dir, '02_clase', medio, ['populatedXml', 'alignedXml']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.ok(p.verificar().ok, 'el grafo cierra');
+
+                const secuencias = p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS);
+                const pre = binDentroDe(p, secuencias, curso.BIN_PRE);
+                t.ok(pre, `«${curso.BIN_PRE}» cuelga del bin de secuencias`);
+                t.deep(dentroDe(p, secuencias), ['01_clase', '02_clase', curso.BIN_PRE],
+                    'y va último, después de las clases');
+
+                t.deep(dentroDe(p, pre), ['poblada', 'alineada'],
+                    'un bin por paso, con el nombre del paso y en el orden en que pasaron');
+                for (const paso of ['poblada', 'alineada']) {
+                    t.deep(dentroDe(p, binDentroDe(p, pre, paso)), ['01_clase', '02_clase'],
+                        `${paso} tiene la secuencia de cada clase, sin renombrar`);
+                }
+                // Dos clases por tres versiones. Si el nombre se hubiera tocado
+                // en algún lado, alguna de las seis no se llamaría así.
+                t.eq(p.porClase('Sequence').filter(k => /^0\d_clase$/.test(p.nombre(k))).length, 6);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('el material de los pasos previos es el mismo, no una segunda copia', () => {
+            // Un `.prproj` con el mismo archivo importado tres veces le muestra
+            // al editor tres filas en el panel para el mismo medio, y ninguna
+            // dice cuál usar. El `registro` es por curso justamente por esto.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            conPasos(dir, '01_clase', medio, ['populatedXml', 'alignedXml']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                t.ok(r.cuenta.some(c => /1 archivo\(s\) de material/.test(c)),
+                    `un archivo y no tres: ${r.cuenta.join(' | ')}`);
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(p.porClase('ClipProjectItem').filter(k => p.nombre(k) === 'a.mov').length, 1,
+                    'una sola fila en el panel');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('a una clase le puede faltar un paso: se saltea y se cuenta, no se rompe', () => {
+            // Una clase procesada con una versión vieja no tiene Backup, y
+            // negarle el proyecto entero al editor por eso sería cambiar doce
+            // pasos previos por ninguno.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            conPasos(dir, '01_clase', medio, ['populatedXml', 'alignedXml']);
+            conPasos(dir, '02_clase', medio, ['populatedXml']);
+            conPasos(dir, '03_clase', medio, []);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                t.eq(r.clases, 3, 'las tres clases entran igual');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const pre = binDentroDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS), curso.BIN_PRE);
+                t.deep(dentroDe(p, binDentroDe(p, pre, 'poblada')), ['01_clase', '02_clase']);
+                t.deep(dentroDe(p, binDentroDe(p, pre, 'alineada')), ['01_clase']);
+                t.ok(r.avisos.every(a => !/paso|previo|poblada|alineada/i.test(a)),
+                    `que falte un paso no es un aviso: ${r.avisos.join(' | ')}`);
+                t.ok(r.cuenta.some(c => /Otros 3 no estaban guardados/.test(c)),
+                    `pero se cuenta: ${r.cuenta.join(' | ')}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('sin ningún paso guardado no se crea un «Pre» vacío', () => {
+            // Los cuatro bins vacíos de la raíz son el andamio de lo que el
+            // editor va a colgar después. De este no cuelga nada que él ponga,
+            // así que vacío no reserva un lugar: promete algo que no está.
+            const dir = carpeta({ 'The Cutter/01_clase.xml': xmlDe('01_clase') });
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(binDentroDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS), curso.BIN_PRE), null);
+                t.eq(p.porNombre('BinProjectItem', 'poblada'), null);
+                t.ok(r.cuenta.some(c => new RegExp(`sin «${curso.BIN_PRE}»`).test(c)),
+                    `y se dice por qué: ${r.cuenta.join(' | ')}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('el aviso de una clase no se repite una vez por paso', () => {
+            // El defecto que esto protege es el mismo de siempre: trece clases
+            // por tres versiones son treinta y nueve líneas iguales tapando a la
+            // única que pide hacer algo. La etiqueta es la misma en los tres
+            // XML, así que el aviso también.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, workspace.OUTPUT_DIR, workspace.BACKUP_DIR), { recursive: true });
+            for (const ruta of [workspace.finalXml(dir, '01_clase'),
+                workspace.artifact(dir, '01_clase', 'populatedXml'),
+                workspace.artifact(dir, '01_clase', 'alignedXml')]) {
+                fs.writeFileSync(ruta, xmlConMaterial('01_clase', medio, 'Turquesa'));
+            }
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const dela = r.avisos.filter(a => /Turquesa/.test(a));
+                t.eq(dela.length, 1, `una vez y no tres: ${r.avisos.join(' | ')}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('las notas en vivo no tienen pasos previos que mostrar', () => {
+            // No pasaron por el pipeline: son marcadores tomados mientras se
+            // grababa. Ir a buscarles un `Backup/` sería buscar en la carpeta
+            // equivocada de otro flujo.
+            const dir = carpeta({
+                'xml/01_notas.xml': xmlDe('01_notas'),
+                'The Cutter/Backup/01_notas_poblada.xml': xmlDe('01_notas')
+            });
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                t.eq(r.fuente, 'notas');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(binDentroDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS), curso.BIN_PRE), null);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+
+        t.group('el proyecto del curso · con una plantilla de verdad');
 
         t.test('la fuente de notas da secuencias con marcadores y sin material', () => {
             const dir = carpeta({ 'xml/01_notas.xml': xmlDe('01_notas') });

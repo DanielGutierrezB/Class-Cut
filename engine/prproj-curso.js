@@ -81,6 +81,34 @@ const BIN_MATERIAL = '01 Material';
  */
 const ORDEN_DE_BINS = [BIN_MATERIAL, BIN_SECUENCIAS, '03 Audio', '04 Assets', '05 Comps', '06 Color'];
 
+/** El bin que junta los pasos previos, adentro del de secuencias. */
+const BIN_PRE = 'Pre';
+
+/**
+ * Los pasos del corte que quedaron guardados y que se pueden volver a mirar.
+ *
+ * Antes de tirar un solo cuadro, el pipeline deja en `The Cutter/Backup/` dos
+ * fotos de la clase entera: `poblada`, con el material completo y los marcadores
+ * como venían del XML del Rodecaster, y `alineada`, el mismo material con los
+ * marcadores ya corridos por la alineación. Van en este orden porque es el orden
+ * en que pasaron —primero se pobló, después se alineó, después se cortó—, y es
+ * el orden en que sirven: cuando un marcador quedó donde no va, la pregunta es
+ * en cuál de los dos pasos se movió.
+ *
+ * **El nombre del bin sale del nombre del archivo y no está escrito acá.** Es lo
+ * que dice `workspace.FILES` sin la extensión, o sea la misma palabra que el
+ * editor ve cuando abre `Backup/` en el Finder. La alternativa era ponerles algo
+ * más explicativo —«antes de ajustar los marcadores», «antes del corte
+ * automático»— y se descartó porque serían dos vocabularios para la misma cosa,
+ * el del disco y el del panel, y comparar un bin con un archivo obligaría a
+ * traducir de uno al otro cada vez. Con esto, además, un paso que cambie de
+ * nombre en `workspace` cambia también acá y no queda un bin mintiendo.
+ */
+const PASOS_PREVIOS = ['populatedXml', 'alignedXml'].map(artefacto => ({
+    artefacto,
+    nombre: path.basename(workspace.FILES[artefacto], '.xml')
+}));
+
 
 // ─── Encontrar de dónde salen los datos ──────────────────────────────
 
@@ -252,6 +280,128 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
 }
 
 
+// ─── Los pasos de antes del corte ────────────────────────────────────
+
+/**
+ * Con qué nombre de secuencia se guardaron los artefactos de una clase.
+ *
+ * Sale del nombre del archivo final y no del `<name>` de adentro, aunque hoy los
+ * dos digan lo mismo: `export.js` escribe `The Cutter/<X>.xml` y
+ * `The Cutter/Backup/<X>_poblada.xml` en la misma corrida y a partir del mismo
+ * `sequenceName`, así que emparejarlos por el nombre del archivo los sigue
+ * emparejando aunque alguien haya editado el `<name>` a mano. El `<name>` es
+ * contenido; el nombre del archivo es la llave con la que se guardó.
+ */
+function nombreGuardado(clase) {
+    return clase.rutaXml ? path.basename(clase.rutaXml, path.extname(clase.rutaXml)) : clase.nombre;
+}
+
+/**
+ * Los pasos previos de cada clase, en `02 Secuencias/Pre/<paso>/`.
+ *
+ * **Qué resuelve.** El proyecto entrega la clase ya cortada, que es lo que el
+ * editor va a editar, pero cuando algo quedó raro —un marcador corrido, un tramo
+ * que se fue— la pregunta no se contesta ahí adentro: hace falta ver la clase
+ * antes del corte y antes de que la alineación tocara los marcadores. Eso ya
+ * estaba guardado en `Backup/` y el editor lo importaba de a un XML por vez.
+ * Acá entra solo.
+ *
+ * **Las secuencias no se renombran.** Las tres versiones de una clase llevan
+ * adentro el mismo `<name>`, así que en el panel se van a ver tres filas que
+ * dicen lo mismo, y lo que las distingue es el bin donde caen. Es a propósito:
+ * el nombre es el de la clase y sigue siendo el de la clase en cualquiera de sus
+ * pasos, y un `01_clase (poblada)` sería un nombre que no existe en ningún otro
+ * lado del disco.
+ *
+ * **El material no se vuelve a importar.** Se comparte el mismo `registro` que
+ * usan las clases, que es por curso justamente para que cada archivo entre una
+ * sola vez al panel. Los pasos previos traen el material COMPLETO y el corte
+ * final solo el que sobrevivió, así que de acá puede salir algún archivo que la
+ * clase no había traído; ese va al bin de material de su clase, que es donde el
+ * editor lo va a buscar, y no a uno aparte.
+ *
+ * **Una clase sin intermedios no es un error.** Un curso procesado con una
+ * versión vieja no tiene `Backup/`, y una clase reprocesada a mano puede tener
+ * uno de los dos y no el otro. Se saltea, se cuenta, y la generación sigue: el
+ * editor prefiere doce pasos previos a que el botón le conteste un error por el
+ * que falta.
+ *
+ * **Y si no hay ninguno, `Pre` no se crea.** Los cuatro bins vacíos de la raíz
+ * se crean igual porque son el andamio de un trabajo que el editor va a hacer
+ * después y él va a colgar cosas ahí. De este no cuelga nada que él ponga: lo
+ * llena el generador o no lo llena nadie, así que un `Pre` vacío no es un lugar
+ * reservado sino una carpeta que promete algo que no está.
+ *
+ * @returns {{secuencias:number, cortes:number, faltan:number}}
+ */
+function armarLosPasosPrevios(taller, pedido) {
+    const { carpeta, clases, binSecuencias, binDeMaterial, registro, avisos } = pedido;
+
+    // Se busca y se lee TODO antes de crear un solo bin, que es lo que permite
+    // no crear `Pre` cuando no hay nada: un bin ya creado no se puede deshacer
+    // sin dejar el panel a medio armar.
+    const porPaso = PASOS_PREVIOS.map(paso => ({ paso, leidas: [] }));
+    let faltan = 0;
+    clases.forEach((clase, indice) => {
+        for (const entrada of porPaso) {
+            const ruta = workspace.artifact(carpeta, nombreGuardado(clase), entrada.paso.artefacto);
+            if (!fs.existsSync(ruta)) { faltan++; continue; }
+            const leida = leerArchivo(ruta);
+            if (!leida.ok) {
+                // Un intermedio ilegible sí se avisa: el archivo está y no se
+                // pudo leer, que es distinto de que la clase sea vieja.
+                avisos.push(`${path.basename(ruta)}: ${leida.error}`);
+                faltan++;
+                continue;
+            }
+            entrada.leidas.push({ clase, indice, leida });
+        }
+    });
+
+    if (!porPaso.some(e => e.leidas.length)) return { secuencias: 0, cortes: 0, faltan };
+
+    // `Pre` va al final del bin de secuencias, después de las clases, porque lo
+    // que el editor abre todos los días son las clases. El `orden` es para la
+    // vista de cuadrícula, donde la lista no manda.
+    const binPre = taller.crearBin(BIN_PRE, { orden: clases.length });
+    taller.guardarEn(binSecuencias, binPre);
+
+    // Los avisos de un paso previo se suman solo si dicen algo que no se dijo
+    // ya. Son la misma clase mirada antes, así que casi todos salen repetidos
+    // —la etiqueta que no está entre las medidas es la misma etiqueta— y con
+    // trece clases por dos pasos eso son hasta veintiséis líneas que tapan al
+    // único archivo que de verdad falta. Lo que sí es nuevo pasa: un medio que
+    // el corte había descartado y no está en el disco aparece nombrándose a sí
+    // mismo, y esa línea no la había dejado nadie.
+    const dichos = new Set(avisos);
+    const suyos = [];
+    let secuencias = 0;
+    let cortes = 0;
+
+    porPaso.forEach((entrada, orden) => {
+        if (!entrada.leidas.length) return;
+        const binPaso = taller.crearBin(entrada.paso.nombre, { orden });
+        taller.guardarEn(binPre, binPaso);
+        for (const { clase, indice, leida } of entrada.leidas) {
+            let medios = new Map();
+            if (leida.archivos.size) {
+                medios = importarMaterial(taller, leida, registro,
+                    binDeMaterial(clase, indice), suyos);
+            }
+            cortes += armarClase(taller, leida, medios, binPaso, suyos).cortes;
+            secuencias++;
+        }
+    });
+
+    for (const aviso of suyos) {
+        if (dichos.has(aviso)) continue;
+        dichos.add(aviso);
+        avisos.push(aviso);
+    }
+    return { secuencias, cortes, faltan };
+}
+
+
 // ─── La puerta ───────────────────────────────────────────────────────
 
 /**
@@ -374,7 +524,13 @@ async function generar(opciones) {
 
     let resumen;
     try {
-        resumen = poblar(taller, clases, avisos, decir);
+        resumen = poblar(taller, clases, avisos, decir, {
+            // Los pasos previos viven en `The Cutter/Backup/`, así que solo los
+            // hay cuando la fuente son los cortes. Las notas en vivo son un XML
+            // de marcadores y nada más: no tuvieron pipeline y no hay ningún
+            // paso anterior que mostrar.
+            carpeta: fuente.tipo === 'cortes' ? op.carpeta : null
+        });
     } catch (e) {
         return { ...vacio, fuente: fuente.tipo, error: `Se cortó armando el proyecto: ${e.message}` };
     }
@@ -414,6 +570,9 @@ async function generar(opciones) {
  *         01 Material/
  *             <clase>/       los doce archivos de esa clase
  *         02 Secuencias/     una por clase, en orden de clase
+ *             Pre/           los pasos de antes del corte, si están guardados
+ *                 poblada/   una por clase, ver `armarLosPasosPrevios`
+ *                 alineada/
  *         03 Audio/          vacío
  *         04 Assets/         vacío
  *         05 Comps/          vacío
@@ -431,7 +590,8 @@ async function generar(opciones) {
  * color— y el editor espera encontrarlos armados al abrir. Un bin vacío cuesta
  * un objeto; que falte cuesta que lo cree a mano trece veces.
  */
-function poblar(taller, clases, avisos, decir) {
+function poblar(taller, clases, avisos, decir, opciones) {
+    const op = opciones || {};
     const raiz = taller.raizDelPanel();
 
     // Lo primero de todo: descolgar lo que traía la plantilla, así lo generado
@@ -450,16 +610,41 @@ function poblar(taller, clases, avisos, decir) {
 
     const registro = new Map();
     const armadas = [];
+    // El bin de material de cada clase, para que los pasos previos metan en él
+    // lo que traigan de más en vez de armar un segundo lugar donde buscar el
+    // mismo archivo. Se crea una vez y se reusa; la clave es la clase leída, que
+    // es lo que las dos pasadas tienen en la mano.
+    const binesDeMaterial = new Map();
+    const binDeMaterial = (clase, i) => {
+        if (!binesDeMaterial.has(clase)) {
+            const binClase = taller.crearBin(clase.nombre, { orden: i });
+            taller.guardarEn(binMaterial, binClase);
+            binesDeMaterial.set(clase, binClase);
+        }
+        return binesDeMaterial.get(clase);
+    };
+
     clases.forEach((clase, i) => {
         decir(i, clases.length, `Armando ${clase.nombre}…`);
         let medios = new Map();
         if (clase.archivos.size) {
-            const binClase = taller.crearBin(clase.nombre, { orden: i });
-            taller.guardarEn(binMaterial, binClase);
-            medios = importarMaterial(taller, clase, registro, binClase, avisos);
+            medios = importarMaterial(taller, clase, registro, binDeMaterial(clase, i), avisos);
         }
         armadas.push(armarClase(taller, clase, medios, binSecuencias, avisos));
     });
+
+    let previos = { secuencias: 0, cortes: 0, faltan: 0 };
+    if (op.carpeta) {
+        decir(clases.length, clases.length, 'Buscando los pasos previos…');
+        previos = armarLosPasosPrevios(taller, {
+            carpeta: op.carpeta,
+            clases,
+            binSecuencias,
+            binDeMaterial,
+            registro,
+            avisos
+        });
+    }
 
     // Recién ahora se borran los moldes: ya se clonó todo lo que hacía falta.
     // Si algo de lo generado hubiera quedado apuntando a la plantilla, no se
@@ -488,7 +673,29 @@ function poblar(taller, clases, avisos, decir) {
     cuenta.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`
         + ` y ${registro.size} archivo(s) de material.`);
 
-    return { clases: armadas.length, detalle: armadas, medios: registro.size, cortes, marcas, cuenta };
+    // Los pasos previos son narración y no aviso, incluso los que faltan: una
+    // clase vieja sin Backup no pide nada —se arregla reprocesándola, y quien
+    // quiera hacerlo va a ir igual a la pestaña Clases—, pero la cuenta tiene
+    // que estar para poder comprobar que los que sí están entraron todos.
+    if (previos.secuencias) {
+        cuenta.push(`En «${BIN_PRE}», ${previos.secuencias} secuencia(s) con ${previos.cortes} corte(s)`
+            + ` de los pasos de antes del corte (${PASOS_PREVIOS.map(p => p.nombre).join(', ')}).`
+            + (previos.faltan ? ` Otros ${previos.faltan} no estaban guardados en «${workspace.BACKUP_DIR}».` : ''));
+    } else if (previos.faltan) {
+        cuenta.push(`No hay ningún paso previo guardado en «${workspace.BACKUP_DIR}»`
+            + ` (faltan ${previos.faltan}), así que el proyecto va sin «${BIN_PRE}».`
+            + ' Se guardan al procesar una clase; las de antes de que eso existiera no los tienen.');
+    }
+
+    return {
+        clases: armadas.length,
+        detalle: armadas,
+        medios: registro.size,
+        cortes,
+        marcas,
+        previos,
+        cuenta
+    };
 }
 
 module.exports = {
@@ -499,5 +706,7 @@ module.exports = {
     MAESTRO,
     ORDEN_DE_BINS,
     BIN_SECUENCIAS,
-    BIN_MATERIAL
+    BIN_MATERIAL,
+    BIN_PRE,
+    PASOS_PREVIOS
 };

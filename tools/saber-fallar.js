@@ -38,6 +38,30 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'un error espera al temporizador para volcarse, como cualquier línea',
+        archivo: 'engine/registro.js',
+        de: '        if (HUELE_A_PROBLEMA.test(linea.evento)) volcar();\n        else programarVolcado();',
+        a: '        programarVolcado();',
+        filtro: 'registro',
+        caen: ['un error se vuelca en el acto, sin esperar al temporizador']
+    },
+    {
+        que: 'la descarga vuelve a mirar solo la memoria y pierde las corridas de antes',
+        archivo: 'engine/registro.js',
+        de: '    const cuales = guardadas.length ? guardadas : lineas;',
+        a: '    const cuales = lineas;',
+        filtro: 'registro',
+        caen: ['la descarga junta las corridas de antes, no solo la de ahora']
+    },
+    {
+        que: 'una línea rota en el diario se lleva puesto el resto del archivo',
+        archivo: 'engine/registro.js',
+        de: '        try {\n            salida.push(JSON.parse(renglon));\n        } catch (err) {',
+        a: '        try {\n            salida.push(JSON.parse(renglon));\n        } catch (err) {\n            throw err;',
+        filtro: 'registro',
+        caen: ['una línea cortada por la mitad no se lleva puesto el resto']
+    },
+    {
         que: 'el recuadro se cuenta como cero y el aviso junto no sale',
         archivo: 'engine/prproj-curso.js',
         de: '        conEfectos: clase.conEfectos || 0,',
@@ -587,6 +611,62 @@ const REVERSIONES = [
         a: '        .filter(e => e.isFile() && /\\.xml$/i.test(e.name))',
         filtro: 'prproj-curso',
         caen: ['los intermedios del pipeline no se confunden con la entrega']
+    },
+    {
+        que: 'el bin de cada paso previo se llama como se nos ocurra y no como el archivo del Backup',
+        archivo: 'engine/prproj-curso.js',
+        de: "    nombre: path.basename(workspace.FILES[artefacto], '.xml')",
+        a: '    nombre: artefacto',
+        filtro: 'prproj-curso',
+        caen: [
+            'los pasos previos entran en «Pre», un bin por paso y adentro cada clase',
+            'a una clase le puede faltar un paso: se saltea y se cuenta, no se rompe'
+        ]
+    },
+    {
+        que: '«Pre» se crea vacío cuando no hay ningún paso guardado',
+        archivo: 'engine/prproj-curso.js',
+        de: '    if (!porPaso.some(e => e.leidas.length)) return { secuencias: 0, cortes: 0, faltan };\n',
+        a: '',
+        filtro: 'prproj-curso',
+        caen: ['sin ningún paso guardado no se crea un «Pre» vacío']
+    },
+    {
+        que: 'los pasos previos vuelven a importar el material, que ya estaba en el panel',
+        archivo: 'engine/prproj-curso.js',
+        de: '                medios = importarMaterial(taller, leida, registro,\n'
+            + '                    binDeMaterial(clase, indice), suyos);',
+        a: '                medios = importarMaterial(taller, leida, new Map(),\n'
+            + '                    binDeMaterial(clase, indice), suyos);',
+        filtro: 'prproj-curso',
+        caen: ['el material de los pasos previos es el mismo, no una segunda copia']
+    },
+    {
+        que: 'un paso que falta no se cuenta, así que nadie se entera de que no está',
+        archivo: 'engine/prproj-curso.js',
+        de: '            if (!fs.existsSync(ruta)) { faltan++; continue; }',
+        a: '            if (!fs.existsSync(ruta)) continue;',
+        filtro: 'prproj-curso',
+        caen: [
+            'a una clase le puede faltar un paso: se saltea y se cuenta, no se rompe',
+            'sin ningún paso guardado no se crea un «Pre» vacío'
+        ]
+    },
+    {
+        que: 'el aviso de una clase se repite una vez por paso previo',
+        archivo: 'engine/prproj-curso.js',
+        de: '        if (dichos.has(aviso)) continue;\n',
+        a: '',
+        filtro: 'prproj-curso',
+        caen: ['el aviso de una clase no se repite una vez por paso']
+    },
+    {
+        que: 'a las notas en vivo se les buscan pasos previos en la carpeta del otro flujo',
+        archivo: 'engine/prproj-curso.js',
+        de: "            carpeta: fuente.tipo === 'cortes' ? op.carpeta : null",
+        a: '            carpeta: op.carpeta',
+        filtro: 'prproj-curso',
+        caen: ['las notas en vivo no tienen pasos previos que mostrar']
     }
 ];
 
