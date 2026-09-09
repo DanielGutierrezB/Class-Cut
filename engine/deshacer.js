@@ -57,6 +57,43 @@ function foto(toma) {
 }
 
 /**
+ * Si dos fotos de la misma toma dicen lo mismo, o sea: si el cambio cambió algo.
+ *
+ * Vive acá y no en quien edita porque se contesta sobre las fotos, que es lo que
+ * quien edita ya tiene en la mano —una de antes y otra de después— y porque así
+ * hay UNA definición de qué es un cambio. Antes cada gesto traía la suya: mover
+ * un borde al hueco donde ya estaba no dejaba paso, y reabrir una toma que el
+ * motor se negaba a reabrir sí lo dejaba, que es el mismo paso fantasma con otro
+ * nombre. Un paso que al deshacerse no se ve hace apretar de nuevo pensando que
+ * el botón no funciona, y encima se come el Cmd-Z que iba para el cambio de
+ * verdad.
+ *
+ * Las listas se comparan elemento a elemento y por referencia, que es lo mismo
+ * que asume `foto` al copiarlas: ni las palabras ni los comentarios se modifican
+ * nunca en su sitio. Sin eso, borrar un comentario que no existe pasaría por
+ * cambio, porque `descomentar` filtra y devuelve una lista nueva con lo mismo
+ * adentro.
+ *
+ * `null` es "esta toma no está", así que una foto contra null nunca son iguales:
+ * es exactamente lo que hace eliminar, y lo que distingue eliminar de veras de
+ * un eliminar que se plantó.
+ */
+function mismaFoto(a, b) {
+    if (!a || !b) return !a && !b;
+    const claves = Object.keys(a);
+    if (claves.length !== Object.keys(b).length) return false;
+    return claves.every(clave => {
+        const x = a[clave];
+        const y = b[clave];
+        if (Array.isArray(x) || Array.isArray(y)) {
+            return Array.isArray(x) && Array.isArray(y) &&
+                x.length === y.length && x.every((cosa, i) => cosa === y[i]);
+        }
+        return x === y;
+    });
+}
+
+/**
  * Anota un paso ya hecho. `antes` y `despues` son fotos de la misma toma.
  *
  * @param {object} historia de `nueva()`
@@ -164,6 +201,7 @@ module.exports = {
     TOPE,
     nueva,
     foto,
+    mismaFoto,
     anotar,
     poner,
     dondeEntra,

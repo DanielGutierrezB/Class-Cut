@@ -407,6 +407,128 @@ module.exports = async t => {
         });
     });
 
+    /* ─── Los pasos que al deshacerse no se ven ───────────────────────────
+     *
+     * La regla del borde de acá arriba, pedida a TODOS los gestos y en un solo
+     * sitio: al historial entra lo que cambió la toma, y nada más. Un paso
+     * fantasma se siente peor que un botón roto —Cmd-Z dice que deshizo algo, la
+     * pantalla no se mueve— y encima se come el paso que iba para el cambio de
+     * verdad.
+     *
+     * Está la lista entera y no solo los que se rompieron, porque lo que hay que
+     * poder mirar de un golpe es qué pasa con cada tipo de cambio cuando se lo
+     * manda dos veces o cuando el motor se planta.
+     */
+    t.group('el historial · solo entra lo que cambió algo');
+
+    t.test('reabrir una toma que no es la última no deja paso', async () => {
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            const r = grabacion.editar({ tipo: 'reabrir', toma: id });
+            t.eq(r.tomas[0].outMs, e.tomas[0].outMs, 'la toma no se movió');
+            t.eq(r.historia.atras, 0, 'y no dejó un paso que no hizo nada');
+        });
+    });
+
+    t.test('reabrir que el motor rechaza no se come el Cmd-Z del cambio anterior', async () => {
+        // Cómo llega este clic: el botón se ofrece mirando el estado que está en
+        // pantalla, y entre ese repintado y el clic pasan hasta tres segundos —lo
+        // que tarda el ciclo de señales en abrir la toma siguiente—. El gesto sale
+        // con el botón que se veía y acá ya no se puede hacer nada.
+        await conSesion(async (dir, e, mas) => {
+            const id = e.tomas[0].id;
+            grabacion.editar({ tipo: 'vista', toma: id, vista: 'S' });
+            await mas(10);
+            const antes = grabacion.resumen();
+            t.eq(antes.tomas.length, 4, 'el "Retomamos" abrió la toma siguiente');
+
+            grabacion.editar({ tipo: 'reabrir', toma: antes.tomas[2].id });
+            t.eq(grabacion.resumen().tomas[2].outMs, antes.tomas[2].outMs, 'la toma no se movió');
+
+            const r = grabacion.deshacer();
+            t.eq(r.que, `poner la toma ${id} en S`, 'el Cmd-Z va al cambio de verdad');
+            t.eq(r.estado.tomas[0].vista, 'PV');
+        });
+    });
+
+    t.test('poner la vista que la toma ya tenía no deja paso', async () => {
+        // El clic más fácil de dar de toda la pantalla: el selector de vista es
+        // una fila de cinco botones y el que está elegido también se puede apretar.
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            const r = grabacion.editar({ tipo: 'vista', toma: id, vista: e.tomas[0].vista });
+            t.eq(r.tomas[0].vista, 'PV');
+            t.eq(r.historia.atras, 0);
+        });
+    });
+
+    t.test('escribir la misma nota otra vez deja un paso, no dos', async () => {
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            grabacion.editar({ tipo: 'nota', toma: id, texto: 'mirar el audio' });
+            const r = grabacion.editar({ tipo: 'nota', toma: id, texto: 'mirar el audio' });
+            t.eq(r.tomas[0].comentario, 'mirar el audio');
+            t.eq(r.historia.atras, 1);
+        });
+    });
+
+    t.test('descartar la que ya estaba descartada no deja paso', async () => {
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            grabacion.editar({ tipo: 'descartar', toma: id, descartada: true });
+            const r = grabacion.editar({ tipo: 'descartar', toma: id, descartada: true });
+            t.ok(r.tomas[0].descartada);
+            t.eq(r.historia.atras, 1);
+        });
+    });
+
+    t.test('borrar un comentario que no existe no deja paso', async () => {
+        // `descomentar` filtra, así que devuelve una lista nueva con lo mismo
+        // adentro: mirar si la lista es otra diría que cambió algo cuando no.
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            const r = grabacion.editar({ tipo: 'borrar-comentario', toma: id, indice: 7 });
+            t.eq(r.tomas[0].comentarios.length, 0);
+            t.eq(r.historia.atras, 0);
+        });
+    });
+
+    t.test('descartar dos veces el mismo ajuste deja un paso, no dos', async () => {
+        // La marca lleva la hora en que se puso, así que reescribirla alcanzaba
+        // para que la foto de después dijera que algo cambió.
+        await conSesion((dir, e) => {
+            const [una, dos] = e.tomas.map(x => x.id);
+            grabacion.editar({ tipo: 'descartar-ajuste', toma: dos, contra: una });
+            const r = grabacion.editar({ tipo: 'descartar-ajuste', toma: dos, contra: una });
+            t.eq(r.historia.atras, 1);
+        });
+    });
+
+    t.test('pero descartar el ajuste contra OTRA toma sí es otro cambio', async () => {
+        // Con quién empalma cambia en cuanto se descarta la del medio, y entonces
+        // la pregunta es otra: la marca vale para el empalme que el editor miró.
+        await conSesion((dir, e) => {
+            const [una, dos, tres] = e.tomas.map(x => x.id);
+            grabacion.editar({ tipo: 'descartar-ajuste', toma: tres, contra: dos });
+            const r = grabacion.editar({ tipo: 'descartar-ajuste', toma: tres, contra: una });
+            t.eq(r.historia.atras, 2);
+        });
+    });
+
+    t.test('dos comentarios iguales son dos cambios, no uno', async () => {
+        // La otra punta de la regla: el portero compara las listas elemento a
+        // elemento, y dos comentarios con el mismo texto son dos comentarios.
+        await conSesion((dir, e) => {
+            const id = e.tomas[0].id;
+            const cuando = e.tomas[0].palabras[1].t;
+            const uno = { tipo: 'comentar', toma: id, desdeMs: cuando, hastaMs: cuando, texto: 'vamos', comentario: 'acá' };
+            grabacion.editar(uno);
+            const r = grabacion.editar(uno);
+            t.eq(r.tomas[0].comentarios.length, 2);
+            t.eq(r.historia.atras, 2);
+        });
+    });
+
     t.group('eliminar · la única acción destructiva');
 
     t.test('una toma descartada se elimina de la sesión', async () => {

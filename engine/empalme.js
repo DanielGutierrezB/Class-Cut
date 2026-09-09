@@ -568,10 +568,10 @@ function medir(toma, contexto) {
     };
 }
 
-/** ¿El editor ya dijo que no a este empalme? */
-function seDescarto(toma, previo) {
+/** ¿El editor ya dijo que no al empalme de esta toma contra esa otra? */
+function seDescarto(toma, contra) {
     const marca = toma && toma.empalme && toma.empalme.descartado;
-    return Boolean(marca && marca.contra === previo.id);
+    return Boolean(marca && marca.contra === contra);
 }
 
 /**
@@ -588,6 +588,11 @@ function seDescarto(toma, previo) {
  * descarte queda en el sidecar en el mismo gesto, sin una segunda escritura.
  */
 function descartar(toma, contra) {
+    // Descartar dos veces el mismo empalme no es un cambio, y tiene que no serlo
+    // también para el objeto: sin esto la marca se reescribía con la hora de
+    // ahora, y eso alcanzaba para que el historial anotara un paso que al
+    // deshacerse no se ve (ver `editar` en `cambios-toma.js`).
+    if (seDescarto(toma, Number(contra))) return;
     toma.empalme = {
         ...(toma.empalme || {}),
         descartado: { contra: Number(contra), ms: Date.now() }
@@ -616,7 +621,7 @@ const medidor = {
     conModelo: async ({ toma, tomas, cliente, signal }) => {
         const previo = anterior(tomas, toma);
         if (!previo) return { hallazgos: [] };
-        if (seDescarto(toma, previo)) return { hallazgos: [] };
+        if (seDescarto(toma, previo.id)) return { hallazgos: [] };
         if (porRegla(previo, toma)) return { hallazgos: [] };
         if (parecidoDeLosBordes(previo, toma) < PARECIDO_PARA_PREGUNTAR) return { hallazgos: [] };
 
@@ -695,7 +700,7 @@ function paraLaPantalla(toma, tomas) {
         sugerencia: null
     };
 
-    if (seDescarto(toma, previo)) {
+    if (seDescarto(toma, previo.id)) {
         vista.estado = 'descartado';
         vista.porque = 'Descartaste el ajuste de este empalme.';
         return vista;

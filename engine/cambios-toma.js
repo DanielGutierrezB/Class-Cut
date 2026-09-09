@@ -47,7 +47,6 @@ function editar(sesion, cambio) {
     if (!toma) return espejo.resumen(sesion);
 
     const antes = historial.foto(toma);
-    let sigue = true;
 
     switch (c.tipo) {
         case 'borde': {
@@ -56,17 +55,15 @@ function editar(sesion, cambio) {
             // palabra o cuando hay que cortar antes de algo, y en los dos casos
             // lo que hay que ver después es el texto nuevo.
             //
-            // Un borde que cae donde ya estaba no es un cambio, y hay dos gestos
-            // que llegan así: un arrastre que volvió al hueco de donde salió y un
+            // Un borde que cae donde ya estaba no se relee, y hay dos gestos que
+            // llegan así: un arrastre que volvió al hueco de donde salió y un
             // clic derecho sobre la palabra que ya es la primera de la toma.
-            // Releerla por eso serían dos segundos de GPU para dejarla igual, y
-            // un paso en el historial que al deshacerse no se ve.
+            // Serían dos segundos de GPU para dejar la toma igual. Del historial
+            // se ocupa el portero de más abajo, que ve que la toma no se movió.
             const estaba = c.borde === 'in' ? toma.inMs : toma.outMs;
             if (c.paredMs != null && Number(c.paredMs) !== estaba &&
                 vivo.moverBorde(toma, c.borde, Number(c.paredMs))) {
                 relecturas.encolar(sesion, toma.id);
-            } else {
-                sigue = false;
             }
             break;
         }
@@ -74,7 +71,7 @@ function editar(sesion, cambio) {
             reabrir(sesion, toma);
             break;
         case 'eliminar':
-            sigue = eliminar(sesion, toma);
+            eliminar(sesion, toma);
             break;
         // Los otros cinco se resuelven con lo que ya está escrito, así que son
         // los mismos que se hacen sobre una clase ya terminada (`editarGrabada`
@@ -85,16 +82,29 @@ function editar(sesion, cambio) {
             vivo.aplicar(toma, c);
     }
 
-    // Un cambio que no cambió nada no va al historial: un arrastre que volvió al
-    // mismo hueco dejaría un paso que al deshacerse no se ve, y el editor
-    // apretaría de nuevo pensando que no funcionó.
-    if (sigue) {
+    // **Al historial entra lo que cambió la toma, y nada más.** Un paso que al
+    // deshacerse no se ve hace apretar de nuevo pensando que el botón no
+    // funciona, y encima se come el Cmd-Z que iba para el cambio de verdad.
+    //
+    // Se pregunta una sola vez y para todos los tipos, comparando las dos fotos,
+    // y no gesto por gesto: cuando cada camino traía su propio criterio, el del
+    // borde se cuidaba y el de reabrir no —una toma que el motor se niega a
+    // reabrir dejaba igual su paso—, y los cinco que pasan por `vivo.aplicar`
+    // tampoco miraban nada. Poner la vista que la toma ya tenía es un clic que
+    // cualquiera da.
+    //
+    // La foto de después es null cuando la toma ya no está en la sesión, y eso
+    // se mira en la lista y no en el tipo del cambio: un `eliminar` que se plantó
+    // —la toma no estaba descartada— deja la toma donde estaba, así que su foto
+    // es la misma de antes y no hay paso que anotar.
+    const despues = sesion.estado.tomas.includes(toma) ? historial.foto(toma) : null;
+    if (!historial.mismaFoto(antes, despues)) {
         historial.anotar(sesion.historia, {
             que: comoSeLlama(c),
             tipo: c.tipo,
             id: toma.id,
             antes,
-            despues: c.tipo === 'eliminar' ? null : historial.foto(toma)
+            despues
         });
     }
 
@@ -145,17 +155,17 @@ function comoSeLlama(c) {
  * demás. Un cartel de confirmación en medio de una clase que se está grabando es
  * un renglón que hay que leer con el profesor hablando: cuesta más que el error
  * que evita, y el error ya está cubierto.
- *
- * @returns {boolean} si se eliminó
  */
 function eliminar(sesion, toma) {
     // Sin descartarla antes no se elimina. Se planta en silencio en vez de tirar
     // porque el camino honesto —el botón, que solo existe en una descartada— no
     // puede llegar acá: esto es la red de abajo, no un mensaje para nadie.
-    if (!toma.descartada) return false;
+    //
+    // Y no contesta si pudo: quien anota mira si la toma quedó en la sesión, que
+    // es la misma pregunta hecha una sola vez para todos los gestos (ver `editar`).
+    if (!toma.descartada) return;
     const tomas = sesion.estado.tomas;
     tomas.splice(tomas.indexOf(toma), 1);
-    return true;
 }
 
 /**
@@ -164,6 +174,13 @@ function eliminar(sesion, toma) {
  * Dos tomas abiertas a la vez rompen todo lo demás: el ciclo de señales le mete
  * las palabras a "la abierta" y no hay tal cosa, y el conteo siguiente cerraría
  * una de las dos dejando la otra abierta para siempre.
+ *
+ * **Plantarse es un caso que llega solo**, y de ahí que importe que no deje paso
+ * en el historial: el botón se ofrece mirando el estado que está en pantalla, y
+ * entre ese repintado y el clic el ciclo de señales pudo abrir la toma siguiente
+ * —tres segundos—. El clic sale con el botón que la pantalla mostraba y acá ya no
+ * se puede hacer nada. Como no toca la toma, la foto de después es igual a la de
+ * antes y `editar` no anota nada.
  */
 function reabrir(sesion, toma) {
     const tomas = sesion.estado.tomas;
