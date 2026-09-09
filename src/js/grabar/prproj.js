@@ -128,11 +128,10 @@ export async function pedir(ruta) {
     const r = await window.cc.prprojGenerar(ruta);
     suyo.generando.delete(ruta);
 
-    if (!r.ok) {
-        toast(r.error || 'No se pudo armar el proyecto.');
-        repintar();
-        return;
-    }
+    // Cancelar no es fallar. El puente pregunta qué hacer cuando ya hay un
+    // proyecto de ese curso, y decir «mejor no» ahí no merece un cartel de error.
+    if (!r.ok && !r.cancelado) toast(r.error || 'No se pudo armar el proyecto.');
+    if (!r.ok) { repintar(); return; }
     suyo.hechos.set(ruta, { ruta: r.ruta });
     // Los avisos van con el resultado y no en un cartel aparte, por lo mismo que
     // en el regenerado: un «listo» que se calla las tres clases que no entraron

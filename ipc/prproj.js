@@ -13,9 +13,46 @@
  */
 
 const fs = require('fs');
+const path = require('path');
 const zlib = require('zlib');
 const ajustes = require('../engine/ajustes');
 const curso = require('../engine/prproj-curso');
+
+/**
+ * Dónde cae el proyecto de un curso.
+ *
+ * El nombre es el de la carpeta, que es como el editor llama al curso en todos
+ * lados: si la carpeta es `2026_curso-spec-driven-development`, el proyecto se
+ * llama igual. Un nombre inventado por nosotros obligaría a traducir entre lo que
+ * dice el Finder y lo que dice Premiere cada vez.
+ *
+ * Y va en una carpeta `Proyecto/` propia, no suelto: Premiere deja auto-guardados
+ * y previsualizaciones al lado del proyecto, y sin una carpeta que los contenga
+ * eso se mezcla con el material.
+ */
+function destinoDe(carpeta) {
+    return path.join(carpeta, 'Proyecto', `${path.basename(carpeta)}.prproj`);
+}
+
+/**
+ * El primer nombre libre al lado de uno ocupado: `Curso 2.prproj`, `Curso 3`…
+ *
+ * Se cuenta hasta encontrar hueco en vez de pegarle la fecha porque así se lee
+ * como lo que es —el segundo intento, el tercero— y es lo que hace el Finder, que
+ * es donde el editor los va a ver.
+ */
+function alLado(destino) {
+    const dir = path.dirname(destino);
+    const ext = path.extname(destino);
+    const base = path.basename(destino, ext);
+    for (let n = 2; n < 1000; n++) {
+        const otro = path.join(dir, `${base} ${n}${ext}`);
+        if (!fs.existsSync(otro)) return otro;
+    }
+    // Mil proyectos del mismo curso es un problema que no vamos a resolver
+    // inventando un nombre más largo.
+    throw new Error(`Hay demasiados proyectos en ${dir}. Llevate alguno antes de generar otro.`);
+}
 
 /**
  * Por qué este archivo no sirve de plantilla, o `null` si sirve.
@@ -100,10 +137,33 @@ function registrar({ ipcMain, dialog, ventana, send, anotar }) {
         const plantilla = estadoDeLaPlantilla();
         if (!plantilla.ok) return { ok: false, ...plantilla };
 
-        anotar('prproj.genera', { carpeta, plantilla: plantilla.ruta });
+        let destino = destinoDe(carpeta);
+        if (fs.existsSync(destino)) {
+            // Con el nombre atado a la carpeta, el segundo apretón del botón
+            // apunta siempre al mismo archivo. Y ese archivo no es un resultado
+            // sino un lugar de trabajo: para cuando alguien vuelva a generar, ahí
+            // adentro puede haber una tarde de edición. Reemplazarlo en silencio
+            // sería tirar trabajo sin avisar, que es el defecto que menos se
+            // perdona.
+            const r = await dialog.showMessageBox(ventana(), {
+                type: 'warning',
+                buttons: ['Guardar uno nuevo al lado', 'Reemplazarlo', 'Cancelar'],
+                defaultId: 0,
+                cancelId: 2,
+                title: 'Ya hay un proyecto de este curso',
+                message: 'Ya hay un proyecto de este curso',
+                detail: `${destino}\n\nSi lo abriste en Premiere y editaste adentro, ` +
+                    'reemplazarlo se lleva puesto ese trabajo.'
+            });
+            if (r.response === 2) return { ok: false, cancelado: true };
+            if (r.response === 0) destino = alLado(destino);
+        }
+
+        anotar('prproj.genera', { carpeta, destino, plantilla: plantilla.ruta });
         try {
             const r = await curso.generar({
                 carpeta,
+                destino,
                 plantilla: plantilla.ruta,
                 avisar: paso => send('prproj-aviso', { carpeta, ...paso })
             });
@@ -116,4 +176,4 @@ function registrar({ ipcMain, dialog, ventana, send, anotar }) {
     });
 }
 
-module.exports = { registrar, estadoDeLaPlantilla };
+module.exports = { registrar, estadoDeLaPlantilla, destinoDe, alLado };

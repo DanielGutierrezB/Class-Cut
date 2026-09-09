@@ -38,6 +38,29 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'generar un proyecto pisa el que ya estaba, con la tarde de edición adentro',
+        archivo: 'ipc/prproj.js',
+        de: '        const otro = path.join(dir, `${base} ${n}${ext}`);\n        if (!fs.existsSync(otro)) return otro;',
+        a: '        return path.join(dir, `${base}${ext}`);',
+        filtro: 'prproj-destino',
+        caen: [
+            'con el nombre ocupado, el de al lado es el 2 y no pisa al 1',
+            'y sigue contando mientras encuentre ocupado'
+        ]
+    },
+    {
+        que: 'el proyecto se llama como se nos ocurra y no como la carpeta del curso',
+        archivo: 'ipc/prproj.js',
+        de: "return path.join(carpeta, 'Proyecto', `${path.basename(carpeta)}.prproj`);",
+        a: "return path.join(carpeta, 'Proyecto', 'Curso.prproj');",
+        filtro: 'prproj-destino',
+        caen: [
+            'el proyecto se llama como la carpeta del curso',
+            'una carpeta con espacios o puntos no rompe el nombre',
+            'una barra al final no deja el nombre vacío'
+        ]
+    },
+    {
         que: 'el error no cuenta cómo se murió el proceso (se tira el dato del `close`)',
         archivo: 'engine/transcribe.js',
         de: "                err.muerte = comoMurio(code, signal);\n",
