@@ -888,6 +888,62 @@ module.exports = t => {
             });
         });
 
+        t.test('los pasos de «Pre» traen el recuadro que el XML marca con un filtro', () => {
+            // Son fotos del XML, y el XML dice con un `<filter>` qué cortes
+            // llevan al profesor en la esquina. Durante meses eso no se escribía
+            // y los pasos previos entraban con el profesor a cuadro completo,
+            // que es justo el plano que esos cortes NO son: una foto que se
+            // parece salvo en lo único que se mira no sirve de foto.
+            if (!hayMovimiento) {
+                t.skip('los pasos de «Pre» traen el recuadro que el XML marca con un filtro',
+                    'la plantilla que se encontró no tiene ningún clip con la escala movida');
+                return null;
+            }
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
+            // Cinco cortes con filtro. Todos van encendidos, o sea todos `PV`,
+            // así que la entrega no lleva recuadro en ninguno: los efectos que
+            // aparezcan son exactamente los del paso «sin-anidar».
+            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 5, medio));
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(p.porClase('VideoFilterComponent').length, 5,
+                    'uno por corte que el XML marcó, y ninguno de más');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('y un corte de audio con filtro no se lleva el encuadre del profesor', () => {
+            // `conEfecto` es «este corte trae un `<filter>`», y en una pista de
+            // audio eso es el volumen. Aplicarle Basic Motion a una onda no
+            // significa nada, y encima contaría como recuadro puesto.
+            const dir = carpeta({
+                'material/a.mov': 'no importa qué diga',
+                'material/Live-Mix.wav': 'la mezcla'
+            });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
+            const conFiltroEnElAudio = xmlConRecuadro('01_clase', 1, medio)
+                .replace('<audio></audio>', '<audio><track>'
+                    + '<clipitem id="a0"><name>c</name><start>0</start><end>30</end>'
+                    + '<in>0</in><out>30</out>'
+                    + `<file id="fa0"><name>Live-Mix.wav</name><pathurl>file://${path.join(dir, 'material', 'Live-Mix.wav')}</pathurl>`
+                    + '<duration>300</duration><media><audio><channelcount>2</channelcount></audio></media></file>'
+                    + '<filter><effect><name>Audio Levels</name></effect></filter>'
+                    + '</clipitem></track></audio>');
+            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), conFiltroEnElAudio);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.eq(p.porClase('AudioFilterComponent').length, 0, 'ningún efecto se coló en el audio');
+                t.ok(r.avisos.every(a => !/recuadro del profesor/.test(a)),
+                    `y no se cuenta como recuadro que faltó: ${r.avisos.join(' | ')}`);
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
         t.test('el aviso de una clase no se repite una vez por paso', () => {
             // El defecto que esto protege es el mismo de siempre: trece clases
             // por tres versiones son treinta y nueve líneas iguales tapando a la

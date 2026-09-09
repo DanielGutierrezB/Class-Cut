@@ -246,8 +246,14 @@ function etiquetaDelArchivo(clase, archivo) {
  * La entrega ya no se arma así —usa `armarClaseSobreNidos`— pero los pasos de
  * `Pre` sí, y tiene que ser así: son fotos de un archivo que existe en el disco
  * y su valor es parecerse a él, no ser cómodas de editar.
+ *
+ * **Parecerse al XML incluye el recuadro del profesor.** El XML marca con un
+ * `<filter>` los cortes que lo llevan, y durante meses eso no se escribía: los
+ * pasos de `Pre` entraban con el profesor a cuadro completo, que es justo el
+ * plano que esos cortes NO son. Una foto que se parece salvo en lo único que se
+ * mira no sirve de foto.
  */
-function armarClase(taller, clase, medios, binSecuencias, avisos) {
+function armarClase(taller, clase, medios, binSecuencias, avisos, encuadre) {
     const pistasVideo = Math.max(1, clase.pistas.video.length);
     const pistasAudio = Math.max(1, clase.pistas.audio.length);
 
@@ -260,13 +266,14 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
     taller.guardarEn(binSecuencias, secuencia.itemDelPanel);
 
     let colocados = 0;
+    let sinRecuadro = 0;
     const sinPintar = new Set();
-    const colocar = (cortes, pista) => {
+    const colocar = (cortes, pista, deVideo) => {
         for (const corte of cortes) {
             const medio = medios.get(corte.archivo.id);
             if (!medio) continue;
             if (corte.etiqueta && !ETIQUETAS[corte.etiqueta]) sinPintar.add(corte.etiqueta);
-            taller.colocarCorte({
+            const item = taller.colocarCorte({
                 pista,
                 medio,
                 desdeSeg: corte.desdeSeg,
@@ -276,11 +283,15 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
                 sonando: corte.sonando
             });
             colocados++;
+            // Solo los de video: `conEfecto` es «este corte trae un `<filter>`»
+            // y un corte de audio también puede traer uno —el volumen viaja
+            // así—, que no tiene nada que ver con el encuadre del profesor.
+            if (deVideo && corte.conEfecto && !taller.ponerEncuadre(item, encuadre)) sinRecuadro++;
         }
     };
 
-    clase.pistas.video.forEach((p, i) => colocar(p.cortes, secuencia.pistasVideo[i]));
-    clase.pistas.audio.forEach((p, i) => colocar(p.cortes, secuencia.pistasAudio[i]));
+    clase.pistas.video.forEach((p, i) => colocar(p.cortes, secuencia.pistasVideo[i], true));
+    clase.pistas.audio.forEach((p, i) => colocar(p.cortes, secuencia.pistasAudio[i], false));
 
     const marcadores = clase.marcadores.filter(m => m.color != null);
     if (marcadores.length !== clase.marcadores.length) {
@@ -293,15 +304,15 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
         avisos.push(`${clase.nombre}: la etiqueta «${etiqueta}» no está entre las medidas`
             + ` (${Object.keys(ETIQUETAS).join(', ')}), así que esos clips entran sin pintar`);
     }
-    // El recuadro NO se avisa por clase: lo trae casi toda clase que tenga
-    // pantalla compartida, así que trece clases dejaban trece líneas iguales que
-    // tapaban a las que sí eran de esta clase y de ninguna otra. Se cuenta acá y
-    // se dice una vez, en `poblar`, con el total.
+    // El recuadro que no se pudo poner NO se avisa por clase: lo trae casi toda
+    // clase que tenga pantalla compartida, así que trece clases dejaban trece
+    // líneas iguales que tapaban a las que sí eran de esta clase y de ninguna
+    // otra. Se cuenta acá y se dice una vez, en `poblar`, con el total.
     return {
         nombre: clase.nombre,
         cortes: colocados,
         marcadores: marcadores.length,
-        conEfectos: clase.conEfectos || 0,
+        sinRecuadro,
         pistasVideo,
         pistasAudio
     };
@@ -478,7 +489,6 @@ function armarClaseSobreNidos(taller, clase, pedido) {
         nombre: clase.nombre,
         cortes: colocados,
         marcadores: marcadores.length,
-        conEfectos: 0,
         conSlides: hayS,
         sinRecuadro,
         pistasVideo,
@@ -539,10 +549,10 @@ function nombreGuardado(clase) {
  * llena el generador o no lo llena nadie, así que un `Pre` vacío no es un lugar
  * reservado sino una carpeta que promete algo que no está.
  *
- * @returns {{secuencias:number, cortes:number, faltan:number}}
+ * @returns {{secuencias:number, cortes:number, faltan:number, sinRecuadro:number}}
  */
 function armarLosPasosPrevios(taller, pedido) {
-    const { carpeta, clases, binSecuencias, binDeMaterial, registro, avisos } = pedido;
+    const { carpeta, clases, binSecuencias, binDeMaterial, registro, avisos, encuadre } = pedido;
 
     // Se busca y se lee TODO antes de crear un solo bin, que es lo que permite
     // no crear `Pre` cuando no hay nada: un bin ya creado no se puede deshacer
@@ -565,7 +575,7 @@ function armarLosPasosPrevios(taller, pedido) {
         }
     });
 
-    if (!porPaso.some(e => e.leidas.length)) return { secuencias: 0, cortes: 0, faltan };
+    if (!porPaso.some(e => e.leidas.length)) return { secuencias: 0, cortes: 0, faltan, sinRecuadro: 0 };
 
     // `Pre` va al final del bin de secuencias, después de las clases, porque lo
     // que el editor abre todos los días son las clases. El `orden` es para la
@@ -584,6 +594,7 @@ function armarLosPasosPrevios(taller, pedido) {
     const suyos = [];
     let secuencias = 0;
     let cortes = 0;
+    let sinRecuadro = 0;
 
     porPaso.forEach((entrada, orden) => {
         if (!entrada.leidas.length) return;
@@ -595,7 +606,9 @@ function armarLosPasosPrevios(taller, pedido) {
                 medios = importarMaterial(taller, leida, registro,
                     binDeMaterial(clase, indice), suyos);
             }
-            cortes += armarClase(taller, leida, medios, binPaso, suyos).cortes;
+            const armada = armarClase(taller, leida, medios, binPaso, suyos, encuadre);
+            cortes += armada.cortes;
+            sinRecuadro += armada.sinRecuadro;
             secuencias++;
         }
     });
@@ -605,7 +618,7 @@ function armarLosPasosPrevios(taller, pedido) {
         dichos.add(aviso);
         avisos.push(aviso);
     }
-    return { secuencias, cortes, faltan };
+    return { secuencias, cortes, faltan, sinRecuadro };
 }
 
 
@@ -878,7 +891,7 @@ function poblar(taller, clases, avisos, decir, opciones) {
     });
     taller.guardarEn(binSecuencias, binNidos);
 
-    let previos = { secuencias: 0, cortes: 0, faltan: 0 };
+    let previos = { secuencias: 0, cortes: 0, faltan: 0, sinRecuadro: 0 };
     if (op.carpeta) {
         decir(clases.length, clases.length, 'Buscando los pasos previos…');
         previos = armarLosPasosPrevios(taller, {
@@ -887,7 +900,11 @@ function poblar(taller, clases, avisos, decir, opciones) {
             binSecuencias,
             binDeMaterial,
             registro,
-            avisos
+            avisos,
+            // El mismo encuadre que la entrega. Los pasos de `Pre` son fotos del
+            // XML y el XML marca con un `<filter>` qué cortes lo llevan; medirlo
+            // aparte sería tener dos recuadros distintos en el mismo proyecto.
+            encuadre: armados.encuadre
         });
     }
 
@@ -899,22 +916,13 @@ function poblar(taller, clases, avisos, decir, opciones) {
     const cortes = armadas.reduce((n, c) => n + c.cortes, 0);
     const marcas = armadas.reduce((n, c) => n + c.marcadores, 0);
 
-    // Lo del recuadro, una vez y con el total. Es una limitación conocida del
-    // XML de origen y no algo que haya salido mal hoy, así que dice qué falta y
-    // qué no: los cortes están donde tienen que estar, lo que no viaja es el
-    // encuadre. Alguien que lea esto tiene que poder decidir si le importa.
-    const conEfectos = armadas.filter(c => c.conEfectos);
-    if (conEfectos.length) {
-        const total = conEfectos.reduce((n, c) => n + c.conEfectos, 0);
-        avisos.push(`${total} corte(s) de ${conEfectos.length} clase(s) traían el recuadro`
-            + ' puesto en el XML: entran en su lugar y con su duración, pero sin el encuadre.');
-    }
-
-    // Y lo mismo con los que no lo pudieron recibir: una vez y con el total. El
-    // encuadre se copia de un clip de la plantilla que lo tenga puesto, y la
-    // mayoría no tiene ninguno, así que esto se dice seguido y por una razón que
-    // no es de este curso. Trece líneas iguales taparían a las que sí lo son.
-    const faltantes = armadas.reduce((n, c) => n + (c.sinRecuadro || 0), 0);
+    // El recuadro que no se pudo poner, una vez y con el total, contando las
+    // clases y los pasos de `Pre` juntos. El encuadre se copia de un clip de la
+    // plantilla que lo tenga puesto, y la mayoría no tiene ninguno, así que esto
+    // se dice seguido y por una razón que no es de este curso: cincuenta y dos
+    // líneas iguales taparían a las que sí lo son.
+    const faltantes = armadas.reduce((n, c) => n + (c.sinRecuadro || 0), 0)
+        + (previos.sinRecuadro || 0);
     if (faltantes) {
         avisos.push(`${faltantes} corte(s) del recuadro del profesor entraron a cuadro completo:`
             + ' la plantilla no tiene ningún clip con la escala o la posición movidas del que'

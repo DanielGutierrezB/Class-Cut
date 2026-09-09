@@ -62,6 +62,22 @@ const REVERSIONES = [
         caen: ['un corte entra en el nido corrido por la franja de su clase']
     },
     {
+        que: 'los pasos de «Pre» vuelven a entrar con el profesor a cuadro completo',
+        archivo: 'engine/prproj-curso.js',
+        de: '            if (deVideo && corte.conEfecto && !taller.ponerEncuadre(item, encuadre)) sinRecuadro++;',
+        a: '',
+        filtro: 'prproj-curso',
+        caen: ['los pasos de «Pre» traen el recuadro que el XML marca con un filtro']
+    },
+    {
+        que: 'el encuadre del profesor se le aplica también a los cortes de audio con filtro',
+        archivo: 'engine/prproj-curso.js',
+        de: '            if (deVideo && corte.conEfecto',
+        a: '            if (corte.conEfecto',
+        filtro: 'prproj-curso',
+        caen: ['y un corte de audio con filtro no se lleva el encuadre del profesor']
+    },
+    {
         que: 'los nidos de imagen se quedan sin el sonido con el que se valida la sincronía',
         archivo: 'engine/prproj-nidos.js',
         de: '            ponerLosCanales(nido, clase, 2);',
