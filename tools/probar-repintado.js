@@ -270,6 +270,23 @@ async function esperarSesion(wc) {
 const boton = (toma, vista) => `#grabar-tomas .toma[data-toma="${toma}"] .toma-vista-btn[data-vista="${vista}"]`;
 const cabeza = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-cuando`;
 const nota = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-nota`;
+/** La primera palabra subrayada de una toma: el clic ahí abre su comentario. */
+const comentada = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-palabra.es-comentada`;
+const palabra = toma => `#grabar-tomas .toma[data-toma="${toma}"] .toma-palabra:not(.es-orilla)`;
+
+/** Cómo está el margen de una toma, y qué vista muestra su tarjeta. */
+const comoEstaElMargen = toma => `(() => {
+    const t = document.querySelector('#grabar-tomas .toma[data-toma="${toma}"]');
+    if (!t) return null;
+    const puesta = t.querySelector('.toma-vista-btn.is-elegida');
+    return {
+        puesta: puesta ? puesta.textContent : null,
+        abierto: t.classList.contains('es-comentando'),
+        cuantos: t.querySelectorAll('.toma-margen .toma-com').length,
+        resaltadas: t.querySelectorAll('.toma-palabra.es-abierta').length,
+        escrito: (t.querySelector('.toma-com-campo') || {}).value
+    };
+})()`;
 
 /** Qué vista muestra la tarjeta de una toma, leído del DOM y de nadie más. */
 const enPantalla = toma => `(() => {
@@ -471,26 +488,39 @@ function casos(wc) {
             }
         },
         {
-            que: 'un botón de vista con una nota a medio escribir no deja la pantalla mintiendo',
+            que: 'un botón de vista apretado con una nota a medio escribir no pierde el clic',
             // Este gesto manda DOS pedidos al motor de una sola vez: al apretar, el
             // campo pierde el foco y su `change` manda la nota, y detrás va el
             // cambio de vista.
             //
-            // Lo que se comprueba es la invariante y nada más, y hay que decir por
-            // qué: la nota repinta la lista, y ese repintado puede caer ENTRE el
-            // mousedown y el mouseup del mismo clic. La tarjeta se reemplaza en el
-            // medio, así que los dos eventos llegan a nodos distintos y el
-            // navegador no dispara ningún `click`: el botón se aprieta y no pasa
-            // nada. Está medido —se espiaron los tres eventos— y es un resto
-            // conocido que se arregla del lado del repintado (reusar la tarjeta en
-            // vez de reemplazarla), no de acá. Que la pantalla y el motor sigan
-            // diciendo lo mismo cuando el clic se pierde es exactamente lo que
-            // esta ronda tiene que garantizar.
+            // Y el segundo se perdía. El repintado que dispara la nota cae ENTRE el
+            // mousedown y el mouseup del mismo clic —el `change` sale del propio
+            // mousedown y la respuesta del motor vuelve en un microtask, o sea
+            // antes de que el mouseup se procese—, la tarjeta se reemplazaba en el
+            // medio, los dos eventos llegaban a nodos distintos y el navegador no
+            // disparaba ningún `click`: el botón se apretaba y no pasaba nada. La
+            // invariante aguantaba —la pantalla no mentía— y aun así el gesto se
+            // había evaporado, que es su propia forma de desconcierto.
+            //
+            // Ahora la lista no se rehace con un botón apretado (`pintar`), así que
+            // esto exige lo que el editor esperaba: la vista cambió Y la nota llegó.
             hacer: async () => {
                 await clic(wc, nota(2));
                 await escribir(wc, ' chau');
                 await clic(wc, boton(1, 'PV'));
                 await dormir(600);
+            },
+            ademas: async () => {
+                const [una, enElMotor] = await Promise.all([
+                    mirar(wc, enPantalla(1)),
+                    mirar(wc, `(async () => {
+                        const e = await window.cc.grabarEstado();
+                        const t = e.tomas.find(x => x.id === 2);
+                        return t ? t.comentario : null;
+                    })()`)
+                ]);
+                if (una !== 'PV') return `el clic se perdió: la toma 1 muestra ${una}`;
+                return /chau$/.test(String(enElMotor)) ? null : `la nota no llegó al motor: «${enElMotor}»`;
             }
         },
         {
@@ -546,6 +576,97 @@ function casos(wc) {
                 if (como.abiertas !== 0) return 'la toma no se cerró';
                 if (como.marcadas.join(' ') !== '1') return `la marca quedó en «${como.marcadas.join(' ')}»`;
                 return una === 'S' ? null : `la tecla no cayó en la elegida, que muestra ${una}`;
+            }
+        },
+        {
+            que: 'con un comentario abierto al margen, la tarjeta se sigue refrescando',
+            // El mismo bug del foco en versión angosta. `es-comentando` marcaba la
+            // tarjeta como ocupada, y esa clase cubría DOS cosas: la caja donde
+            // alguien está escribiendo un comentario nuevo —trabajo a medio hacer,
+            // que hay que proteger— y un comentario viejo que solo se está mirando,
+            // donde no hay nada que perder. Con el margen abierto, la tarjeta no se
+            // rehacía nunca: el cambio se guardaba, no se veía, y aparecía de golpe
+            // al cerrar el comentario.
+            hacer: async () => {
+                await clic(wc, comentada(1));
+                await clic(wc, boton(1, 'MG'));
+                await dormir(500);
+            },
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElMargen(1));
+                if (como.puesta !== 'MG') return `la toma 1 quedó mostrando ${como.puesta}`;
+                if (!como.abierto || !como.cuantos) return 'el repintado se llevó el comentario abierto';
+                return como.resaltadas ? null : 'el tramo del comentario dejó de estar resaltado';
+            }
+        },
+        {
+            que: 'y un repintado que empieza en otra toma tampoco se lo cierra',
+            // La otra mitad: la tarjeta se rehace por cualquier motivo —acá, un
+            // gesto en la toma 2; en la app, el estado que llega cada tres
+            // segundos— y el margen tiene que volver a abrirse sobre la tarjeta
+            // nueva. Si no, mirar un comentario duraría hasta el empujón siguiente.
+            hacer: async () => {
+                await clic(wc, boton(2, 'PV'));
+                await dormir(500);
+            },
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElMargen(1));
+                if (!como.abierto || !como.cuantos) return 'el comentario se cerró solo';
+                if (!como.resaltadas) return 'el tramo del comentario dejó de estar resaltado';
+                return como.puesta === 'MG' ? null : `la toma 1 quedó mostrando ${como.puesta}`;
+            }
+        },
+        {
+            que: 'y el clic sobre el mismo tramo lo cierra, como antes',
+            // El margen se reabre solo en cada repintado, así que hay que
+            // comprobar que se lo puede cerrar igual: si la marca de qué está
+            // abierto no viajara a la tarjeta nueva, el interruptor volvería a
+            // abrirlo en vez de cerrarlo y el comentario sería inapagable.
+            hacer: async () => {
+                await clic(wc, comentada(1));
+                await clic(wc, boton(1, 'R'));
+                await dormir(500);
+            },
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElMargen(1));
+                if (como.abierto || como.cuantos) return 'el comentario siguió abierto';
+                return como.puesta === 'R' ? null : `la toma 1 quedó mostrando ${como.puesta}`;
+            }
+        },
+        {
+            que: 'la caja de un comentario nuevo a medio escribir sí se queda quieta',
+            // La contracara, y es lo que no se puede romper al angostar la regla:
+            // acá SÍ hay trabajo a medio hacer. Se escribe en la toma 4 y se toca
+            // la 2 —o sea que el foco ya no está en la caja— y aun así lo escrito
+            // tiene que seguir ahí.
+            hacer: async () => {
+                await arrastrar(wc, palabra(4), 260);
+                await dormir(400);
+                await escribir(wc, 'ojo');
+                await clic(wc, boton(2, 'MG'));
+                await dormir(500);
+            },
+            ademas: async () => {
+                const [cuatro, dos] = await Promise.all([
+                    mirar(wc, comoEstaElMargen(4)),
+                    mirar(wc, enPantalla(2))
+                ]);
+                if (!cuatro.abierto) return 'el repintado se llevó la caja del comentario';
+                if (cuatro.escrito !== 'ojo') return `lo escrito quedó en «${cuatro.escrito}»`;
+                return dos === 'MG' ? null : `la toma 2 quedó mostrando ${dos}`;
+            }
+        },
+        {
+            que: 'y al cancelarla la tarjeta vuelve a rehacerse',
+            hacer: async () => {
+                await clic(wc, '#grabar-tomas .toma.es-comentando .toma-com.es-nuevo .btn-ghost');
+                await clic(wc, boton(4, 'X2'));
+                await dormir(500);
+            },
+            ademas: async () => {
+                const como = await mirar(wc, comoEstaElMargen(4));
+                if (como.abierto) return 'la caja del comentario quedó abierta';
+                return como.puesta === 'X2' ? null : `la toma 4 quedó mostrando ${como.puesta}`;
             }
         }
     ];

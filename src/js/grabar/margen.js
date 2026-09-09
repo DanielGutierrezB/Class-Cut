@@ -32,6 +32,38 @@ import { unirMarcadas } from './palabras.js';
 /** La marca de que una tarjeta tiene el margen desplegado. */
 const ABIERTA = 'es-comentando';
 
+/**
+ * Y la marca, aparte, de que lo que hay abierto es una caja de ESCRIBIR.
+ *
+ * Son dos situaciones que se ven parecidas y no lo son. `abrirCaja` abre el
+ * campo donde alguien está redactando un comentario nuevo: eso es trabajo a
+ * medio hacer, y un repintado que lo saque del documento se lleva el foco y lo
+ * escrito. `abrirDe` solo MUESTRA comentarios que ya existen, y ahí no hay nada
+ * que perder: la tarjeta se puede rehacer y el margen volver a abrirse encima
+ * (`reabrir`).
+ *
+ * Estuvieron confundidas bajo la misma clase, y el precio fue el mismo defecto
+ * que el del foco en el botón apretado (ver `tarjetasOcupadas` en `tomas.js`):
+ * mientras un comentario viejo estuviera abierto, su tarjeta no se refrescaba
+ * nunca y el cambio aparecía de golpe al cerrarlo.
+ *
+ * Va en un `dataset` y no en otra clase porque no se dibuja: la columna del
+ * margen se abre igual en los dos casos, y una clase que no pinta nada invita a
+ * colgarle estilo y volver a mezclarlas.
+ */
+const ESCRIBIENDO = 'comentando';
+
+/** Si en esta tarjeta hay un comentario a medio escribir. */
+export function escribiendoEn(tarjeta) {
+    return Boolean(tarjeta && tarjeta.dataset && tarjeta.dataset[ESCRIBIENDO]);
+}
+
+/** Qué comentarios tiene abiertos al margen, por su índice en la toma. */
+export function abiertosDe(tarjeta) {
+    const crudo = tarjeta && tarjeta.dataset ? tarjeta.dataset.abiertos : '';
+    return String(crudo || '').split(' ').filter(s => s !== '').map(Number);
+}
+
 function cajaDeMargen(tarjeta) {
     let margen = tarjeta.querySelector('.toma-margen');
     if (!margen) {
@@ -103,6 +135,31 @@ export function abrirDe(span, toma, acciones) {
     // tramo es un interruptor, que es lo que se espera de algo que se pide.
     if (tarjeta.dataset.abiertos === cuales.join(' ')) { cerrar(tarjeta); return; }
 
+    abrir(tarjeta, cuales, toma, acciones);
+}
+
+/**
+ * Vuelve a poner el margen sobre la tarjeta NUEVA, después de un repintado.
+ *
+ * Mostrar un comentario viejo no es trabajo a medio hacer, así que su tarjeta se
+ * rehace como cualquier otra (ver `tarjetasOcupadas` en `tomas.js`) y el margen
+ * se vuelve a abrir encima. Sin esto, la alternativa era la que había: congelar
+ * la tarjeta mientras alguien mira un comentario, y que el cambio de vista que
+ * hizo en el medio apareciera recién al cerrarlo.
+ *
+ * Los que ya no están se dejan afuera, y si no queda ninguno no se abre nada: un
+ * margen con la columna puesta y sin tarjetas adentro es doscientos píxeles
+ * quitados al texto para mostrar nada.
+ */
+export function reabrir(tarjeta, cuales, toma, acciones) {
+    const comentarios = toma.comentarios || [];
+    const siguen = cuales.filter(i => comentarios[i]);
+    if (!siguen.length) return;
+    abrir(tarjeta, siguen, toma, acciones);
+}
+
+/** Los comentarios `cuales` al margen de `tarjeta`, cada uno a su altura. */
+function abrir(tarjeta, cuales, toma, acciones) {
     const margen = cajaDeMargen(tarjeta);
     if (!margen) return;
     margen.textContent = '';
@@ -156,6 +213,7 @@ export function cerrar(tarjeta) {
     if (!tarjeta) return;
     tarjeta.classList.remove(ABIERTA);
     delete tarjeta.dataset.abiertos;
+    delete tarjeta.dataset[ESCRIBIENDO];
     const margen = tarjeta.querySelector('.toma-margen');
     if (margen) margen.textContent = '';
     for (const s of tarjeta.querySelectorAll('.toma-palabra.es-abierta')) {
@@ -194,6 +252,9 @@ export function abrirCaja(tarjeta, ancla, acciones, tomaId) {
     if (!margen) return;
     margen.textContent = '';
     tarjeta.classList.add(ABIERTA);
+    // Y la marca de que acá hay algo a medio escribir, que es lo que le pide a la
+    // lista que no rehaga esta tarjeta hasta que la suelten.
+    tarjeta.dataset[ESCRIBIENDO] = '1';
 
     // El subrayado del tramo que se está por comentar, puesto a mano: el que sale
     // de `marcarComentados` es de los comentarios que YA existen, y este todavía

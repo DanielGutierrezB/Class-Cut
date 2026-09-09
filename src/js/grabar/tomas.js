@@ -356,7 +356,12 @@ function cuerpoDe(toma, acciones, tarjeta, repetidos) {
         const nota = document.createElement('input');
         nota.className = 'toma-nota';
         nota.type = 'text';
-        nota.placeholder = 'Comentar';
+        // "Comentar" a secas quedó ambiguo cuando aparecieron los comentarios
+        // sobre un tramo del texto, que se piden con el mismo verbo y con un
+        // botón que dice justo eso (`abrirCaja` en `margen.js`). Este campo es la
+        // otra cosa: una nota sobre la toma entera, y el rótulo tiene que decir
+        // sobre qué es antes de que alguien escriba en el sitio equivocado.
+        nota.placeholder = 'Nota de toda la toma';
         nota.value = toma.comentario || '';
         // Al salir del campo y no en cada tecla: cada cambio reescribe el XML.
         nota.onchange = () => acciones.alCambiar({ tipo: 'nota', toma: toma.id, texto: nota.value });
@@ -405,15 +410,17 @@ function comentarSeleccion(tarjeta, texto, acciones, tomaId) {
 /**
  * Las tarjetas que no se pueden rehacer, por id.
  *
- * Son dos cosas y las dos son trabajo a medio hacer. Una es el campo donde
- * alguien está escribiendo: sacarlo del documento se lleva puesto el foco, y con
- * el estado del motor llegando cada tres segundos, comentar una toma mientras la
- * clase seguía era imposible —a media frase el cursor se iba solo—. La otra es un
- * comentario abierto al margen: se abre a mano, con un clic sobre su tramo, y un
- * repintado que lo cierre cada tres segundos lo vuelve inservible.
+ * Son dos cosas y las dos son **trabajo a medio hacer**, que es la regla entera:
+ * lo que se rehace le cuesta a alguien algo que no puede recuperar. Una es el
+ * campo donde se está escribiendo —la nota de la toma o el comentario nuevo—:
+ * sacarlo del documento se lleva puesto el foco, y con el estado del motor
+ * llegando cada tres segundos, comentar mientras la clase seguía era imposible,
+ * porque a media frase el cursor se iba solo. La otra es la caja de un comentario
+ * nuevo aunque el foco ya no esté en ella: lo escrito y el tramo subrayado que
+ * dice sobre qué es siguen siendo trabajo que nadie guardó.
  *
- * Son varias y no una: se puede tener un comentario abierto en la toma 2 y estar
- * escribiendo la nota de la 5 al mismo tiempo.
+ * Son varias y no una: se puede tener un comentario a medio escribir en la toma 2
+ * y estar escribiendo la nota de la 5 al mismo tiempo.
  *
  * **Un botón con el foco no ocupa la tarjeta**, y esa distinción no es cosmética:
  * antes se miraba si la tarjeta contenía a `document.activeElement`, y Chromium le
@@ -422,6 +429,13 @@ function comentarSeleccion(tarjeta, texto, acciones, tomaId) {
  * no se rehacía nunca: el cambio se escribía en el XML y en la pantalla no pasaba
  * nada hasta que alguien hiciera clic en otra parte. Perder el foco de un botón
  * que ya se apretó, en cambio, no se ve.
+ *
+ * **Y mirar un comentario viejo tampoco la ocupa**, que es el mismo defecto en
+ * versión angosta: se miraba la clase `es-comentando`, y esa clase cubre las dos
+ * maneras de tener el margen abierto —escribir uno nuevo y mostrar los que ya
+ * están—. Solo la primera es trabajo a medio hacer; la segunda se rehace y se
+ * vuelve a abrir encima (ver `reabrir` en `margen.js`), que cuesta un repintado
+ * y no cuesta nada de nadie.
  */
 function tarjetasOcupadas(donde) {
     const foco = document.activeElement;
@@ -429,11 +443,33 @@ function tarjetasOcupadas(donde) {
     const ocupadas = new Map();
     for (const tarjeta of donde.children) {
         if (!tarjeta.dataset || !tarjeta.dataset.toma) continue;
-        if ((escribiendo && tarjeta.contains(escribiendo)) || tarjeta.classList.contains('es-comentando')) {
+        if ((escribiendo && tarjeta.contains(escribiendo)) || margen.escribiendoEn(tarjeta)) {
             ocupadas.set(Number(tarjeta.dataset.toma), tarjeta);
         }
     }
     return ocupadas;
+}
+
+/**
+ * Los comentarios que están abiertos al margen de las tarjetas que SÍ se rehacen.
+ *
+ * Se anotan antes de rehacer la lista y se vuelven a abrir después, sobre las
+ * tarjetas nuevas: es lo que deja que un comentario siga abierto mientras su
+ * toma se refresca. Las ocupadas no entran porque no se rehacen, así que su
+ * margen sigue puesto y volver a abrirlo lo tiraría.
+ *
+ * @returns {Map<number, number[]>} id de toma → índices de sus comentarios
+ */
+function margenesAbiertos(donde, ocupadas) {
+    const abiertos = new Map();
+    for (const tarjeta of donde.children) {
+        if (!tarjeta.dataset || !tarjeta.dataset.toma) continue;
+        const id = Number(tarjeta.dataset.toma);
+        if (ocupadas.has(id)) continue;
+        const cuales = margen.abiertosDe(tarjeta);
+        if (cuales.length) abiertos.set(id, cuales);
+    }
+    return abiertos;
 }
 
 /**
@@ -464,20 +500,23 @@ function acomodar(donde, nuevas) {
  * hacia arriba, que es lo que nadie hace con un texto. Que lo último quede a la
  * vista lo resuelve el scroll, que se pega al fondo solo (`pegado.js`).
  *
- * La tarjeta que se está escribiendo, y la que tiene un comentario abierto al
- * margen, se quedan como están hasta que las suelten. O sea que su texto deja de
- * crecer un rato: es a propósito, porque quien está escribiendo un comentario
- * está mirando su comentario, y a cambio no se le mueve el suelo. Lo que se está
- * oyendo sigue a la vista arriba, en "Oyendo:".
+ * La tarjeta donde se está escribiendo —la nota, o un comentario nuevo— se queda
+ * como está hasta que la suelten. O sea que su texto deja de crecer un rato: es a
+ * propósito, porque quien está escribiendo está mirando lo que escribe, y a
+ * cambio no se le mueve el suelo. Lo que se está oyendo sigue a la vista arriba,
+ * en "Oyendo:".
+ *
+ * La que solo tiene un comentario viejo abierto al margen, en cambio, se rehace
+ * como cualquiera y el margen se vuelve a abrir encima: mirar no es escribir, y
+ * congelarla era lo que dejaba un cambio de vista invisible hasta cerrarla.
  *
  * @param {object|null} mirada { plegadas: Set<number>, sinDescartadas: boolean,
  *   alPlegar(id, plegada) }
  */
 export function pintar(donde, estado, acciones, mirada) {
-    // Con una línea de borde en la mano no se repinta. El estado del motor llega
-    // cada tres segundos, y rehacer la lista en medio del gesto cambia la línea
-    // por otra: el arrastre se cortaba solo, a mitad de camino y sin avisar.
-    if (donde.querySelector('.toma-borde.es-arrastrando')) return;
+    vigilarElPulso(donde);
+    // Con un gesto del mouse a medio hacer sobre la lista no se repinta.
+    if (enMitadDeUnGesto(donde)) return;
 
     if (!estado || !estado.tomas.length) {
         const vacio = document.createElement('p');
@@ -495,6 +534,70 @@ export function pintar(donde, estado, acciones, mirada) {
     // escribirle encima al que mandó el motor.
     const conTramos = { ...estado, repetidos: empalme.tramosPorToma(estado.tomas) };
     const ocupadas = tarjetasOcupadas(donde);
-    acomodar(donde, plegado.alaVista(estado.tomas, mirada).map(toma =>
-        ocupadas.get(toma.id) || pintarToma(toma, conTramos, acciones, mirada)));
+    const abiertos = margenesAbiertos(donde, ocupadas);
+    const alaVista = plegado.alaVista(estado.tomas, mirada);
+    const tarjetas = alaVista.map(toma =>
+        ocupadas.get(toma.id) || pintarToma(toma, conTramos, acciones, mirada));
+    acomodar(donde, tarjetas);
+
+    // Con las tarjetas ya colgadas del documento, y no antes: el margen pone cada
+    // comentario a la altura de su tramo, y eso se mide; sin dibujar, todo mide
+    // cero y las tarjetas se apilarían en el mismo alto.
+    for (const [id, cuales] of abiertos) {
+        const i = alaVista.findIndex(toma => toma.id === id);
+        if (i >= 0) margen.reabrir(tarjetas[i], cuales, alaVista[i], acciones);
+    }
+}
+
+/* ─── El pulso: nada se rehace debajo del puntero ─────────────────────────
+ *
+ * Un botón de vista apretado con la nota a medio escribir perdía el clic. El
+ * `change` del campo sale del propio `mousedown` —al apretar, el campo pierde el
+ * foco— y la respuesta del motor vuelve enseguida, así que el repintado caía
+ * ENTRE el `mousedown` y el `mouseup`: el botón que recibió el primero ya no
+ * estaba en el documento cuando llegó el segundo, y el navegador no dispara
+ * ningún `click` si los dos no cayeron en el mismo nodo. La pantalla no mentía
+ * —cada tarjeta seguía mostrando lo que decía el motor— y aun así el editor
+ * apretaba y no pasaba nada.
+ *
+ * Es el mismo problema que ya tenía el arrastre de un borde con otro gesto: una
+ * lista que se rehace debajo de la mano. Así que la respuesta es la que ya
+ * estaba —no repintar mientras el gesto dure— y no un mecanismo nuevo que
+ * intente conservar los nodos de abajo del puntero.
+ *
+ * Lo que se pierde es un repintado, no un cambio: el motor ya lo escribió, y lo
+ * que se ve queda al día en el gesto siguiente o, como mucho, en el empujón que
+ * llega tres segundos después. Es exactamente el precio que la guarda del
+ * arrastre venía pagando.
+ */
+
+/** Si hay un botón del mouse apretado sobre la lista. */
+let apretado = false;
+const vigiladas = new WeakSet();
+
+/**
+ * Las dos maneras de preguntar lo mismo, y la segunda sigue haciendo falta.
+ *
+ * Un arrastre de borde ES un botón apretado, así que `apretado` lo cubre; pero
+ * dura segundos y no milisegundos, y en el medio la ventana puede perder el foco
+ * —un diálogo del sistema— y soltar el pulso sin que nadie haya soltado nada. La
+ * línea en la mano lo dice por sí misma y no depende de eso.
+ */
+function enMitadDeUnGesto(donde) {
+    return apretado || Boolean(donde.querySelector('.toma-borde.es-arrastrando'));
+}
+
+function vigilarElPulso(donde) {
+    if (vigiladas.has(donde)) return;
+    vigiladas.add(donde);
+    // En captura, para que el pulso se encienda aunque el gesto lo atienda algo
+    // de adentro; y solo el botón principal, porque el clic derecho abre un
+    // diálogo del sistema y su `pointerup` puede no volver nunca.
+    donde.addEventListener('pointerdown', e => { if (e.button === 0) apretado = true; }, true);
+    // El final se escucha en la ventana y no en la lista por lo mismo que el del
+    // arrastre (`empezarAMover` en `palabras.js`): se puede soltar afuera, y un
+    // gesto que nunca se diera por terminado congelaría la lista para siempre.
+    const soltar = () => { apretado = false; };
+    for (const fin of ['pointerup', 'pointercancel']) window.addEventListener(fin, soltar);
+    window.addEventListener('blur', soltar);
 }
