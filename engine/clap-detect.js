@@ -18,6 +18,7 @@
  */
 
 const onset = require('./vendor/audio-onset');
+const { norm } = require('./texto');
 
 const DEFAULTS = {
     searchSec: 240,      // la claqueta está al principio; más allá es otra cosa
@@ -31,14 +32,6 @@ const NUMBER_WORDS = {
     ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14,
     quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19, veinte: 20
 };
-
-function norm(text) {
-    return String(text == null ? '' : text)
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]/g, '');
-}
 
 function asNumber(token) {
     const t = norm(token);

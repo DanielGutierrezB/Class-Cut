@@ -111,14 +111,25 @@ class TranscribeError extends Error {
     }
 }
 
-function checkTools() {
+/**
+ * @param {object} [pedido] `{path, name}` de un modelo concreto, para quien no
+ *   quiere el mejor que haya. La toma de notas en vivo pide uno liviano para
+ *   escuchar las señales del profesor: ahí lo que importa es cuánto tarda, no
+ *   cuánto acierta, porque de ese texto no queda nada. Si viene, tiene que
+ *   venir con ruta: caer al modelo grande en silencio dejaría como único
+ *   síntoma "el ciclo se puso lento".
+ */
+function checkTools(pedido) {
     const cli = paths.whisper();
     if (!cli.path) {
         throw new TranscribeError(
             'Falta whisper-cli. Mirá Diagnóstico: la app lo trae incluido, así que esto pasa solo en desarrollo.',
             'sin_whisper');
     }
-    const model = paths.whisperModel();
+    if (pedido && !pedido.path) {
+        throw new TranscribeError('Se pidió un modelo concreto sin decir dónde está.', 'sin_modelo');
+    }
+    const model = pedido || paths.whisperModel();
     if (!model.path) {
         throw new TranscribeError(
             'No encontré el modelo de Whisper. Mirá Diagnóstico para ver dónde lo busqué.',
@@ -360,7 +371,7 @@ function tirar(temporal) {
  */
 function runWhisper(wavPath, options) {
     const opts = options || {};
-    const tools = checkTools();
+    const tools = checkTools(opts.model);
     const outBase = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'classcut-stt-')), 'out');
 
     // Sin `--vad` a propósito. El VAD recorta el audio a los pedazos con voz y
