@@ -13,6 +13,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
 const ajustes = require('../engine/ajustes');
@@ -100,22 +101,140 @@ function porQueNoSirve(ruta) {
 }
 
 /**
+ * Los bins que arma el generador, que son con lo que se reconoce lo nuestro.
+ *
+ * Se le preguntan al motor en vez de escribirlos acá: si algún día se llaman de
+ * otra manera, esto lo sigue solo en vez de dejar de reconocer nada en silencio.
+ */
+const NUESTROS_BINS = curso.ORDEN_DE_BINS;
+
+/** Dónde buscar sola, y hasta dónde bajar. */
+const DONDE_BUSCAR = ['Movies', 'Documents', 'Desktop'];
+const HONDO = 4;
+// Abrir un proyecto y recorrerlo cuesta; con los más nuevos alcanza y sobra.
+const CUANTOS_PROBAR = 10;
+
+/**
+ * Un `.prproj` del editor que sirva de molde, buscado en vez de preguntado.
+ *
+ * **Preguntar por una plantilla es un requisito raro de explicar.** Quien aprieta
+ * «Generar .prproj» quiere su curso en Premiere, no elegir un archivo del que
+ * nunca oyó hablar; y la respuesta correcta —«cualquier proyecto tuyo que tenga
+ * en la línea de tiempo un video, un audio mono y uno estéreo»— es una condición
+ * que nadie tiene por qué llevar en la cabeza. Pero la máquina sí puede probarla,
+ * y probarla es exactamente lo que hace `porQueNoSirve`. Así que se prueban los
+ * proyectos que el editor ya tiene y se usa el primero que pase.
+ *
+ * Sale de los proyectos del editor y no de uno que venga adentro de la app a
+ * propósito: el molde le presta al archivo nuevo la versión y los ajustes del
+ * Premiere que lo guardó, y el Premiere que importa es el suyo. Uno empaquetado
+ * acá envejecería con nosotros y no con él.
+ *
+ * De los más nuevos a los más viejos porque el más reciente es el que más se
+ * parece a lo que el editor usa hoy, y dejando para el final los que salieron de
+ * acá. Un proyecto nuestro sirve de molde —es una mutación fiel de uno real, con
+ * las mismas versiones de clase— pero si alguna vez un defecto nuestro escribe un
+ * archivo torcido, usarlo de molde lo propaga a todos los que vengan. Ya pasó una
+ * vez con los marcadores. Se prefieren, entonces, y no se descartan: quedan de
+ * último recurso, que es mejor que preguntar.
+ */
+function buscarPlantilla() {
+    const candidatos = candidatosDe(os.homedir()).slice(0, CUANTOS_PROBAR);
+    const nuestros = [];
+    for (const ruta of candidatos) {
+        if (loEscribimosNosotros(ruta)) { nuestros.push(ruta); continue; }
+        if (!porQueNoSirve(ruta)) return ruta;
+    }
+    for (const ruta of nuestros) {
+        if (!porQueNoSirve(ruta)) return ruta;
+    }
+    return null;
+}
+
+/**
+ * Los `.prproj` que hay bajo un home, del más nuevo al más viejo.
+ *
+ * Aparte de `buscarPlantilla` para poder mirarlo: es la mitad barata —recorrer
+ * carpetas y ordenar por fecha— y la otra mitad abre y recorre proyectos de
+ * megas. Probar el orden sin tener que fabricar proyectos de Premiere de verdad
+ * es la diferencia entre una prueba que corre siempre y una que se saltea.
+ *
+ * @returns {string[]}
+ */
+function candidatosDe(home) {
+    const encontrados = [];
+    const bajar = (dir, hondo) => {
+        if (hondo > HONDO || encontrados.length > 400) return;
+        let entradas;
+        try {
+            entradas = fs.readdirSync(dir, { withFileTypes: true });
+        } catch (err) {
+            return; // sin permiso, o un disco que se desmontó mientras mirábamos
+        }
+        for (const e of entradas) {
+            if (e.name.startsWith('.')) continue;
+            const completo = path.join(dir, e.name);
+            if (e.isDirectory()) {
+                if (e.name === 'node_modules') continue;
+                bajar(completo, hondo + 1);
+            } else if (e.name.endsWith('.prproj')) {
+                try {
+                    encontrados.push({ ruta: completo, cuando: fs.statSync(completo).mtimeMs });
+                } catch (err) { /* se fue mientras mirábamos */ }
+            }
+        }
+    };
+    for (const nombre of DONDE_BUSCAR) bajar(path.join(home, nombre), 0);
+    return encontrados.sort((a, b) => b.cuando - a.cuando).map(c => c.ruta);
+}
+
+/**
+ * Si este `.prproj` lo armó Class Cut.
+ *
+ * Se mira el panel y no el nombre ni la carpeta, porque el archivo se puede
+ * mover y renombrar —de hecho el primero que generamos terminó en otro lado—.
+ * La marca son los seis bins numerados, todos, que es la organización que arma
+ * el generador y que ningún proyecto llega a tener por casualidad.
+ *
+ * Se lee el archivo por arriba en vez de recorrer el grafo: acá alcanza con
+ * saber si los nombres están, y esto corre sobre varios candidatos seguidos.
+ */
+function loEscribimosNosotros(ruta) {
+    try {
+        const xml = zlib.gunzipSync(fs.readFileSync(ruta)).toString('utf8');
+        return NUESTROS_BINS.every(b => xml.includes(`<Name>${b}</Name>`));
+    } catch (err) {
+        return false;
+    }
+}
+
+/**
  * Qué le pasa hoy a la plantilla, que es lo que decide si el botón se puede
  * apretar y, si no, qué hay que decirle a quien lo mira.
  *
  * Se pregunta al disco en vez de confiar en el ajuste porque una plantilla es un
  * archivo que alguien puede mover, renombrar o tener en un disco externo. El
  * ajuste guarda dónde estaba, no que siga estando.
+ *
+ * Y si no hay ninguna anotada, o la que había se fue, se busca una antes de
+ * darse por vencido: preguntar es el último recurso, no el primero.
  */
 function estadoDeLaPlantilla() {
-    const ruta = ajustes.leer().plantillaPrproj;
-    if (!ruta) return { ok: false, falta: 'sin-elegir' };
-    try {
-        if (!fs.statSync(ruta).isFile()) return { ok: false, falta: 'no-es-archivo', ruta };
-    } catch (err) {
-        return { ok: false, falta: 'no-esta', ruta };
+    const anotada = ajustes.leer().plantillaPrproj;
+    if (anotada) {
+        try {
+            if (fs.statSync(anotada).isFile()) return { ok: true, ruta: anotada };
+        } catch (err) { /* se movió, se renombró, o el disco no está */ }
     }
-    return { ok: true, ruta };
+
+    const encontrada = buscarPlantilla();
+    if (encontrada) {
+        // Se anota para no volver a barrer el disco en cada apretón, y para que
+        // el editor pueda ver cuál salió elegida y cambiarla si quiere.
+        ajustes.guardar({ ...ajustes.leer(), plantillaPrproj: encontrada });
+        return { ok: true, ruta: encontrada, hallada: true };
+    }
+    return { ok: false, falta: anotada ? 'no-esta' : 'sin-elegir', ruta: anotada || undefined };
 }
 
 /**
@@ -195,4 +314,13 @@ function registrar({ ipcMain, dialog, ventana, send, anotar }) {
     });
 }
 
-module.exports = { registrar, estadoDeLaPlantilla, destinoDe, alLado };
+module.exports = {
+    registrar,
+    estadoDeLaPlantilla,
+    destinoDe,
+    alLado,
+    porQueNoSirve,
+    buscarPlantilla,
+    candidatosDe,
+    loEscribimosNosotros
+};

@@ -38,6 +38,22 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'la búsqueda de plantilla toma la primera que encuentra, sin ordenar por fecha',
+        archivo: 'ipc/prproj.js',
+        de: '    return encontrados.sort((a, b) => b.cuando - a.cuando).map(c => c.ruta);',
+        a: '    return encontrados.map(c => c.ruta);',
+        filtro: 'prproj-plantilla',
+        caen: ['del más nuevo al más viejo']
+    },
+    {
+        que: 'un proyecto nuestro se reconoce con que tenga UN bin de los seis',
+        archivo: 'ipc/prproj.js',
+        de: 'return NUESTROS_BINS.every(b => xml.includes(`<Name>${b}</Name>`));',
+        a: 'return NUESTROS_BINS.some(b => xml.includes(`<Name>${b}</Name>`));',
+        filtro: 'prproj-plantilla',
+        caen: ['y con cinco de los seis, no']
+    },
+    {
         que: 'los GUID de los marcadores se pierden en un segundo module.exports',
         archivo: 'engine/prproj-moldes.js',
         de: '    CLASE_MARKERS,\n    CLASE_MARKER,\n',

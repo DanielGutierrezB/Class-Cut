@@ -465,6 +465,7 @@ module.exports = {
     xmlsDe,
     INTERMEDIOS,
     MAESTRO,
+    ORDEN_DE_BINS,
     BIN_SECUENCIAS,
     BIN_MATERIAL
 };

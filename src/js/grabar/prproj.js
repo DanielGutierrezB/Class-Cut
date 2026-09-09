@@ -122,6 +122,12 @@ export async function pedir(ruta) {
         plantilla = await window.cc.prprojPlantilla();
         if (!plantilla.ok) return;
     }
+    // Cuando la encontró sola, se dice cuál. No es un permiso que se pida —el
+    // molde no se toca, solo se copia— pero elegir un archivo del editor sin
+    // nombrarlo sería magia, y la magia es lo que después nadie sabe deshacer.
+    if (plantilla.hallada) {
+        toast(`Usé «${plantilla.ruta.split('/').pop()}» de molde, un proyecto tuyo que ya estaba.`);
+    }
 
     suyo.generando.set(ruta, { hecho: 0, total: 0, que: 'Leyendo las clases…' });
     repintar();
