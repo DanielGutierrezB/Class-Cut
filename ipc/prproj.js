@@ -111,8 +111,12 @@ const NUESTROS_BINS = curso.ORDEN_DE_BINS;
 /** Dónde buscar sola, y hasta dónde bajar. */
 const DONDE_BUSCAR = ['Movies', 'Documents', 'Desktop'];
 const HONDO = 4;
-// Abrir un proyecto y recorrerlo cuesta; con los más nuevos alcanza y sobra.
-const CUANTOS_PROBAR = 10;
+// Cuántos proyectos se abren y se recorren antes de darse por vencido. Abrir uno
+// cuesta del orden de cien milisegundos, así que veinticinco son un par de
+// segundos en el peor caso y ni se notan cuando el primero ya sirve. Eran diez, y
+// con diez la búsqueda paraba justo antes de la única plantilla del disco que
+// traía el efecto del recuadro.
+const CUANTOS_PROBAR = 25;
 
 /**
  * Un `.prproj` del editor que sirva de molde, buscado en vez de preguntado.
@@ -140,15 +144,32 @@ const CUANTOS_PROBAR = 10;
  */
 function buscarPlantilla() {
     const candidatos = candidatosDe(os.homedir()).slice(0, CUANTOS_PROBAR);
-    const nuestros = [];
-    for (const ruta of candidatos) {
-        if (loEscribimosNosotros(ruta)) { nuestros.push(ruta); continue; }
-        if (!porQueNoSirve(ruta)) return ruta;
+    // Los nuestros al final, por lo de siempre: sirven, pero un defecto nuestro
+    // propagado de molde en molde es peor que probar unos cuantos más.
+    const enOrden = candidatos.filter(r => !loEscribimosNosotros(r))
+        .concat(candidatos.filter(loEscribimosNosotros));
+
+    // Se sigue buscando después de encontrar una que sirva, hasta dar con una
+    // que además traiga un clip con la escala o la posición movidas. De ahí se
+    // copia el recuadro del profesor: sin eso el proyecto se arma igual, pero el
+    // recuadro hay que acomodarlo a mano. Como buscar sola ya ahorró la
+    // pregunta, buscar un poco mejor ahorra además la tarea.
+    let laPrimeraQueSirve = null;
+    for (const ruta of enOrden) {
+        if (porQueNoSirve(ruta)) continue;
+        if (tieneElMovimiento(ruta)) return ruta;
+        if (!laPrimeraQueSirve) laPrimeraQueSirve = ruta;
     }
-    for (const ruta of nuestros) {
-        if (!porQueNoSirve(ruta)) return ruta;
+    return laPrimeraQueSirve;
+}
+
+/** Si de este proyecto se puede copiar el efecto de movimiento. */
+function tieneElMovimiento(ruta) {
+    try {
+        return Boolean(moldes.detectarMoldes(prproj.Proyecto.leer(ruta)).efectoDeMovimiento);
+    } catch (err) {
+        return false;
     }
-    return null;
 }
 
 /**

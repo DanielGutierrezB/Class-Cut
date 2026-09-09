@@ -20,6 +20,7 @@ const path = require('path');
 const fs = require('fs');
 
 const curso = require('../engine/prproj-curso');
+const nidos = require('../engine/prproj-nidos');
 const workspace = require('../engine/workspace');
 
 /** Un XML mínimo pero legible, con un marcador para que la secuencia tenga algo. */
@@ -250,6 +251,11 @@ module.exports = t => {
         t.skip('la fuente de notas da secuencias con marcadores y sin material', comoSeConsigue);
     } else {
         const prproj = require('../engine/prproj');
+        // Del recuadro solo se puede hablar si la plantilla que se encontró trae
+        // un clip con la escala o la posición movidas: es de donde se copia.
+        const hayMovimiento = Boolean(
+            require('../engine/prproj-moldes').detectarMoldes(prproj.Proyecto.leer(PLANTILLA)).efectoDeMovimiento
+        );
 
         /**
          * Qué cuelga de un bin, por nombre y en el orden en que se ve el panel.
@@ -292,26 +298,209 @@ module.exports = t => {
             });
         });
 
-        t.test('lo del recuadro se dice una vez y con el total, no una vez por clase', () => {
-            // Este es el mensaje que ocupaba media pantalla. Casi toda clase con
-            // pantalla compartida trae recuadro, así que trece clases dejaban
-            // trece líneas iguales en el cartel y tapaban a las que sí eran de
-            // una clase y de ninguna otra. Sumadas ocupan un renglón y dicen lo
-            // mismo: cuántos cortes, de cuántas clases, y qué es lo que no viaja.
+        /**
+         * Un XML de clase con `cuantos` bloques pegados, de un minuto cada uno,
+         * más el `cutplan.json` que dice con qué vista se pidió cada uno.
+         *
+         * Los dos van juntos porque el generador los lee juntos: del XML saca
+         * dónde cae cada corte y del plan, con qué vista. Escribir uno sin el
+         * otro sería preparar un caso que no existe en el disco.
+         */
+        const claseConVistas = (dir, nombre, medio, vistas) => {
+            const clips = (pista, prendida) => vistas.map((vista, i) =>
+                `<clipitem id="${pista}${i}"><name>c</name>`
+                + `<enabled>${prendida(vista) ? 'TRUE' : 'FALSE'}</enabled>`
+                + `<start>${i * 30}</start><end>${(i + 1) * 30}</end>`
+                + `<in>${1800 + i * 30}</in><out>${1800 + (i + 1) * 30}</out>`
+                + (i === 0
+                    ? `<file id="f${pista}"><name>a.mov</name><pathurl>file://${medio}</pathurl>`
+                        + '<duration>36000</duration><media><video></video></media></file>'
+                    : `<file id="f${pista}"/>`)
+                + '</clipitem>').join('');
+            const xml = xmlDe(nombre).replace('<video></video>',
+                `<video><track>${clips(1, v => v === 'PV')}</track>`
+                + `<track>${clips(2, v => v !== 'PV')}</track></video>`);
+            fs.mkdirSync(path.join(dir, workspace.OUTPUT_DIR), { recursive: true });
+            fs.writeFileSync(workspace.finalXml(dir, nombre), xml);
+
+            fs.mkdirSync(path.dirname(workspace.artifact(dir, nombre, 'cutplan')), { recursive: true });
+            fs.writeFileSync(workspace.artifact(dir, nombre, 'cutplan'), JSON.stringify({
+                segments: vistas.map((view, i) => ({
+                    keep: true, view, blockIndex: i,
+                    timelineStartSec: i * 60, timelineEndSec: (i + 1) * 60,
+                    sourceStartSec: 60 + i * 60
+                }))
+            }));
+        };
+
+        /**
+         * La secuencia de ENTREGA de una clase.
+         *
+         * Se busca por el bin y no por el nombre porque las cuatro versiones de
+         * una clase se llaman igual a propósito —la entrega y los tres pasos de
+         * `Pre`— así que `porNombre` devuelve cualquiera. La que cuelga derecho
+         * de `02 Secuencias` es la que corta sobre los nidos.
+         */
+        const entregaDe = (p, nombre) => {
+            const cpi = hijosDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS))
+                .find(k => p.clase(k) === 'ClipProjectItem' && p.nombre(k) === nombre);
+            return cpi ? p.cierre([cpi], {}).find(k => p.clase(k) === 'Sequence') : null;
+        };
+
+        /** Las pistas de video de una secuencia, en orden. */
+        const pistasVideoDe = (p, seq) => {
+            const grupo = p.refsDe(seq).find(k => p.clase(k) === 'VideoTrackGroup');
+            return [...p.contenido(grupo).matchAll(/<Track Index="\d+" ObjectURef="([^"]+)"\/>/g)]
+                .map(m => prproj.clave('UID', m[1]))
+                .filter(k => p.tiene(k));
+        };
+
+        // Toda entrada de lista del formato lleva su `Index` delante de la
+        // referencia; sin él en el patrón no casa ninguna y todas las pistas
+        // parecen vacías.
+        const CORTE_EN_LA_LISTA = /<TrackItem Index="\d+" ObjectRef="(\d+)"\/>/g;
+
+        /** Los `TrackItem` de una pista, en orden. */
+        const cortesDe = (p, pista) => [...p.contenido(pista).matchAll(CORTE_EN_LA_LISTA)]
+            .map(m => prproj.clave('ID', Number(m[1])));
+
+        /** Cuántos cortes tiene cada pista de video, en orden. */
+        const cortesPorPista = (p, seq) => pistasVideoDe(p, seq)
+            .map(k => cortesDe(p, k).length);
+
+        /** El nombre del nido que usa un corte, que es el `<Name>` de su subclip. */
+        const nidoDelCorte = (p, item) => {
+            const sub = p.refsDe(item).find(k => p.clase(k) === 'SubClip');
+            return sub ? (/<Name>([^<]*)<\/Name>/.exec(p.contenido(sub)) || [])[1] : null;
+        };
+
+        t.test('sin ninguna S la clase lleva tres pistas: cámara, pantalla y recuadro', () => {
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV', 'R', 'PV']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                // Tres bloques en cámara y pantalla, y el recuadro solo en el
+                // único que va con la pantalla.
+                t.deep(cortesPorPista(p, entregaDe(p, '01_clase')), [3, 3, 1],
+                    'tres pistas, y el recuadro solo donde hace falta');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('con una S la clase lleva cuatro, y el recuadro queda arriba de todo', () => {
+            // El editor lo pidió así: con slides, `SLIDE` va en la dos y empuja
+            // al grabador de pantalla a la tres, para que el recuadro del
+            // profesor quede siempre solo en la última. Si el orden se diera
+            // vuelta, el recuadro quedaría tapado — y eso no se ve en ningún
+            // lado hasta que alguien mira el resultado en Premiere.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            claseConVistas(dir, '01_clase', path.join(dir, 'material', 'a.mov'), ['PV', 'S', 'R']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const pistas = pistasVideoDe(p, entregaDe(p, '01_clase'));
+                t.eq(pistas.length, 4, `cuatro pistas y no tres: ${pistas.length}`);
+                t.deep(pistas.map(k => nidoDelCorte(p, cortesDe(p, k)[0])),
+                    [nidos.NOMBRES.camara, nidos.NOMBRES.slide, nidos.NOMBRES.pantalla, nidos.NOMBRES.mini],
+                    'de abajo hacia arriba: cámara, slide, pantalla y el recuadro último');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('un corte entra en el nido corrido por la franja de su clase', () => {
+            // **Esta es la cuenta que hace que todo lo demás sirva.** Un corte
+            // que en el XML entraba en el segundo 1860 de su clase tiene que
+            // entrar en `franja + 1860` del nido, porque adentro del nido esa
+            // clase arranca ahí. Si se corrige mal no se ve al generar: el
+            // archivo abre, el clip está y dura lo que tiene que durar; lo único
+            // que pasa es que muestra otro pedazo de la clase.
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            claseConVistas(dir, '01_clase', medio, ['PV']);
+            claseConVistas(dir, '02_clase', medio, ['PV']);
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+
+                // Las dos clases tienen el mismo material y el mismo corte, así
+                // que lo único que puede diferenciarlas es la franja.
+                const entradaDe = nombre => {
+                    const pista = pistasVideoDe(p, entregaDe(p, nombre))[0];
+                    const item = cortesDe(p, pista)[0];
+                    const sub = p.refsDe(item).find(k => p.clase(k) === 'SubClip');
+                    const clip = p.refsDe(sub).find(k => p.clase(k) === 'VideoClip');
+                    return prproj.aSegundos(Number(/<InPoint>(\d+)<\/InPoint>/.exec(p.contenido(clip))[1]));
+                };
+
+                // El `<duration>` del XML va en CUADROS: 36000 a 30 fps son
+                // veinte minutos, que es lo que dura la franja de cada clase.
+                const LARGO = 36000 / 30;
+                const primera = entradaDe('01_clase');
+                const segunda = entradaDe('02_clase');
+                t.near(primera, 60, 0.01, 'la primera clase arranca en cero, así que su corte no se corre');
+                t.near(segunda, 60 + LARGO + nidos.AIRE_SEG, 0.01,
+                    `la segunda se corre su franja entera: ${segunda}`);
+                t.ok(segunda > primera, 'y dos clases con el mismo corte no pueden entrar en el mismo lugar');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('el recuadro ya no se avisa: ahora entra puesto, en «MINI»', () => {
+            // Durante meses el proyecto avisaba «entran en su lugar y con su
+            // duración, pero sin el encuadre», porque el recuadro del profesor
+            // viajaba en el XML y el generador no sabía escribirlo. Con las
+            // anidaciones se aplica UNA vez, adentro de `MINI`, así que el aviso
+            // dejó de tener de qué hablar. Que no esté es el resultado.
             const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
             const medio = path.join(dir, 'material', 'a.mov');
             fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 5, medio));
             fs.writeFileSync(path.join(dir, 'The Cutter', '02_clase.xml'), xmlConRecuadro('02_clase', 3, medio));
-            fs.writeFileSync(path.join(dir, 'The Cutter', '03_clase.xml'), xmlDe('03_clase'));
             return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
-                const delRecuadro = r.avisos.filter(a => /recuadro/.test(a));
-                t.eq(delRecuadro.length, 1, 'una línea, no una por clase');
-                t.ok(/8 corte\(s\) de 2 clase\(s\)/.test(delRecuadro[0]),
-                    `suma los cortes y cuenta las clases, y dice: ${delRecuadro[0]}`);
-                t.ok(/sin el encuadre/.test(delRecuadro[0]),
-                    'y dice qué es lo que no viaja, que es el punto del aviso');
+                t.ok(r.avisos.every(a => !/sin el encuadre/.test(a)),
+                    `el aviso viejo no tiene de qué hablar: ${r.avisos.join(' | ')}`);
+
+                const p = prproj.Proyecto.leer(r.ruta);
+                t.ok(p.porNombre('Sequence', nidos.NOMBRES.mini), 'y existe la secuencia del recuadro');
+                fs.rmSync(dir, { recursive: true, force: true });
+            });
+        });
+
+        t.test('el recuadro sale con la geometría medida en el Premiere del editor', () => {
+            // Los cuatro números salieron de abrir su `Plantilla.prproj`, que se
+            // armó importando los XML que escribe esta misma app: ahí Premiere
+            // dejó el recuadro en `Position 0.879:0.806`, `Scale 30` y los
+            // costados recortados al 18 %. Si esta prueba cae, el recuadro se
+            // corrió, y se corrió respecto de lo que el editor ya venía viendo.
+            if (!hayMovimiento) {
+                t.skip('el recuadro sale con la geometría medida en el Premiere del editor',
+                    'la plantilla que se encontró no tiene ningún clip con la escala movida');
+                return null;
+            }
+            const dir = carpeta({ 'material/a.mov': 'no importa qué diga' });
+            const medio = path.join(dir, 'material', 'a.mov');
+            fs.mkdirSync(path.join(dir, 'The Cutter'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'The Cutter', '01_clase.xml'), xmlConRecuadro('01_clase', 5, medio));
+            return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
+                t.eq(r.ok, true, r.error || '');
+                const p = prproj.Proyecto.leer(r.ruta);
+                const efectos = p.porClase('VideoFilterComponent');
+                t.eq(efectos.length, 1, 'uno solo, y no lo que viniera colgado en la plantilla');
+
+                const valores = {};
+                for (const k of p.cierre([efectos[0]], {})) {
+                    const texto = p.contenido(k).replace(/\n\s*/g, ' ');
+                    const nombre = (/<Name>([^<]*)<\/Name>/.exec(texto) || [])[1];
+                    const valor = (/<StartKeyframe>[^,]*,([^,]*),/.exec(texto) || [])[1];
+                    if (nombre) valores[nombre.trim()] = valor;
+                }
+                t.eq(valores.Position, '0.879:0.806', 'abajo a la derecha, donde lo dejó Premiere');
+                t.eq(valores['Anchor Point'], '0.5:0.5');
+                t.eq(valores.Scale, '30');
+                t.eq(valores['Crop Left'], '18');
+                t.eq(valores['Crop Right'], '18');
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });
@@ -365,18 +554,20 @@ module.exports = t => {
                 const secuencias = p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS);
                 const pre = binDentroDe(p, secuencias, curso.BIN_PRE);
                 t.ok(pre, `«${curso.BIN_PRE}» cuelga del bin de secuencias`);
-                t.deep(dentroDe(p, secuencias), ['01_clase', '02_clase', curso.BIN_PRE],
-                    'y va último, después de las clases');
+                t.deep(dentroDe(p, secuencias),
+                    ['01_clase', '02_clase', nidos.NOMBRES.raiz, curso.BIN_PRE],
+                    'las clases primero, y detrás las dos cosas que se miran cuando algo falló');
 
-                t.deep(dentroDe(p, pre), ['poblada', 'alineada'],
+                t.deep(dentroDe(p, pre), ['poblada', 'alineada', 'sin-anidar'],
                     'un bin por paso, con el nombre del paso y en el orden en que pasaron');
-                for (const paso of ['poblada', 'alineada']) {
+                for (const paso of ['poblada', 'alineada', 'sin-anidar']) {
                     t.deep(dentroDe(p, binDentroDe(p, pre, paso)), ['01_clase', '02_clase'],
                         `${paso} tiene la secuencia de cada clase, sin renombrar`);
                 }
-                // Dos clases por tres versiones. Si el nombre se hubiera tocado
-                // en algún lado, alguna de las seis no se llamaría así.
-                t.eq(p.porClase('Sequence').filter(k => /^0\d_clase$/.test(p.nombre(k))).length, 6);
+                // Dos clases por cuatro versiones: la entrega y los tres pasos.
+                // Si el nombre se hubiera tocado en algún lado, alguna de las
+                // ocho no se llamaría así.
+                t.eq(p.porClase('Sequence').filter(k => /^0\d_clase$/.test(p.nombre(k))).length, 8);
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });
@@ -423,18 +614,23 @@ module.exports = t => {
             });
         });
 
-        t.test('sin ningún paso guardado no se crea un «Pre» vacío', () => {
-            // Los cuatro bins vacíos de la raíz son el andamio de lo que el
-            // editor va a colgar después. De este no cuelga nada que él ponga,
-            // así que vacío no reserva un lugar: promete algo que no está.
+        t.test('sin nada en Backup, «Pre» igual trae el corte sin anidar', () => {
+            // Una clase cortada con una versión vieja no tiene `Backup/`, así que
+            // no hay ni `poblada` ni `alineada`. Pero el XML de la entrega existe
+            // siempre —es de donde se leyó la clase— y ese es el tercer paso, así
+            // que `Pre` nunca queda vacío mientras haya clases. Es justamente el
+            // que más se va a mirar: es lo único del proyecto que se parece a lo
+            // que Resolve abre.
             const dir = carpeta({ 'The Cutter/01_clase.xml': xmlDe('01_clase') });
             return curso.generar({ carpeta: dir, destino: path.join(dir, 'Proyecto', 's.prproj'), plantilla: PLANTILLA, semilla: 1 }).then(r => {
                 t.eq(r.ok, true, r.error || '');
                 const p = prproj.Proyecto.leer(r.ruta);
-                t.eq(binDentroDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS), curso.BIN_PRE), null);
-                t.eq(p.porNombre('BinProjectItem', 'poblada'), null);
-                t.ok(r.cuenta.some(c => new RegExp(`sin «${curso.BIN_PRE}»`).test(c)),
-                    `y se dice por qué: ${r.cuenta.join(' | ')}`);
+                const pre = binDentroDe(p, p.porNombre('BinProjectItem', curso.BIN_SECUENCIAS), curso.BIN_PRE);
+                t.ok(pre, 'el bin está');
+                t.deep(dentroDe(p, pre), ['sin-anidar'], 'con el único paso que siempre existe');
+                t.eq(p.porNombre('BinProjectItem', 'poblada'), null, 'y sin los que no están');
+                t.ok(r.cuenta.some(c => /Otros 2 no estaban guardados/.test(c)),
+                    `y se cuenta cuáles faltaron: ${r.cuenta.join(' | ')}`);
                 fs.rmSync(dir, { recursive: true, force: true });
             });
         });

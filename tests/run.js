@@ -77,6 +77,7 @@ const FILES = [
     'desestructurar.test.js',
     'prproj.test.js',
     'prproj-destino.test.js',
+    'prproj-nidos.test.js',
     'prproj-plantilla.test.js',
     'prproj-plantilla-anotada.test.js',
     'prproj-panel.test.js',

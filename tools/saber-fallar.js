@@ -38,6 +38,63 @@ const RAIZ = path.join(__dirname, '..');
  */
 const REVERSIONES = [
     {
+        que: 'las clases del nido se pegan una tras otra, sin el aire de cinco minutos',
+        archivo: 'engine/prproj-nidos.js',
+        de: '        reloj += largoSeg + AIRE_SEG;',
+        a: '        reloj += largoSeg;',
+        filtro: 'prproj-nidos',
+        caen: ['cada clase arranca después de la anterior más el aire']
+    },
+    {
+        que: 'la franja se mide con la primera fuente en vez de con la más larga',
+        archivo: 'engine/prproj-nidos.js',
+        de: '        largo = Math.max(largo, archivo.duracionSeg || 0);',
+        a: '        if (!largo) largo = archivo.duracionSeg || 0;',
+        filtro: 'prproj-nidos',
+        caen: ['la franja la marca la fuente más larga, no la primera']
+    },
+    {
+        que: 'los cortes entran al nido sin correrse por la franja de su clase',
+        archivo: 'engine/prproj-curso.js',
+        de: '            entradaSeg: franja.desdeSeg + corte.entradaSeg,',
+        a: '            entradaSeg: corte.entradaSeg,',
+        filtro: 'prproj-curso',
+        caen: ['un corte entra en el nido corrido por la franja de su clase']
+    },
+    {
+        que: 'con slides no se agrega la pista, y el recuadro queda tapado',
+        archivo: 'engine/prproj-curso.js',
+        de: '    const pistasVideo = hayS ? 4 : 3;',
+        a: '    const pistasVideo = 3;',
+        filtro: 'prproj-curso',
+        caen: ['con una S la clase lleva cuatro, y el recuadro queda arriba de todo']
+    },
+    {
+        que: 'el recuadro se copia con todo lo que venga colgado al lado en la plantilla',
+        archivo: 'engine/prproj-secuencia.js',
+        de: '        const sobran = componentes.filter(k => k !== componente);',
+        a: '        const sobran = [];',
+        filtro: 'prproj-curso',
+        caen: ['el recuadro sale con la geometría medida en el Premiere del editor']
+    },
+    {
+        que: 'el corte sin anidar deja de anexarse al proyecto',
+        archivo: 'engine/prproj-curso.js',
+        de: 'const PASOS = PASOS_PREVIOS.concat([PASO_SIN_ANIDAR]);',
+        a: 'const PASOS = PASOS_PREVIOS;',
+        filtro: 'prproj-curso',
+        caen: ['sin nada en Backup, «Pre» igual trae el corte sin anidar',
+            'los pasos previos entran en «Pre», un bin por paso y adentro cada clase']
+    },
+    {
+        que: 'MG y X2 vuelven a quedarse sin marcador cuando nadie escribió una nota',
+        archivo: 'engine/export.js',
+        de: "        if (!texto && !SE_MARCAN_SIEMPRE.has(segment.view)) continue;",
+        a: '        if (!texto) continue;',
+        filtro: 'export',
+        caen: ['MG y X2 dejan marcador aunque nadie haya escrito nada']
+    },
+    {
         que: 'un error espera al temporizador para volcarse, como cualquier línea',
         archivo: 'engine/registro.js',
         de: '        if (HUELE_A_PROBLEMA.test(linea.evento)) volcar();\n        else programarVolcado();',
@@ -62,12 +119,12 @@ const REVERSIONES = [
         caen: ['una línea cortada por la mitad no se lleva puesto el resto']
     },
     {
-        que: 'el recuadro se cuenta como cero y el aviso junto no sale',
-        archivo: 'engine/prproj-curso.js',
-        de: '        conEfectos: clase.conEfectos || 0,',
-        a: '        conEfectos: 0,',
+        que: 'el recuadro no se aplica, y el proyecto se calla que falta',
+        archivo: 'engine/prproj-nidos.js',
+        de: '    const puesto = taller.ponerEncuadre(suElCorte, fcp.encuadreDelRecuadro(medidasDe(clases)));',
+        a: '    const puesto = true;',
         filtro: 'prproj-curso',
-        caen: ['lo del recuadro se dice una vez y con el total, no una vez por clase']
+        caen: ['el recuadro sale con la geometría medida en el Premiere del editor']
     },
     {
         que: 'la cuenta de lo que entró vuelve a ser un aviso y tapa a los de verdad',
@@ -623,14 +680,12 @@ const REVERSIONES = [
             'a una clase le puede faltar un paso: se saltea y se cuenta, no se rompe'
         ]
     },
-    {
-        que: '«Pre» se crea vacío cuando no hay ningún paso guardado',
-        archivo: 'engine/prproj-curso.js',
-        de: '    if (!porPaso.some(e => e.leidas.length)) return { secuencias: 0, cortes: 0, faltan };\n',
-        a: '',
-        filtro: 'prproj-curso',
-        caen: ['sin ningún paso guardado no se crea un «Pre» vacío']
-    },
+    // Acá vivía «Pre se crea vacío cuando no hay ningún paso guardado». Se sacó
+    // al anexar el corte sin anidar: ese paso es el XML del que se leyó la clase,
+    // así que existe siempre y `Pre` ya no puede quedar vacío mientras haya
+    // clases. La guarda sigue en el código —protege el caso de que alguien borre
+    // los XML mientras se genera— pero ninguna prueba puede llegar hasta ahí, y
+    // una reversión que no se ve en rojo no dice nada.
     {
         que: 'los pasos previos vuelven a importar el material, que ya estaba en el panel',
         archivo: 'engine/prproj-curso.js',
@@ -644,12 +699,12 @@ const REVERSIONES = [
     {
         que: 'un paso que falta no se cuenta, así que nadie se entera de que no está',
         archivo: 'engine/prproj-curso.js',
-        de: '            if (!fs.existsSync(ruta)) { faltan++; continue; }',
-        a: '            if (!fs.existsSync(ruta)) continue;',
+        de: '            if (!ruta || !fs.existsSync(ruta)) { faltan++; continue; }',
+        a: '            if (!ruta || !fs.existsSync(ruta)) continue;',
         filtro: 'prproj-curso',
         caen: [
             'a una clase le puede faltar un paso: se saltea y se cuenta, no se rompe',
-            'sin ningún paso guardado no se crea un «Pre» vacío'
+            'sin nada en Backup, «Pre» igual trae el corte sin anidar'
         ]
     },
     {

@@ -38,6 +38,29 @@ const FRONTERA_DEL_CORTE = [
 ];
 
 /**
+ * Donde para el clonado de un corte ANIDADO, que es uno cuya fuente no es un
+ * archivo sino otra secuencia.
+ *
+ * **Un corte anidado y uno de archivo son el mismo objeto.** Se midió: en un
+ * proyecto del editor, el cierre de los dos da exactamente las mismas cuatro
+ * clases de video (`VideoClipTrackItem`, `VideoComponentChain`, `SubClip`,
+ * `VideoClip`) y las mismas seis de audio. Lo único que cambia es a dónde apunta
+ * el `<Source>` del clip: a un `VideoMediaSource` en uno y a un
+ * `VideoSequenceSource` en el otro. Por eso no hace falta un molde aparte para
+ * anidar: alcanza con clonar el corte de siempre y repuntarle la fuente.
+ *
+ * Lo que sí hace falta es esta frontera, y por lo mismo que la otra: sin parar en
+ * la fuente, clonar un corte anidado se llevaría puesta la secuencia entera que
+ * hay del otro lado, con sus pistas y todos sus clips.
+ */
+const FRONTERA_DEL_ANIDADO = FRONTERA_DEL_CORTE.concat([
+    'VideoSequenceSource', 'AudioSequenceSource'
+]);
+
+/** Cómo se llama en el formato el efecto de movimiento que trae todo clip. */
+const MOVIMIENTO = 'AE.ADBE Motion';
+
+/**
  * Donde para el clonado de un medio.
  *
  * `TranscriptClip` está acá para que la transcripción NO viaje, y esa decisión
@@ -191,6 +214,7 @@ function detectarMoldes(proyecto) {
     return {
         secuencia,
         itemDeSecuencia,
+        efectoDeMovimiento: buscarMovimiento(p),
         corteVideo: corteVideo ? corteVideo.k : null,
         corteMono: corteMono ? corteMono.k : null,
         corteEstereo: corteEstereo ? corteEstereo.k : null,
@@ -234,6 +258,41 @@ function loQueFalta(moldes) {
 }
 
 
+/**
+ * Una cadena de componentes con el movimiento tocado, para copiarle el recuadro.
+ *
+ * Se busca la CADENA y no el componente suelto porque la cadena lleva además
+ * `DefaultOpacity` y `DefaultOpacityComponentID`, que Premiere escribe junto con
+ * el efecto; clonar el componente solo y colgarlo de una cadena vacía sería armar
+ * a mano una forma que Premiere nunca escribe.
+ *
+ * **Un clip sin efectos no sirve de molde, y eso no es evidente.** La tentación
+ * es pensar que todo clip tiene Movimiento porque el panel de Premiere siempre lo
+ * muestra: es un efecto «intrínseco», está en la interfaz aunque nadie lo haya
+ * tocado. Pero en el archivo no está — se midió, y en un proyecto sin efectos las
+ * siete cadenas de video están vacías. Recién cuando alguien mueve la escala o la
+ * posición, Premiere escribe el componente con sus once parámetros.
+ *
+ * Por eso esto puede volver `null` sin que sea un error: la mayoría de las
+ * plantillas no tienen ninguno. Quien lo necesita avisa (ver `armarLosNidos`).
+ */
+function buscarMovimiento(proyecto) {
+    const p = proyecto;
+    for (const cadena of p.porClase('VideoComponentChain')) {
+        if (!/ObjectRef/.test(p.contenido(cadena))) continue;
+        const piezas = p.cierre([cadena], {});
+        const componente = piezas.find(k => p.clase(k) === 'VideoFilterComponent'
+            && p.contenido(k).includes(`<MatchName>${MOVIMIENTO}</MatchName>`));
+        if (!componente) continue;
+        // Los once parámetros: posición, escala, rotación, anclaje, los cuatro
+        // recortes. Uno con menos es de otra versión y le faltaría justo el que
+        // se va a escribir, sin que nada se queje.
+        const cuantos = (p.contenido(componente).match(/<Param Index="\d+"/g) || []).length;
+        if (cuantos >= 11) return cadena;
+    }
+    return null;
+}
+
 function elegir(medios, cumple) {
     const encontrado = medios.filter(cumple).sort((a, b) => a.piezas - b.piezas)[0];
     return encontrado ? encontrado.k : null;
@@ -275,7 +334,9 @@ module.exports = {
     CLASE_MARKERS,
     CLASE_MARKER,
     TIPO_AUDIO,
+    MOVIMIENTO,
     FRONTERA_DEL_CORTE,
+    FRONTERA_DEL_ANIDADO,
     FRONTERA_DEL_MEDIO,
     ETIQUETAS,
     COLOR_DE,

@@ -50,6 +50,7 @@ const workspace = require('./workspace');
 const prproj = require('./prproj');
 const { Taller, ETIQUETAS, loQueFalta } = require('./prproj-secuencia');
 const { leerArchivo } = require('./clase-del-xml');
+const nidos = require('./prproj-nidos');
 
 /**
  * Los intermedios del pipeline, que no son la entrega de ninguna clase.
@@ -105,9 +106,31 @@ const BIN_PRE = 'Pre';
  * nombre en `workspace` cambia también acá y no queda un bin mintiendo.
  */
 const PASOS_PREVIOS = ['populatedXml', 'alignedXml'].map(artefacto => ({
-    artefacto,
-    nombre: path.basename(workspace.FILES[artefacto], '.xml')
+    nombre: path.basename(workspace.FILES[artefacto], '.xml'),
+    rutaDe: (carpeta, clase) => workspace.artifact(carpeta, nombreGuardado(clase), artefacto)
 }));
+
+/**
+ * El tercer paso: la clase cortada como se entregaba antes de las anidaciones.
+ *
+ * No vive en `Backup/` sino que ES el XML de la entrega, el que abre en Resolve,
+ * y por eso no sale de `workspace.FILES` como los otros dos. Se anexa igual que
+ * ellos porque cumple la misma función: es una foto de un paso anterior a la que
+ * se puede volver.
+ *
+ * **Y esta vez el paso anterior sigue siendo la entrega en el otro formato.** La
+ * secuencia de clase del proyecto ahora corta sobre las anidaciones, que es más
+ * cómodo de editar pero más difícil de mirar: para saber qué archivo hay detrás
+ * de un clip hay que entrar al nido. Esta copia responde eso sin entrar a nada, y
+ * es además lo único que se parece a lo que Resolve va a abrir.
+ */
+const PASO_SIN_ANIDAR = {
+    nombre: 'sin-anidar',
+    rutaDe: (carpeta, clase) => clase.rutaXml
+};
+
+/** Los tres, en el orden en que pasaron: poblar, alinear, cortar. */
+const PASOS = PASOS_PREVIOS.concat([PASO_SIN_ANIDAR]);
 
 
 // ─── Encontrar de dónde salen los datos ──────────────────────────────
@@ -218,6 +241,11 @@ function etiquetaDelArchivo(clase, archivo) {
 
 /**
  * Una clase → una secuencia con sus pistas, sus cortes y sus marcadores.
+ *
+ * Es el espejo plano del XML: cada corte apunta al archivo que el XML nombra.
+ * La entrega ya no se arma así —usa `armarClaseSobreNidos`— pero los pasos de
+ * `Pre` sí, y tiene que ser así: son fotos de un archivo que existe en el disco
+ * y su valor es parecerse a él, no ser cómodas de editar.
  */
 function armarClase(taller, clase, medios, binSecuencias, avisos) {
     const pistasVideo = Math.max(1, clase.pistas.video.length);
@@ -276,6 +304,147 @@ function armarClase(taller, clase, medios, binSecuencias, avisos) {
         conEfectos: clase.conEfectos || 0,
         pistasVideo,
         pistasAudio
+    };
+}
+
+
+// ─── La clase, armada sobre las anidaciones ──────────────────────────
+
+/**
+ * Las vistas de cada bloque, en el orden en que quedaron en la línea de tiempo.
+ *
+ * Salen del `cutplan.json` que el corte dejó al lado del XML, y no del XML: ahí
+ * la vista solo viaja en el nombre de los marcadores, y un bloque sin nota no
+ * deja marcador. O sea que el XML sabe la vista de algunos bloques y de otros
+ * no, y «algunos» no sirve para decidir el orden de las pistas.
+ *
+ * Sin `cutplan.json` —una clase cortada con una versión vieja— se contesta
+ * vacío, y quien llama se arregla con lo que el XML sí dice: qué pista quedó
+ * encendida. Eso alcanza para todo salvo para distinguir una `S` de una `R`.
+ */
+function vistasDe(carpeta, clase) {
+    const ruta = workspace.artifact(carpeta, nombreGuardado(clase), 'cutplan');
+    try {
+        const plan = JSON.parse(fs.readFileSync(ruta, 'utf8'));
+        return (plan.segments || []).filter(s => s.keep).map(s => s.view || '');
+    } catch (err) {
+        return [];
+    }
+}
+
+/** Las vistas que se ven con el grabador de pantalla y no con la cámara. */
+const VISTA_DE_CAMARA = 'PV';
+const VISTA_DE_SLIDE = 'S';
+
+/**
+ * Una clase → una secuencia que corta sobre las anidaciones del curso.
+ *
+ * **Esta es la entrega, y la diferencia con `armarClase` es toda la gracia.**
+ * Los cortes caen en los mismos lugares y duran lo mismo, pero en vez de mirar
+ * al archivo miran a `CAM`, a `SR` o a `SLIDE`. Para el editor la línea de
+ * tiempo se ve igual; lo que cambia es que ahora hay UN lugar donde tocar la
+ * cámara de las trece clases en vez de dos mil.
+ *
+ * La cuenta que lo hace posible es una sola: un corte que en el XML entraba en
+ * el segundo 300 de su clase entra en `franja.desdeSeg + 300` del nido, porque
+ * adentro del nido esa clase arranca ahí. Los cinco nidos comparten el mapa de
+ * franjas justamente para que sea la misma cuenta en todos.
+ *
+ * **El orden de las pistas depende de si la clase tiene alguna `S`**, y lo pidió
+ * así el editor: con slides, `SLIDE` va en la dos y empuja al grabador de
+ * pantalla a la tres, así el recuadro del profesor queda siempre solo, arriba de
+ * todo. Sin slides no hace falta esa pista y no se crea: una pista vacía en las
+ * trece clases es ruido que hay que saltear cada vez que se mira una.
+ */
+function armarClaseSobreNidos(taller, clase, pedido) {
+    const { nidos, franja, vistas, binSecuencias, avisos } = pedido;
+
+    // Los bloques salen de la primera pista de video, que `export.js` escribe
+    // con un corte por bloque que sobrevivió al corte, encendido o apagado.
+    const bloques = clase.pistas.video.length ? clase.pistas.video[0].cortes : [];
+    // Sin `cutplan.json` la vista se deduce de qué pista quedó encendida: si la
+    // cámara está prendida es `PV` y si no, algo que se ve con la pantalla. No
+    // distingue una `S`, y por eso una clase así entra sin la pista de slides.
+    const vistaDe = i => {
+        if (vistas[i]) return vistas[i];
+        return bloques[i] && bloques[i].sonando ? VISTA_DE_CAMARA : 'R';
+    };
+
+    const hayS = bloques.some((corte, i) => vistaDe(i) === VISTA_DE_SLIDE);
+    const pistasVideo = hayS ? 4 : 3;
+
+    const secuencia = taller.crearSecuencia({
+        nombre: clase.nombre,
+        pistasVideo,
+        // Dos: la de siempre y la copia muteada de respaldo.
+        pistasAudio: 2,
+        duracionSeg: clase.duracionSeg
+    });
+    taller.guardarEn(binSecuencias, secuencia.itemDelPanel);
+
+    const pista = {
+        camara: secuencia.pistasVideo[0],
+        slide: hayS ? secuencia.pistasVideo[1] : null,
+        pantalla: secuencia.pistasVideo[hayS ? 2 : 1],
+        mini: secuencia.pistasVideo[hayS ? 3 : 2]
+    };
+
+    let colocados = 0;
+    const poner = (suPista, nido, corte, sonando, etiqueta) => {
+        if (!suPista) return;
+        taller.colocarCorte({
+            pista: suPista,
+            medio: nido.comoFuente,
+            desdeSeg: corte.desdeSeg,
+            hastaSeg: corte.hastaSeg,
+            entradaSeg: franja.desdeSeg + corte.entradaSeg,
+            etiqueta,
+            sonando
+        });
+        colocados++;
+    };
+
+    bloques.forEach((corte, i) => {
+        const vista = vistaDe(i);
+        const esCamara = vista === VISTA_DE_CAMARA;
+        const esSlide = vista === VISTA_DE_SLIDE;
+
+        // La cámara y la pantalla entran SIEMPRE las dos, y solo se enciende la
+        // que el bloque eligió. Es lo que ya hacía el XML: cambiar de plano
+        // sigue siendo un clic y ninguna tapa a la buena.
+        poner(pista.camara, nidos.camara, corte, esCamara, nidos.etiquetaDeCamara);
+        poner(pista.pantalla, nidos.pantalla, corte, !esCamara && !esSlide, nidos.etiquetaDePantalla);
+        if (pista.slide) poner(pista.slide, nidos.slide, corte, esSlide);
+
+        // El recuadro solo donde se ve la pantalla a cuadro completo. En `S` no
+        // va: el profesor ya está de fondo adentro del slide, y ponerlo otra vez
+        // en la esquina sería mostrarlo dos veces.
+        if (!esCamara && !esSlide) poner(pista.mini, nidos.mini, corte, true, nidos.etiquetaDeCamara);
+    });
+
+    // Las dos pistas de audio son el mismo nido: la de arriba suena y la de
+    // abajo entra muteada de respaldo. Es lo que pidió el editor, y sirve para
+    // lo de siempre: tocar el audio y poder volver sin deshacer.
+    for (const corte of (clase.pistas.audio[0] ? clase.pistas.audio[0].cortes : [])) {
+        poner(secuencia.pistasAudio[0], nidos.audio, corte, true);
+        poner(secuencia.pistasAudio[1], nidos.audio, corte, false);
+    }
+
+    const marcadores = clase.marcadores.filter(m => m.color != null);
+    if (marcadores.length !== clase.marcadores.length) {
+        avisos.push(`${clase.nombre}: ${clase.marcadores.length - marcadores.length} marcador(es)`
+            + ' sin color declarado quedaron afuera');
+    }
+    taller.ponerMarcadores(secuencia.secuencia, marcadores);
+
+    return {
+        nombre: clase.nombre,
+        cortes: colocados,
+        marcadores: marcadores.length,
+        conEfectos: 0,
+        conSlides: hayS,
+        pistasVideo,
+        pistasAudio: 2
     };
 }
 
@@ -340,12 +509,12 @@ function armarLosPasosPrevios(taller, pedido) {
     // Se busca y se lee TODO antes de crear un solo bin, que es lo que permite
     // no crear `Pre` cuando no hay nada: un bin ya creado no se puede deshacer
     // sin dejar el panel a medio armar.
-    const porPaso = PASOS_PREVIOS.map(paso => ({ paso, leidas: [] }));
+    const porPaso = PASOS.map(paso => ({ paso, leidas: [] }));
     let faltan = 0;
     clases.forEach((clase, indice) => {
         for (const entrada of porPaso) {
-            const ruta = workspace.artifact(carpeta, nombreGuardado(clase), entrada.paso.artefacto);
-            if (!fs.existsSync(ruta)) { faltan++; continue; }
+            const ruta = entrada.paso.rutaDe(carpeta, clase);
+            if (!ruta || !fs.existsSync(ruta)) { faltan++; continue; }
             const leida = leerArchivo(ruta);
             if (!leida.ok) {
                 // Un intermedio ilegible sí se avisa: el archivo está y no se
@@ -624,14 +793,49 @@ function poblar(taller, clases, avisos, decir, opciones) {
         return binesDeMaterial.get(clase);
     };
 
+    // **El material de TODAS antes de armar una sola secuencia**, que es lo que
+    // el anidado obliga a cambiar. Las anidaciones del curso son una sola línea
+    // de tiempo con las trece clases adentro, así que no se pueden armar hasta
+    // tener importados los archivos de la última; y las secuencias de clase
+    // cortan sobre ellas, así que van después. Antes era una sola pasada.
+    const mediosPorClase = new Map();
+    clases.forEach((clase, i) => {
+        decir(i, clases.length, `Leyendo el material de ${clase.nombre}…`);
+        mediosPorClase.set(clase, clase.archivos.size
+            ? importarMaterial(taller, clase, registro, binDeMaterial(clase, i), avisos)
+            : new Map());
+    });
+
+    // Las anidaciones cuelgan del bin de secuencias, que es donde el editor las
+    // va a buscar: son secuencias, y son las que abre para tocar todas las
+    // clases de una vez.
+    //
+    // El bin se crea ahora porque los nidos tienen que existir antes que las
+    // clases —las clases cortan sobre ellos— pero se CUELGA después, con las
+    // clases ya puestas. El orden de la lista es el orden que se ve, y lo que el
+    // editor abre todos los días son las clases; los nidos y `Pre` son de las
+    // veces que hay que ir a arreglar algo.
+    decir(clases.length, clases.length, 'Armando las anidaciones del curso…');
+    const binNidos = taller.crearBin(nidos.NOMBRES.raiz, { orden: clases.length });
+    const armados = nidos.armarLosNidos(taller, {
+        clases, mediosPorClase, bin: binNidos, avisos
+    });
+
     clases.forEach((clase, i) => {
         decir(i, clases.length, `Armando ${clase.nombre}…`);
-        let medios = new Map();
-        if (clase.archivos.size) {
-            medios = importarMaterial(taller, clase, registro, binDeMaterial(clase, i), avisos);
-        }
-        armadas.push(armarClase(taller, clase, medios, binSecuencias, avisos));
+        armadas.push(armarClaseSobreNidos(taller, clase, {
+            nidos: {
+                ...armados,
+                etiquetaDeCamara: nidos.ETIQUETA_DE_CAMARA,
+                etiquetaDePantalla: nidos.ETIQUETA_DE_PANTALLA
+            },
+            franja: armados.franjas.get(clase),
+            vistas: op.carpeta ? vistasDe(op.carpeta, clase) : [],
+            binSecuencias,
+            avisos
+        }));
     });
+    taller.guardarEn(binSecuencias, binNidos);
 
     let previos = { secuencias: 0, cortes: 0, faltan: 0 };
     if (op.carpeta) {
@@ -673,13 +877,21 @@ function poblar(taller, clases, avisos, decir, opciones) {
     cuenta.push(`${armadas.length} secuencia(s), ${cortes} corte(s), ${marcas} marcador(es)`
         + ` y ${registro.size} archivo(s) de material.`);
 
+    const conSlides = armadas.filter(c => c.conSlides).length;
+    cuenta.push(`Las clases cortan sobre «${nidos.NOMBRES.raiz}»: ${armados.cortes} corte(s) reparten`
+        + ` el material en ${Object.keys(nidos.NOMBRES).length - 1} anidación(es)`
+        + ` de ${Math.round(armados.largoSeg / 60)} minutos, con ${nidos.AIRE_SEG / 60} de aire entre clases.`
+        + (conSlides
+            ? ` ${conSlides} clase(s) traen slides, así que llevan una pista más.`
+            : ' Ninguna clase trae slides, así que ninguna lleva la pista de «SLIDE».'));
+
     // Los pasos previos son narración y no aviso, incluso los que faltan: una
     // clase vieja sin Backup no pide nada —se arregla reprocesándola, y quien
     // quiera hacerlo va a ir igual a la pestaña Clases—, pero la cuenta tiene
     // que estar para poder comprobar que los que sí están entraron todos.
     if (previos.secuencias) {
         cuenta.push(`En «${BIN_PRE}», ${previos.secuencias} secuencia(s) con ${previos.cortes} corte(s)`
-            + ` de los pasos de antes del corte (${PASOS_PREVIOS.map(p => p.nombre).join(', ')}).`
+            + ` de los pasos de antes (${PASOS.map(p => p.nombre).join(', ')}).`
             + (previos.faltan ? ` Otros ${previos.faltan} no estaban guardados en «${workspace.BACKUP_DIR}».` : ''));
     } else if (previos.faltan) {
         cuenta.push(`No hay ningún paso previo guardado en «${workspace.BACKUP_DIR}»`
@@ -708,5 +920,7 @@ module.exports = {
     BIN_SECUENCIAS,
     BIN_MATERIAL,
     BIN_PRE,
-    PASOS_PREVIOS
+    PASOS_PREVIOS,
+    PASOS,
+    PASO_SIN_ANIDAR
 };

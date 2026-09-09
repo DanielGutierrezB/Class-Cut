@@ -68,6 +68,30 @@ module.exports = function (t) {
         t.eq(cut.markers[0].endSec != null, true, 'y abarca su bloque entero');
     });
 
+    t.test('MG y X2 dejan marcador aunque nadie haya escrito nada', () => {
+        // **La excepción, y el porqué.** Las dos se montan igual que una `R`:
+        // misma fuente, misma pista, mismo color, el profesor en el recuadro. En
+        // la línea de tiempo no hay NADA que las distinga de una `R`, así que sin
+        // marcador la decisión de pedir multicámara o dos ventanas se pierde
+        // entre el que la tomó y el que edita. `PV` y `R` no lo necesitan: se ven
+        // distintas solas.
+        const plan = cutplan.buildCutplan({
+            blocks: [
+                { ...alignedBlock(0, 100, 130, 'MG'), note: '' },
+                { ...alignedBlock(1, 200, 220, 'X2'), note: '' },
+                { ...alignedBlock(2, 300, 340, 'R'), note: '' },
+                { ...alignedBlock(3, 400, 440, 'PV'), note: '' }
+            ],
+            videos: CAMERAS, audios: AUDIOS, durationSec: 600
+        });
+        const cut = exporter.cutTracks({ videos: CAMERAS, audios: AUDIOS }, plan, null);
+        t.deep(cut.markers.map(m => m.name), ['MG', 'X2'],
+            'solo las dos que no se distinguen mirando');
+        t.eq(cut.markers[0].startSec, 0);
+        t.eq(cut.markers[0].endSec, 30, 'y dura el bloque entero, no un frame');
+        t.ok(cut.markers[0].color != null, 'con el color de su vista');
+    });
+
     t.test('la cuenta cierra: los que dicen algo más los de selección', () => {
         // Con la forma de la clase 1 del curso: 15 bloques, 3 con nota del CD.
         const conNota = new Set([2, 9, 12]);

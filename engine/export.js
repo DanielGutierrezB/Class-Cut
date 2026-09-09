@@ -199,6 +199,16 @@ function markersFromAlign(alignResult, parsed, guardadas) {
 const VISTA_DEL_PROFESOR = 'PV';
 
 /**
+ * Las vistas que dejan marcador aunque nadie haya escrito una nota.
+ *
+ * Son las que no se distinguen mirando la línea de tiempo: se montan igual que
+ * una `R` porque salen de la misma fuente, así que el clip, la pista y el color
+ * son los mismos. Lo que las hace distintas es lo que se pidió —multicámara, dos
+ * ventanas— y eso no está en ningún lado más.
+ */
+const SE_MARCAN_SIEMPRE = new Set(['MG', 'X2']);
+
+/**
  * La clase ya cortada: cada bloque uno detrás de otro, con su vista.
  *
  * Las pistas quedan por papel y no por casualidad del orden del material:
@@ -280,10 +290,17 @@ function cutTracks(cls, plan, guardadas) {
     // alguien haya escrito. Un bloque sin nota no lleva marcador aunque tenga cue.
     //
     // El color es el que eligió el CD y viaja tal cual.
+    //
+    // La excepción son `MG` y `X2`, que llevan marcador SIEMPRE. Las dos se
+    // montan igual que una `R` —la pantalla a cuadro completo, el profesor en el
+    // recuadro— así que en la línea de tiempo no hay nada que las distinga de
+    // ella: mismo clip, misma pista, mismo color. El marcador es lo único que
+    // dice que ese bloque se pidió multicámara o a dos ventanas, y sin él esa
+    // decisión se pierde en el camino entre el que la tomó y el que edita.
     const markers = [];
     for (const segment of kept) {
         const texto = notas.notaDeBloque(guardadas, segment.blockIndex, segment.note || '');
-        if (!texto) continue;
+        if (!texto && !SE_MARCAN_SIEMPRE.has(segment.view)) continue;
         markers.push({
             name: segment.view,
             comment: texto,

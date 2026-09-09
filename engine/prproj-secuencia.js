@@ -28,6 +28,9 @@
  */
 
 const prproj = require('./prproj');
+// Solo por la geometría del recuadro: es la misma que escribe el XML, dicha en
+// las unidades de este formato. Ver `aUnidadesDePremiere`.
+const fcp = require('./fcp-xml');
 
 /**
  * Los GUID que nombran a los tres tipos de pista. Son constantes del formato:
@@ -43,6 +46,8 @@ const {
     FRONTERA_DEL_MEDIO,
     ETIQUETAS,
     COLOR_DE,
+    MOVIMIENTO,
+    FRONTERA_DEL_ANIDADO,
     detectarMoldes,
     loQueFalta,
     elegir,
@@ -415,12 +420,28 @@ class Taller {
         this.siguienteIdDePista(grupoVideo, pistasVideo.length + 1);
         this.siguienteIdDePista(grupoAudio, pistasAudio.length + 2);
 
+        const panel = this.itemDeSecuencia(seq, pedido.nombre);
         return {
             secuencia: seq,
             pistasVideo,
             pistasAudio,
             nombre: pedido.nombre,
-            itemDelPanel: this.itemDeSecuencia(seq, pedido.nombre)
+            itemDelPanel: panel.cpi,
+            // La misma secuencia, dicha como se dice un archivo, para poder
+            // ponerla de fuente de un corte sin que `colocarCorte` se entere de
+            // que no es un archivo. Ver `comoFuente`.
+            comoFuente: {
+                masterClip: panel.masterClip,
+                fuenteVideo: panel.fuenteVideo,
+                fuenteAudio: panel.fuenteAudio,
+                // Una secuencia suena en estéreo, así que el corte que la usa se
+                // clona del mismo molde que un WAV de dos canales.
+                canales: 2,
+                conVideo: true,
+                medio: null,
+                nombre: pedido.nombre,
+                duracionSeg: pedido.duracionSeg || 0
+            }
         };
     }
 
@@ -431,6 +452,12 @@ class Taller {
      * El clonado para en la secuencia del molde (`objFrontera`) y después se le
      * repuntan las dos fuentes a la secuencia nueva. Sin la frontera, clonar el
      * ítem se llevaría puesta la secuencia del molde entera.
+     *
+     * Devuelve las cuatro piezas y no solo la fila del panel porque las otras
+     * tres son justamente lo que hace falta para anidarla: el clip maestro que
+     * un corte nombra, y las dos fuentes —video y audio— a las que apunta.
+     *
+     * @returns {{cpi, masterClip, fuenteVideo, fuenteAudio}}
      */
     itemDeSecuencia(seq, nombre) {
         const p = this.proyecto;
@@ -454,7 +481,12 @@ class Taller {
         // El verde de las secuencias se escribe siempre, sin heredarlo del molde:
         // el molde es una secuencia cualquiera y podría venir de cualquier color.
         this.pintarItemDelPanel(cpi, COLOR_DE.secuencia);
-        return cpi;
+        return {
+            cpi,
+            masterClip: this._deClase(clonados, 'MasterClip')[0] || null,
+            fuenteVideo: this._deClase(clonados, 'VideoSequenceSource')[0] || null,
+            fuenteAudio: this._deClase(clonados, 'AudioSequenceSource')[0] || null
+        };
     }
 
     /**
@@ -559,7 +591,10 @@ class Taller {
             : (medio.canales === 1 ? this.moldes.corteMono : this.moldes.corteEstereo);
         if (!modelo) throw new Error('el molde no tiene un corte de ejemplo del que copiar');
 
-        const { clonados } = this._clonar([modelo], { claseFrontera: FRONTERA_DEL_CORTE });
+        // La frontera del anidado incluye la del archivo, así que sirve para los
+        // dos casos: parar en un `Media` que no está y parar en una `Sequence`
+        // que no está son la misma instrucción cuando la fuente es la otra.
+        const { clonados } = this._clonar([modelo], { claseFrontera: FRONTERA_DEL_ANIDADO });
         const item = this._deClase(clonados, esVideo ? 'VideoClipTrackItem' : 'AudioClipTrackItem')[0];
         const clip = this._deClase(clonados, esVideo ? 'VideoClip' : 'AudioClip')[0];
         const sub = this._deClase(clonados, 'SubClip')[0];
@@ -596,9 +631,10 @@ class Taller {
             .replace(/<Name>[^<]*<\/Name>/, `<Name>${xmlSeguro(medio.nombre)}</Name>`));
         // Los marcadores del clip son los del medio de ORIGEN: los del molde
         // hablan de otro archivo. Se repuntan a los del medio nuevo, que el
-        // clonado del medio ya trajo vacíos.
+        // clonado del medio ya trajo vacíos. Una secuencia usada de fuente no
+        // tiene `medio`, y ahí el clip maestro es el único lugar donde mirar.
         const marcasDelMedio = p.refsDe(medio.masterClip).find(k => p.clase(k) === 'Markers')
-            || p.refsDe(medio.medio).find(k => p.clase(k) === 'Markers');
+            || (medio.medio ? p.refsDe(medio.medio).find(k => p.clase(k) === 'Markers') : null);
         if (marcasDelMedio) this.repuntar(clip, 'Markers', marcasDelMedio);
 
         if (corte.etiqueta) this.pintarCorte(clip, corte.etiqueta);
@@ -660,6 +696,100 @@ class Taller {
             'asl.clip.label.color': color.entero
         });
         return true;
+    }
+
+    /**
+     * Le pone a un corte de video el recuadro del profesor: escala, posición y
+     * recorte, con la misma geometría que el XML escribe en Basic Motion.
+     *
+     * **Se reemplaza la cadena entera y no se le cuelga un componente.** Premiere
+     * escribe el efecto junto con `DefaultOpacity` y `DefaultOpacityComponentID`
+     * en la misma cadena; clonar el componente suelto y colgarlo de la cadena
+     * vacía que trae el corte sería armar a mano una forma que Premiere nunca
+     * escribe. Clonando la cadena del molde con todo adentro, lo que queda es una
+     * copia de algo que su Premiere ya guardó.
+     *
+     * Contesta `false` cuando el molde no tiene de dónde copiar, que es el caso
+     * normal: el efecto solo aparece en el archivo si alguien movió la escala o
+     * la posición, así que la mayoría de las plantillas no lo tienen. Quien llama
+     * decide si eso merece un aviso.
+     *
+     * @param {string} item la clave del `VideoClipTrackItem`
+     * @param {object} encuadre lo que devuelve `fcp.encuadreDelRecuadro`
+     */
+    ponerEncuadre(item, encuadre) {
+        const p = this.proyecto;
+        if (!this.moldes.efectoDeMovimiento || !encuadre) return false;
+
+        const vieja = p.refsDe(item).find(k => p.clase(k) === 'VideoComponentChain');
+        if (!vieja) return false;
+
+        const { clonados } = this._clonar([this.moldes.efectoDeMovimiento], {});
+        const cadena = this._deClase(clonados, 'VideoComponentChain')[0];
+        const componentes = this._deClase(clonados, 'VideoFilterComponent');
+        const componente = componentes
+            .find(k => p.contenido(k).includes(`<MatchName>${MOVIMIENTO}</MatchName>`));
+        if (!cadena || !componente) return false;
+
+        // **De la cadena copiada se queda solo el movimiento.** Una cadena de la
+        // plantilla puede traer cualquier cosa colgada al lado —en la que se
+        // midió venían además un Recorte redondeado y un Transform— y copiarla
+        // entera sería aplicarle al recuadro efectos que nadie eligió. Acá suena
+        // a poco: esos dos son justamente los que le faltan al recuadro para
+        // tener las esquinas redondeadas. Pero la plantilla la elige la máquina
+        // entre los proyectos del editor, así que lo que venga al lado del
+        // movimiento es cualquier cosa: mañana es una corrección de color y el
+        // profesor sale verde sin que nada lo explique.
+        const sobran = componentes.filter(k => k !== componente);
+        if (sobran.length) {
+            quitarDeLista(p, cadena, 'Components', 'Component', sobran);
+            for (const k of sobran) {
+                for (const pieza of p.cierre([k], {})) p.borrar(pieza);
+            }
+        }
+
+        const posicion = fcp.aUnidadesDePremiere(encuadre.centro);
+        const anclaje = fcp.aUnidadesDePremiere(encuadre.anclaje);
+        const porNombre = {
+            Position: `${posicion.x}:${posicion.y}`,
+            'Anchor Point': `${anclaje.x}:${anclaje.y}`,
+            Scale: encuadre.escala,
+            'Scale Width': encuadre.escala,
+            'Crop Left': encuadre.recorte.izq,
+            'Crop Right': encuadre.recorte.der,
+            'Crop Top': encuadre.recorte.arriba,
+            'Crop Bottom': encuadre.recorte.abajo
+        };
+        for (const k of p.cierre([componente], {})) {
+            const texto = p.contenido(k);
+            const nombre = (/<Name>([^<]*)<\/Name>/.exec(texto) || [])[1];
+            if (!(nombre in porNombre)) continue;
+            this.valorDelParametro(k, porNombre[nombre]);
+        }
+
+        this.repuntar(item, 'Components', cadena);
+        for (const k of p.cierre([vieja], {})) p.borrar(k);
+        return true;
+    }
+
+    /**
+     * El valor de un parámetro de efecto, que va escrito DOS veces.
+     *
+     * `<StartKeyframe>` es el valor en el tiempo cero y `<CurrentValue>` es el
+     * que muestra el panel. Premiere escribe los dos y hay que escribir los dos:
+     * con uno solo, el efecto se ve aplicado en el programa pero el panel muestra
+     * otro número, o al revés. El `CurrentValue` no siempre está —un parámetro
+     * que nadie tocó no lo trae— y por eso se reemplaza si está y no se inventa
+     * si no.
+     *
+     * El fotograma clave es una lista por comas donde el valor es el segundo
+     * campo; el primero es el instante, y ese no se toca.
+     */
+    valorDelParametro(k, valor) {
+        const p = this.proyecto;
+        p.escribir(k, p.contenido(k)
+            .replace(/<StartKeyframe>([^,]*),[^,]*,/, `<StartKeyframe>$1,${valor},`)
+            .replace(/<CurrentValue>[^<]*<\/CurrentValue>/, `<CurrentValue>${valor}</CurrentValue>`));
     }
 
     /**

@@ -306,6 +306,30 @@ function aUnidadesDelCuadro(x, y, ancho, alto) {
 }
 
 /**
+ * El mismo punto, en las unidades del `.prproj`.
+ *
+ * Los dos formatos dicen el punto como fracción del cuadro entero; lo único que
+ * cambia es dónde está el cero. Basic Motion lo pone en el centro y el proyecto
+ * nativo, arriba a la izquierda, así que la conversión es correr medio cuadro.
+ *
+ * **Está medido contra un archivo del editor, no deducido.** Su `Plantilla.prproj`
+ * salió de importar a Premiere los XML que escribe esta misma función, y ahí el
+ * recuadro quedó con `Position` en `0.879:0.806` y `Anchor Point` en `0.5:0.5`.
+ * Son exactamente estos dos números para un cuadro de 1920×1080, y el anclaje
+ * —que en Basic Motion va en (0, 0)— confirma el corrimiento por el otro lado.
+ *
+ * Vive acá y no en el motor del `.prproj` porque es geometría del recuadro, y la
+ * geometría del recuadro se decide en este archivo. Que haya dos dialectos no la
+ * vuelve dos cuentas.
+ */
+function aUnidadesDePremiere(punto) {
+    return {
+        x: redondear((punto.horiz || 0) + 0.5),
+        y: redondear((punto.vert || 0) + 0.5)
+    };
+}
+
+/**
  * El encuadre del recuadro para un cuadro y una fuente dados.
  *
  * **Se calcula, no se copia**, y eso costó un error. El editor exportó desde su
@@ -766,6 +790,7 @@ module.exports = {
     encuadreDelRecuadro,
     encuadreXml,
     aUnidadesDelCuadro,
+    aUnidadesDePremiere,
     RECUADRO,
     RECORTE_EN_BASIC,
     RECORTE_APARTE,
