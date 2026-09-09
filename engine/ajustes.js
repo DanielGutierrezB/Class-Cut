@@ -23,6 +23,23 @@ const PROVEEDORES = ['local', 'cursor', 'anthropic'];
 
 const DEFAULTS = {
     version: 1,
+    /**
+     * Dónde caen las notas que se toman en vivo (paso "Grabar").
+     *
+     * Vive acá y no en la ventana porque hace falta de los dos lados: la ventana
+     * la propone y el escáner la usa para encontrar el XML de una clase que no lo
+     * tiene adentro. La herramienta en vivo nunca escribe en la carpeta del
+     * Rodecaster —esa está en su tarjeta y no aparece en la Mac hasta que la
+     * grabación termina—, así que el XML y el material nacen separados y alguien
+     * tiene que recordar dónde quedó cada uno.
+     *
+     * `notasDir` es la carpeta en uso —donde cae la próxima clase— y `notasDirs`
+     * todas las que se usaron alguna vez, la activa primero. Una carpeta es un
+     * curso: la lista de lo grabado se agrupa por ellas y el escáner las recorre
+     * todas buscando el XML de una clase.
+     */
+    notasDir: null,
+    notasDirs: [],
     ia: {
         // 'local' es el que funciona en una Mac recién sacada de la caja, sin
         // cuentas ni claves: el que viene con la app.
@@ -47,8 +64,16 @@ function archivo() {
 /** Un objeto con TODAS las claves, venga lo que venga del disco. */
 function sanear(crudo) {
     const ia = (crudo && crudo.ia) || {};
+    const notasDir = (crudo && typeof crudo.notasDir === 'string' && crudo.notasDir) || null;
+    // La activa siempre está en la lista y va primera: es el invariante que hace
+    // que "elegir carpeta" sea guardar una sola clave, y que quitar una carpeta
+    // de la lista no pueda dejar la activa afuera.
+    const recordadas = (crudo && Array.isArray(crudo.notasDirs) ? crudo.notasDirs : [])
+        .filter(d => typeof d === 'string' && d && d !== notasDir);
     return {
         version: DEFAULTS.version,
+        notasDir,
+        notasDirs: (notasDir ? [notasDir] : []).concat([...new Set(recordadas)]),
         ia: {
             proveedor: PROVEEDORES.includes(ia.proveedor) ? ia.proveedor : DEFAULTS.ia.proveedor,
             local: { modelo: (ia.local && ia.local.modelo) || null },
@@ -94,4 +119,18 @@ function guardar(datos) {
     return limpio;
 }
 
-module.exports = { leer, guardar, sanear, archivo, PROVEEDORES, DEFAULTS };
+/**
+ * Dónde buscar los XML de notas que no están junto a su clase, como lo espera
+ * el escáner (`course-scan.scan(root, { notasDirs })`): todas las carpetas que
+ * se usaron, la activa primero, que es la que gana si dos cursos tienen una
+ * clase con el mismo número.
+ *
+ * Vive acá y no adentro del escáner para que ese siga siendo una función del
+ * disco: la app y las herramientas que quieran ver lo mismo que la app se lo
+ * pasan, y una prueba que no lo pasa no ve los XML de la máquina en que corre.
+ */
+function carpetasDeNotas() {
+    return leer().notasDirs;
+}
+
+module.exports = { leer, guardar, carpetasDeNotas, sanear, archivo, PROVEEDORES, DEFAULTS };

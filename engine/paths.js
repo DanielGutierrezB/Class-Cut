@@ -191,6 +191,32 @@ function vadModel() {
 }
 
 /**
+ * Los modelos chicos, de menor a mayor.
+ *
+ * Los usa el ciclo de señales de la toma de notas en vivo (`engine/oir.js`), que
+ * solo busca tres palabras conocidas y tira el texto: ahí lo que importa es
+ * cuánto tarda, no cuánto acierta.
+ */
+const MODELOS_LIVIANOS = ['ggml-base.bin', 'ggml-small.bin', 'ggml-medium.bin'];
+
+/**
+ * Memoizado junto con las herramientas, y no en quien lo pide: el ciclo de
+ * señales lo consulta cada tres segundos, y recorrer las carpetas de modelos cada
+ * vez es tirar disco. Al vivir en el mismo `cache`, `clearCache` lo suelta con
+ * el resto, y Diagnóstico y el ciclo ven siempre lo mismo.
+ */
+function modeloLiviano() {
+    if (!cache.has('modelo-liviano')) {
+        cache.set('modelo-liviano', findModel(
+            'CLASSCUT_WHISPER_MODELO_LIVIANO',
+            n => MODELOS_LIVIANOS.includes(n),
+            MODELOS_LIVIANOS
+        ));
+    }
+    return cache.get('modelo-liviano');
+}
+
+/**
  * Chequeo de arranque: qué hay y qué falta. Se muestra tal cual en la pantalla de
  * diagnóstico, porque "no se pudo leer el video" sin decir que falta ffprobe manda
  * a buscar la culpa al lugar equivocado.
@@ -200,7 +226,15 @@ function doctor() {
         { key: 'ffprobe', required: true, info: ffprobe() },
         { key: 'ffmpeg', required: true, info: ffmpeg() },
         { key: 'whisper-cli', required: true, info: whisper() },
-        { key: 'modelo de Whisper', required: true, info: whisperModel() }
+        { key: 'modelo de Whisper', required: true, info: whisperModel() },
+        {
+            key: 'modelo liviano (notas en vivo)',
+            required: false,
+            nota: 'Sin él, la toma de notas en vivo escucha las señales del profesor ' +
+                'con el modelo grande: funciona, pero gasta un segundo cada tres en vez ' +
+                'de un décimo, durante los cuarenta minutos que dura una clase.',
+            info: modeloLiviano()
+        }
     ];
     return {
         arch: process.arch,
@@ -208,6 +242,7 @@ function doctor() {
         tools: tools.map(t => ({
             key: t.key,
             required: t.required,
+            nota: t.nota || null,
             found: Boolean(t.info.path),
             path: t.info.path,
             name: t.info.name || null,
@@ -222,7 +257,7 @@ function clearCache() { cache.clear(); }
 
 module.exports = {
     resolveTool, ffprobe, ffmpeg, whisper,
-    whisperModel, vadModel, modelDirs, MODEL_PREFERENCE,
+    whisperModel, vadModel, modeloLiviano, modelDirs, MODEL_PREFERENCE,
     // Primitivas que usa quien resuelve otras cosas (ver `ollama-store.js`).
     isExecutable, rank, appRoot, dataDirs, DATA_DIR,
     doctor, clearCache

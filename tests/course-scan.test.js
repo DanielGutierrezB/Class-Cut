@@ -9,6 +9,29 @@ const fs = require('fs');
 const path = require('path');
 const scanner = require('../engine/course-scan');
 const fixture = require('./lib/fixture');
+const notasXml = require('../engine/notas-xml');
+
+/**
+ * Un XML como el que deja la toma de notas en vivo, con el nombre que se le pida.
+ *
+ * Se escribe con el mismo módulo que lo escribe la app, no a mano: lo que se
+ * está probando es que el escáner elija bien entre varios, y un XML de mentira
+ * podría pasar la prueba y fallar con uno de verdad.
+ */
+function escribirNotas(dir, nombre) {
+    const cero = Date.UTC(2026, 7, 18, 16, 0, 0);
+    fs.writeFileSync(path.join(dir, `${nombre}.xml`), notasXml.xmlDeNotas({
+        secuencia: nombre,
+        ceroMs: cero,
+        claqueta: { ms: cero + 2000 },
+        tomas: [{
+            id: 1, vista: 'PV', comentario: '', cuenta: '3, 2, 1.',
+            inMs: cero + 10000, outMs: cero + 40000,
+            palabras: [{ t: cero + 10000, texto: 'Hola' }, { t: cero + 39000, texto: 'chau' }]
+        }]
+    }));
+    return path.join(dir, `${nombre}.xml`);
+}
 
 module.exports = function (t) {
     t.group('course-scan · qué le dieron');
@@ -42,6 +65,138 @@ module.exports = function (t) {
             // El mismo escaneo otra vez tiene que dar los mismos ids: `main.js`
             // vuelve a escanear antes de procesar y busca por id.
             t.deep(scanner.scan(root).classes.map(c => c.id), result.classes.map(c => c.id));
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('el XML de notas se encuentra aunque viva en otra carpeta', () => {
+        // Las notas y el material nacen separados: la herramienta en vivo escribe
+        // el XML donde el editor le dijo, porque la carpeta del Rodecaster está en
+        // su tarjeta y no aparece en la Mac hasta que la grabación termina. Se
+        // emparejan por número de clase, que es lo único que las dos mitades
+        // comparten —los timestamps de los nombres los pone cada máquina—.
+        const root = fixture.tempRoot('notas-aparte');
+        try {
+            const clase = fixture.makeClassFolder(root, { number: 6, xml: false });
+            const notas = path.join(root, 'Notas del rodaje');
+            fs.mkdirSync(notas, { recursive: true });
+            // Con un nombre de los viejos, sin hora: se sigue emparejando por
+            // número, que es lo único que había antes.
+            escribirNotas(notas, '06_2609_curso-prueba-1785289335');
+
+            const result = scanner.scan(root, { notasDirs: [notas] });
+            const encontrada = result.classes.find(c => c.folder === clase.dir);
+            t.eq(Boolean(encontrada.xmlPath), true, 'encontró el XML');
+            t.eq(encontrada.xmlDeNotas, true, 'y sabe que vino de la carpeta de notas');
+            t.eq(encontrada.deNotasEnVivo, true, 'y que lo escribió la herramienta en vivo');
+            t.eq(encontrada.blockCount, 1);
+            t.eq(encontrada.problems.some(p => p.code === 'sin_xml'), false);
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('y se encuentra igual dentro de xml/, que es donde cae ahora', () => {
+        // La herramienta en vivo dejó de tirar todo suelto en la carpeta que
+        // eligió el editor. Este es el punto donde un cambio de rutas se rompe
+        // en silencio: el XML se sigue escribiendo, pero el flujo de corte deja
+        // de emparejarlo con su carpeta del Rodecaster y la clase queda sin XML.
+        const root = fixture.tempRoot('notas-en-xml');
+        try {
+            const clase = fixture.makeClassFolder(root, {
+                number: 6, xml: false, stamp: '2026-08-18_1_16-00-00'
+            });
+            const notas = path.join(root, 'Notas del rodaje');
+            fs.mkdirSync(path.join(notas, 'xml'), { recursive: true });
+            escribirNotas(path.join(notas, 'xml'), '06_curso_2026-08-18_16-00-05');
+
+            const encontrada = scanner.scan(root, { notasDirs: [notas] })
+                .classes.find(c => c.folder === clase.dir);
+            t.eq(Boolean(encontrada.xmlPath), true, 'lo encontró un piso más abajo');
+            t.eq(encontrada.xmlDeNotas, true);
+            t.eq(encontrada.problems.some(p => p.code === 'sin_xml'), false);
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('dos tandas de la misma clase: cada carpeta se lleva la suya', () => {
+        // Una clase se puede grabar en dos veces, y entonces hay dos carpetas que
+        // dicen "Clase 01" y dos XML que empiezan en "01". Antes ganaba el primero
+        // que apareciera, así que las dos carpetas se llevaban el mismo y una
+        // quedaba con los marcadores de la otra. Los separa la hora de arranque.
+        const root = fixture.tempRoot('dos-tandas');
+        try {
+            const manana = fixture.makeClassFolder(root, {
+                number: 1, xml: false, stamp: '2026-08-18_1_13-00-00'
+            });
+            const tarde = fixture.makeClassFolder(root, {
+                number: 1, xml: false, stamp: '2026-08-18_2_15-00-00'
+            });
+            const notas = path.join(root, 'Notas del rodaje');
+            fs.mkdirSync(notas, { recursive: true });
+            // Cada una arranca unos segundos después que su Rodecaster: es la
+            // demora entre apretar los dos botones.
+            escribirNotas(notas, '01_curso_2026-08-18_13-00-12');
+            escribirNotas(notas, '01_p2_curso_2026-08-18_15-00-08');
+
+            const result = scanner.scan(root, { notasDirs: [notas] });
+            const primera = result.classes.find(c => c.folder === manana.dir);
+            const segunda = result.classes.find(c => c.folder === tarde.dir);
+
+            t.eq(primera.xmlName, '01_curso_2026-08-18_13-00-12.xml');
+            t.eq(segunda.xmlName, '01_p2_curso_2026-08-18_15-00-08.xml');
+            t.eq(primera.parte, 1);
+            t.eq(segunda.parte, 2, 'la segunda tanda se sabe segunda');
+            // Y no son duplicados: las dos van, las dos marcadas.
+            t.eq(primera.duplicate, false);
+            t.eq(segunda.duplicate, false);
+            t.eq(result.warnings.some(w => w.code === 'clase_duplicada'), false);
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('dos carpetas con la MISMA tanda siguen siendo duplicadas', () => {
+        // Lo de arriba no puede tapar el caso que el aviso existe para atrapar:
+        // la clase que se grabó dos veces porque la primera salió mal.
+        const root = fixture.tempRoot('dos-iguales');
+        try {
+            fixture.makeClassFolder(root, { number: 4, stamp: '2026-08-18_1_13-00-00' });
+            fixture.makeClassFolder(root, { number: 4, stamp: '2026-08-18_2_15-00-00' });
+            const result = scanner.scan(root);
+            t.eq(result.classes.filter(c => c.duplicate).length, 2);
+            t.eq(result.classes.filter(c => c.selected).length, 1, 'queda marcada la más nueva');
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('un XML de notas de otro día se empareja igual, pero avisando', () => {
+        // Es el único con ese número, así que es ese; pero lo normal es que las
+        // dos horas estén a minutos, y a días significa que alguien reusó la
+        // carpeta de notas de otro rodaje.
+        const root = fixture.tempRoot('notas-lejos');
+        try {
+            const clase = fixture.makeClassFolder(root, {
+                number: 3, xml: false, stamp: '2026-08-18_1_13-00-00'
+            });
+            const notas = path.join(root, 'Notas del rodaje');
+            fs.mkdirSync(notas, { recursive: true });
+            escribirNotas(notas, '03_curso_2026-08-11_13-00-00');
+
+            const encontrada = scanner.scan(root, { notasDirs: [notas] })
+                .classes.find(c => c.folder === clase.dir);
+            t.eq(Boolean(encontrada.xmlPath), true, 'se emparejó igual');
+            t.eq(encontrada.warnings.some(w => w.code === 'notas_de_otro_dia'), true);
+        } finally { fixture.rimraf(root); }
+    });
+
+    t.test('el XML que viaja con el material le gana al de notas', () => {
+        // Si la clase ya tiene el suyo adentro, uno de la carpeta de notas es una
+        // versión vieja de lo mismo o, peor, de otra clase con el mismo número.
+        const root = fixture.tempRoot('notas-pierde');
+        try {
+            const clase = fixture.makeClassFolder(root, { number: 6 });
+            const notas = path.join(root, 'Notas del rodaje');
+            fs.mkdirSync(notas, { recursive: true });
+            fs.writeFileSync(path.join(notas, '06_otra-cosa.xml'), 'basura');
+
+            const result = scanner.scan(root, { notasDirs: [notas] });
+            const encontrada = result.classes.find(c => c.folder === clase.dir);
+            t.eq(encontrada.xmlPath.startsWith(clase.dir), true);
+            t.eq(encontrada.xmlDeNotas, false);
         } finally { fixture.rimraf(root); }
     });
 
